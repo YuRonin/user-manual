@@ -24,6 +24,8 @@ Skill 代码与项目数据严格分离：
   config.yaml             配置，init 产出（入库）
   project.yaml            项目地图 / 页面索引，inspect 产出（入库）
   pages/<id>.yaml         每页详情，页面模型的事实来源（入库）
+  index/forward.json      页面 → 源码 / 截图 / 手册的派生正索引（入库）
+  index/reverse.json      源码文件 → 受影响页面的派生逆索引（入库）
   .gitignore              让下面这些不入库
   screenshots/raw/        原始截图
   screenshots/annotated/  标注后截图
@@ -33,7 +35,7 @@ Skill 代码与项目数据严格分离：
 
 原图与标注图都留存：原图可复用、可重新标注；标注图进手册。
 
-`project.yaml` 是**索引**，每次写页面后由 `pages/*.yaml` 重新生成。不双写同一份事实，避免漂移。
+`project.yaml` 与 `index/*.json` 都是**派生索引**，每次写页面后由 `pages/*.yaml` 重新生成。不手工维护、不把派生产物当成唯一事实源，避免漂移。
 
 ## 页面模型
 
@@ -43,7 +45,7 @@ Skill 代码与项目数据严格分离：
 
 | 归属 | 字段 | 行为 |
 |---|---|---|
-| 扫描 (`inspect`) | `route` `dynamic` `params` `entry` `status.router` | 每次 `inspect` 重写 |
+| 扫描 (`inspect`) | `route` `dynamic` `params` `entry` `dependencies` `status.router` | 每次 `inspect` 重写 |
 | 分析 (`describe`) | `title` `purpose` `detectedActions` `source` `includeInManual` | `inspect` 绝不覆盖 |
 | 截图 (`capture`) | `browser.*` | 路由变更时清空 |
 | 过程 | `confidence` `status.sourceAnalysis` | 由各阶段推进 |
@@ -63,6 +65,20 @@ browser.verified: false ──capture──▶ true ──路由变更──▶ 
 `stale` 是 V0.6 增量更新的基础：入口文件变了就说明这页的描述可能过时，不用等 git diff 也能发现。
 
 删除语义保守：代码里消失的路由默认只报告不删，加 `--prune` 才清理——那些文件里有 AI 或人写的分析成果，静默删掉代价太大。
+
+## 源码依赖索引
+
+inspect 从页面入口递归追踪项目内的静态 `import`、re-export 和字面量 `require()`。相对路径与 `tsconfig.json` / `jsconfig.json` 的 `baseUrl`、`paths` 都走同一套扩展名和目录 `index.*` 解析；第三方包、样式、图片和动态表达式不进入依赖图。循环引用由 visited set 截断，所有路径统一为项目相对 POSIX 路径并稳定排序。
+
+依赖结果先写入页面模型的 `dependencies.files` / `dependencies.unresolved`，再派生两份 JSON：
+
+```text
+pages/*.yaml
+    ├──▶ index/forward.json   route → entry/files/components/hooks/apis/scenarios
+    └──▶ index/reverse.json   file → affected routes
+```
+
+inspect、describe、capture 每次改写页面模型后都会重建索引。capture 与 generate 通过容错读取器消费正索引；索引缺失、损坏或找不到页面时回退页面 YAML。V1 的 `apis` 与 `scenarios` 保留为空数组，props、API 调用和运行时关系留给后续版本。
 
 ## 配置演进规则
 
@@ -134,7 +150,7 @@ V0.2 只做 Next.js —— 先把一个框架做透，而不是每个框架都�
 `generate` 是三段式，不是一步到位：
 
 ```
-页面模型 + capture 数据 ──程序──▶ .manual/drafts/<id>.md  事实草稿
+页面模型 + 正索引上下文 + capture 数据 ──程序──▶ .manual/drafts/<id>.md  事实草稿
                         ──AI───▶ 按 references/manual-writing-style.md 改写
                         ──程序──▶ 事实一致性校验 ──▶ docs/manual/<id>.md
 ```
@@ -181,7 +197,7 @@ V0.2 只做 Next.js —— 先把一个框架做透，而不是每个框架都�
 3. 手册索引页（把各页 `docs/manual/<id>.md` 汇成一个目录）
 4. 批量处理（`capture --all` / `generate --all`）与并发
 5. 标注（红框 / 箭头 / 序号），产出进 `annotatedDir`
-6. `update`：基于 git diff 的增量更新
+6. `update`：基于 git diff 与现有 reverse index 的增量更新
 7. 移动端 profile
 8. 其它前端框架的扫描
 9. 数据库 Fixture、多角色复杂状态

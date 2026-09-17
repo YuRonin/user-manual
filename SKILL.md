@@ -14,7 +14,7 @@ Skill 自身代码与项目数据分离：**Skill 只提供能力，项目状态
 | 命令 | 状态 | 作用 |
 |---|---|---|
 | `manual init` | ✅ V0.1 | 收集配置，生成 `.manual/config.yaml` |
-| `manual inspect` | ✅ V0.2 | 扫描路由，建立页面模型 |
+| `manual inspect` | ✅ V0.2+ | 扫描路由与静态源码依赖，建立页面模型和正逆索引 |
 | `manual describe` | ✅ V0.2 | 把页面的源码分析结果写回模型 |
 | `manual capture` | ✅ V0.3 | 用真实浏览器打开页面并截图 |
 | `manual generate` | ✅ V0.4 | 生成 Markdown 手册（含中文自然化） |
@@ -69,9 +69,11 @@ node <skill>/bin/manual.js init \
 node <skill>/bin/manual.js inspect --project-root <项目根> --json
 ```
 
-CLI 会识别技术栈、扫出全部页面、写 `.manual/project.yaml` 与 `.manual/pages/<id>.yaml`，并在 `worklist` 里给出**每个待分析页面该读哪些文件**。
+CLI 会识别技术栈、扫出全部页面、递归追踪项目内静态依赖，写 `.manual/project.yaml`、`.manual/pages/<id>.yaml`、`.manual/index/forward.json` 与 `.manual/index/reverse.json`，并在 `worklist` 里给出**每个待分析页面该读哪些文件**。
 
-当前只支持 **Next.js**（App Router + Pages Router）。其它框架会给出准确的「暂不支持」提示。
+依赖扫描支持静态 `import`、re-export、字面量 `require()`，以及 `tsconfig.json` / `jsconfig.json` 的 `baseUrl`、`paths`。第三方包、样式和静态资源会被忽略；无法解析的项目内依赖写入页面模型的 `dependencies.unresolved` 并作为 warning 报告，不中断其它页面。
+
+当前只支持 **Next.js**（App Router + Pages Router）。Vite + Vue 等其它框架会被识别，但会给出准确的「暂不支持」提示。
 
 ### 2. 读源码，分析语义
 
@@ -123,7 +125,7 @@ node <skill>/bin/manual.js describe --project-root <项目根> --input <分析�
 node <skill>/bin/manual.js capture <page-id> --project-root <项目根> --json
 ```
 
-从页面模型取出 route → 拼出 `{baseUrl}{route}` → 用配置里的 Provider 打开真实页面 →
+优先从正索引取出 route（索引不可用时回退页面模型）→ 拼出 `{baseUrl}{route}` → 用配置里的 Provider 打开真实页面 →
 等页面稳定 → 按配置的 viewport 与 DPR 截图 → 回写页面模型的 `browser` 状态。
 
 **先确认开发服务器在跑**。capture 不启动项目，也不会去猜端口——连不上就直接失败。
@@ -172,8 +174,8 @@ DOM 连续静止 → 冻结 CSS 动画与过渡 → 静置回流。
 node <skill>/bin/manual.js generate <page-id> --project-root <项目根> --json
 ```
 
-草稿写到 `.manual/drafts/<id>.md`，只由确定性事实拼成，一个字都不是推断的。
-`--json` 会返回 `protected` 字段，列出润色阶段一个字都不能动的东西。
+草稿写到 `.manual/drafts/<id>.md`，只由确定性事实拼成，一个字都不是推断的。正索引中的关联源码会写入 HTML 元数据，并通过 `--json` 的 `indexContext` 返回给 AI 调用方，不会被当成用户可见操作步骤。
+`--json` 还会返回 `protected` 字段，列出润色阶段一个字都不能动的东西。
 
 前置条件：页面必须已 `describe`（有标题和用途）且已 `capture`（有真实截图）。
 缺哪个会明确告诉你先跑哪条命令。确实要出纯文字版才加 `--no-screenshot`。
@@ -237,6 +239,10 @@ route: /membership          # ← 扫描拥有，每次 inspect 重写
 dynamic: false              # ←
 params: []                  # ←
 entry: app/membership/page.tsx  # ←
+dependencies:               # ← 扫描拥有，每次 inspect 重写
+  files:
+    - components/membership/PlanCard.tsx
+  unresolved: []
 
 title: 会员计划              # ← 分析拥有，inspect 绝不覆盖
 purpose: 查看和购买会员套餐。  # ←

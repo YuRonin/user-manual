@@ -63,6 +63,15 @@ Next.js（App Router + Pages Router）：
 
 自动跳过：`layout` / `loading` / `error` / `not-found` / `template` / `route`、`api/**`、私有目录 `_foo`、并行插槽 `@modal`、拦截路由 `(.)foo`、`_app` / `_document`、测试与 story 文件。
 
+inspect 还会从每个页面入口递归追踪项目内的静态 `import`、re-export 和字面量 `require()`，支持相对路径以及 `tsconfig.json` / `jsconfig.json` 的 `baseUrl`、`paths`。第三方包、样式和静态资源不会进入依赖图；无法解析的项目内导入会记录 warning，但不会中断其它页面扫描。
+
+扫描完成后会生成两个可重建的 JSON 索引：
+
+- `.manual/index/forward.json`：页面 → 入口、关联源码、组件、Hook、截图和手册路径。
+- `.manual/index/reverse.json`：源码文件 → 受影响页面，为未来的 `manual update` 提供影响范围。
+
+当前路由扫描只支持 Next.js（App Router + Pages Router）。Vite + Vue 等框架能被识别，但 `inspect` 会明确提示暂不支持。
+
 ### capture 怎么保证截图质量
 
 截图前依次等待：load 事件 → 网络空闲 → 指定元素（可选）→ Web Font 就绪 → 图片加载完 →
@@ -118,6 +127,8 @@ DOM 连续静止 → 冻结 CSS 动画与过渡 → 静置回流。每步有独�
   config.yaml          项目配置（init 产出，应入库）
   project.yaml         项目地图 / 页面索引（inspect 产出）
   pages/<id>.yaml      每个页面的详情
+  index/forward.json   页面到源码、截图与手册的正索引（派生产物）
+  index/reverse.json   源码文件到受影响页面的逆索引（派生产物）
   drafts/<id>.md       事实草稿（generate 产出，保留便于回溯）
   .gitignore           让浏览器会话与缓存不入库
 
@@ -126,14 +137,16 @@ DOM 连续静止 → 冻结 CSS 动画与过渡 → 静置回流。每步有独�
   images/raw/<id>.png  截图（capture 产出）
 ```
 
-页面文件的字段有明确归属：`route`/`dynamic`/`entry` 由扫描拥有，重跑 inspect 会更新；`title`/`purpose`/`detectedActions` 由分析拥有，**inspect 绝不覆盖**；`browser.*` 由 capture 拥有。入口或路由变了，原分析会被标成 `stale` 提示重新分析；路由变了截图状态会被清空；代码里删掉的路由默认只报告，确认后加 `--prune` 才清理。
+页面文件的字段有明确归属：`route`/`dynamic`/`entry`/`dependencies` 由扫描拥有，重跑 inspect 会更新；`title`/`purpose`/`detectedActions` 由分析拥有，**inspect 绝不覆盖**；`browser.*` 由 capture 拥有。入口或路由变了，原分析会被标成 `stale` 提示重新分析；路由变了截图状态会被清空；代码里删掉的路由默认只报告，确认后加 `--prune` 才清理。
+
+capture 和 generate 会读取正索引：capture 使用索引中的当前路由，generate 把关联源码作为结构化上下文与草稿元数据。索引缺失或 JSON 损坏时，两条命令都会回退到页面 YAML，旧项目无需迁移。
 
 配置结构靠**具名注册表 + active 指针**保证扩展性：加截图规格、加 Browser Provider 都是纯增量。生成的 config.yaml 里带有 mobile profile 与 computer-use provider 的注释示例。
 
 ## 测试
 
 ```bash
-npm test          # 114 项端到端测试
+npm test          # 129 项单元与端到端测试
 npm run test:init
 npm run test:inspect
 npm run test:capture
@@ -148,4 +161,6 @@ capture 与 generate 测试会真的启动 Chromium，跑完约需 3-4 分钟。
 
 ## 设计
 
-见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+- [架构与演进约定](docs/ARCHITECTURE.md)
+- [正逆索引设计](docs/plans/2026-09-17-forward-reverse-index-design.md)
+- [正逆索引实施计划](docs/plans/2026-09-17-forward-reverse-index.md)

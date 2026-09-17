@@ -495,6 +495,6 @@ git commit -m "docs: document manual dependency indexes"
 
 Skip in the current non-Git workspace.
 
-## Execution constraint
+## Execution environment
 
-The planning skill normally expects a dedicated Git worktree and frequent commits. The current directory has no `.git` repository, so worktree creation and commit steps cannot run here. The implementation can still follow every RED/GREEN verification step; commit steps become available once this directory is placed in a Git repository.
+The repository was initialized before implementation. At the user's explicit request, the tasks were executed and committed directly on `main` instead of in a dedicated worktree. Every production change followed the documented RED/GREEN verification steps.
