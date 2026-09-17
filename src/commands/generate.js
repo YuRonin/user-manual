@@ -20,6 +20,7 @@ const { parseArgs } = require('../cli/args');
 const { loadConfig } = require('../config/load');
 const { ANALYSIS, normalizePage } = require('../inspect/model');
 const store = require('../inspect/store');
+const { readIndexes, findForwardPage } = require('../inspect/index-store');
 const { buildDraft } = require('../generate/draft');
 const { extractFacts, compareFacts, formatViolations } = require('../generate/facts');
 const { writeText, displayPath } = require('../util/fsx');
@@ -100,12 +101,18 @@ function loadPage(projectRoot, config, pageId) {
     };
   }
 
-  return { ok: true, page: normalizePage(found), stateDirAbs };
+  const page = normalizePage(found);
+  const indexes = readIndexes(stateDirAbs);
+  const indexContext = indexes.ok
+    ? findForwardPage(indexes.forward, { id: page.id, route: page.route })
+    : null;
+
+  return { ok: true, page, stateDirAbs, indexContext };
 }
 
 // ---------------------------------------------------------------- 阶段一：草稿
 
-function runDraft({ projectRoot, config, page, stateDirAbs, skillRoot, noScreenshot, json }) {
+function runDraft({ projectRoot, config, page, stateDirAbs, skillRoot, indexContext, noScreenshot, json }) {
   const errors = [];
 
   // 事实优先级第一条：没有真实截图就没有可信的手册
@@ -147,6 +154,7 @@ function runDraft({ projectRoot, config, page, stateDirAbs, skillRoot, noScreens
     docsOutputDir: config.docs.outputDir,
     pageFilePath: `.manual/pages/${page.id}.yaml`,
     includeScreenshot: !noScreenshot,
+    indexContext,
   });
 
   const draftPath = path.join(stateDirAbs, 'drafts', `${page.id}.md`);
@@ -168,6 +176,7 @@ function runDraft({ projectRoot, config, page, stateDirAbs, skillRoot, noScreens
           finalPath,
           language: config.docs.language,
           facts,
+          indexContext,
           // 这些是润色阶段一个字都不能动的东西
           protected: {
             images: draftFacts.images.map((i) => i.src),
@@ -350,7 +359,7 @@ function run(argv) {
 
   const pageResult = loadPage(projectRoot, config, pageId);
   if (!pageResult.ok) return fail(pageResult.errors, { json });
-  const { page, stateDirAbs } = pageResult;
+  const { page, stateDirAbs, indexContext } = pageResult;
 
   const skillRoot = path.resolve(__dirname, '..', '..');
 
@@ -368,7 +377,7 @@ function run(argv) {
   }
 
   return runDraft({
-    projectRoot, config, page, stateDirAbs, skillRoot,
+    projectRoot, config, page, stateDirAbs, skillRoot, indexContext,
     noScreenshot: values.noScreenshot === true,
     json,
   });

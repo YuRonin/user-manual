@@ -27,13 +27,16 @@ function screenshotRelativeToDocs(docsOutputDir, screenshotPath) {
  * @returns {{ markdown, facts }}  facts 是给用户看的事实来源说明
  */
 function buildDraft(page, context) {
-  const { docsOutputDir, pageFilePath, includeScreenshot = true } = context;
+  const { docsOutputDir, pageFilePath, includeScreenshot = true, indexContext = null } = context;
   const browser = page.browser || {};
   const L = [];
 
   // 草稿头部只放元信息。它在 HTML 注释里，不参与事实校验，也不会进最终文档。
   L.push('<!-- 事实草稿，由 `manual generate` 生成。不要手工编辑这个文件。 -->');
   L.push(`<!-- 页面模型: ${pageFilePath} -->`);
+  if (Array.isArray(indexContext?.files) && indexContext.files.length > 0) {
+    L.push(`<!-- 关联源码: ${indexContext.files.join(', ')} -->`);
+  }
   if (browser.screenshot) {
     L.push(`<!-- 截图: ${browser.screenshot} @ ${browser.lastCapture || '未知时间'} -->`);
     L.push(`<!-- 截图时的真实地址: ${browser.url || '未知'} -->`);

@@ -144,6 +144,44 @@ async function main() {
     }
   });
 
+  await test('generate 将 forward index 源码上下文加入草稿与 JSON 输出', async () => {
+    const root = await prepareProject(server.baseUrl);
+    try {
+      const r = await run('generate', root, ['chat', '--json']);
+      assert.strictEqual(r.status, 0, r.stderr);
+      const out = JSON.parse(r.stdout);
+
+      assert.deepStrictEqual(out.indexContext.entry, ['app/chat/page.tsx']);
+      assert.deepStrictEqual(out.indexContext.files, ['app/chat/page.tsx']);
+      assert.deepStrictEqual(out.indexContext.components, []);
+      assert.deepStrictEqual(out.indexContext.hooks, []);
+      assert.deepStrictEqual(out.indexContext.apis, []);
+      assert.deepStrictEqual(out.indexContext.scenarios, []);
+      assert.match(readDraft(root, 'chat'), /<!-- 关联源码: app\/chat\/page\.tsx -->/);
+    } finally {
+      fx.cleanup(root);
+    }
+  });
+
+  await test('索引缺失或损坏时 generate 回退页面 YAML', async () => {
+    const root = await prepareProject(server.baseUrl);
+    try {
+      fs.rmSync(path.join(root, '.manual', 'index'), { recursive: true });
+      let r = await run('generate', root, ['chat', '--json']);
+      assert.strictEqual(r.status, 0, r.stderr);
+      assert.strictEqual(JSON.parse(r.stdout).indexContext, null);
+
+      fs.mkdirSync(path.join(root, '.manual', 'index'), { recursive: true });
+      fs.writeFileSync(path.join(root, '.manual', 'index', 'forward.json'), '{broken', 'utf8');
+      fs.writeFileSync(path.join(root, '.manual', 'index', 'reverse.json'), '{}', 'utf8');
+      r = await run('generate', root, ['chat', '--json']);
+      assert.strictEqual(r.status, 0, r.stderr);
+      assert.strictEqual(JSON.parse(r.stdout).indexContext, null);
+    } finally {
+      fx.cleanup(root);
+    }
+  });
+
   // ------------------------------------------------------------ 阶段三：定稿
   await test('合规的中文润色可以通过并输出正式文档', async () => {
     const root = await prepareProject(server.baseUrl);

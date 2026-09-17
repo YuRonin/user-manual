@@ -118,6 +118,40 @@ async function main() {
     }
   });
 
+  await test('capture 优先使用 forward index 中的当前路由', async () => {
+    const root = await prepareProject(server.baseUrl);
+    try {
+      const pageFile = path.join(root, '.manual', 'pages', 'chat.yaml');
+      fs.writeFileSync(
+        pageFile,
+        fs.readFileSync(pageFile, 'utf8').replace('route: /chat', 'route: /stale-chat'),
+        'utf8'
+      );
+
+      const r = await run('capture', root, ['chat', '--json']);
+      assert.strictEqual(r.status, 0, r.stderr);
+      assert.strictEqual(JSON.parse(r.stdout).url, `${server.baseUrl}/chat`);
+    } finally {
+      fx.cleanup(root);
+    }
+  });
+
+  await test('索引缺失或损坏时 capture 回退页面 YAML', async () => {
+    const root = await prepareProject(server.baseUrl);
+    try {
+      fs.rmSync(path.join(root, '.manual', 'index'), { recursive: true });
+      let r = await run('capture', root, ['chat']);
+      assert.strictEqual(r.status, 0, r.stderr);
+
+      fs.writeFileSync(path.join(root, '.manual', 'index', 'forward.json'), '{broken', 'utf8');
+      r = await run('capture', root, ['chat']);
+      assert.strictEqual(r.status, 0, r.stderr);
+      assert.strictEqual(pageYaml(root, 'chat').browser.url, `${server.baseUrl}/chat`);
+    } finally {
+      fx.cleanup(root);
+    }
+  });
+
   await test('capture 后回写页面模型的 browser 状态', async () => {
     const root = await prepareProject(server.baseUrl);
     try {

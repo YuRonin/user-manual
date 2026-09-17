@@ -19,6 +19,7 @@ const { CaptureError, REASON } = require('../browser/errors');
 const { DEFAULT_READY_OPTIONS } = require('../browser/provider');
 const { CONFIDENCE, ANALYSIS, normalizePage } = require('../inspect/model');
 const store = require('../inspect/store');
+const { readIndexes, findForwardPage } = require('../inspect/index-store');
 const { displayPath } = require('../util/fsx');
 
 const KNOWN_FLAGS = new Set([
@@ -268,6 +269,11 @@ async function run(argv) {
     const ids = existing.pages.map((p) => p.id).join(', ');
     return fail([`找不到页面 "${pageId}"。已有: ${ids}`], { json });
   }
+  const indexes = readIndexes(stateDirAbs);
+  const indexedPage = indexes.ok
+    ? findForwardPage(indexes.forward, { id: page.id, route: page.route })
+    : null;
+  const effectiveRoute = typeof indexedPage?.route === 'string' ? indexedPage.route : page.route;
 
   // ---- 解析截图规格与 provider
   const profileId = values.profile || config.capture.activeProfile;
@@ -288,11 +294,11 @@ async function run(argv) {
     url = values.url;
   } else {
     const params = parseParams(values.params);
-    const resolved = resolveRoute(page.route, params);
+    const resolved = resolveRoute(effectiveRoute, params);
     if (!resolved.ok) {
       return fail(
         [
-          `"${pageId}" 是动态路由 ${page.route}，需要具体参数值才能打开。`,
+          `"${pageId}" 是动态路由 ${effectiveRoute}，需要具体参数值才能打开。`,
           `缺少: ${resolved.missing.join(', ')}`,
           `补上即可，例如: manual capture ${pageId} --params "${resolved.missing.map((m) => `${m}=<值>`).join(';')}"`,
         ],
@@ -391,7 +397,7 @@ async function run(argv) {
         {
           ok: true,
           pageId,
-          route: page.route,
+          route: effectiveRoute,
           url: shot.meta.url,
           screenshot: screenshotRelative,
           screenshotAbsolute: outPath,
