@@ -89,8 +89,8 @@ async function main() {
         // JSONC comments are valid in tsconfig files.
         "compilerOptions": {
           "baseUrl": ".",
-          "paths": { "@/*": ["src/*"] }
-        }
+          "paths": { "@/*": ["src/*"], },
+        },
       }\n`);
       fx.writeFile(root, 'src/app/page.tsx', [
         "import Input from '@/components/Input'",

@@ -91,12 +91,42 @@ function stripJsonComments(text) {
   return out;
 }
 
+function stripTrailingCommas(text) {
+  let out = '';
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (inString) {
+      out += char;
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      out += char;
+      continue;
+    }
+    if (char === ',') {
+      let next = i + 1;
+      while (/\s/.test(text[next] || '')) next++;
+      if (text[next] === '}' || text[next] === ']') continue;
+    }
+    out += char;
+  }
+  return out;
+}
+
 function loadAliasConfig(projectRoot) {
   for (const name of ['tsconfig.json', 'jsconfig.json']) {
     const file = path.join(projectRoot, name);
     if (!fs.existsSync(file)) continue;
     try {
-      const parsed = JSON.parse(stripJsonComments(fs.readFileSync(file, 'utf8')));
+      const jsonc = stripJsonComments(fs.readFileSync(file, 'utf8'));
+      const parsed = JSON.parse(stripTrailingCommas(jsonc));
       const compiler = parsed.compilerOptions || {};
       return {
         baseUrl: path.resolve(projectRoot, compiler.baseUrl || '.'),
