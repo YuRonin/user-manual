@@ -9,6 +9,7 @@ const FILES = [
   'init.test.js',
   'import-graph.test.js',
   'index-builder.test.js',
+  'index-store.test.js',
   'inspect.test.js',
   'capture.test.js',
   'generate.test.js',
