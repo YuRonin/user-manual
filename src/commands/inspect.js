@@ -223,7 +223,9 @@ function run(argv) {
     ? result.pages
     : [...result.pages, ...result.removed].sort((a, b) => String(a.route).localeCompare(String(b.route)));
 
-  const { written, projectFile } = store.writeModel(stateDirAbs, meta, indexPages);
+  const { written, projectFile } = store.writeModel(stateDirAbs, meta, indexPages, {
+    docsOutputDir: config.docs.outputDir,
+  });
   const worklist = buildWorklist(result.pages);
 
   if (json) {

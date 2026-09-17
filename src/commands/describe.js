@@ -328,7 +328,9 @@ function run(argv) {
   meta.generatedAt = new Date().toISOString();
 
   const allPages = [...byId.values()].sort((a, b) => String(a.route).localeCompare(String(b.route)));
-  const { projectFile } = store.writeModel(stateDirAbs, meta, allPages);
+  const { projectFile } = store.writeModel(stateDirAbs, meta, allPages, {
+    docsOutputDir: config.docs.outputDir,
+  });
 
   const remaining = allPages.filter(
     (p) => p.includeInManual !== false && p.status?.sourceAnalysis !== ANALYSIS.COMPLETED

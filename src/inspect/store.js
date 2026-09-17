@@ -17,6 +17,7 @@ const yaml = require('js-yaml');
 const { emit } = require('../util/yaml-emit');
 const { writeText } = require('../util/fsx');
 const { normalizePage, isBrowserVerified } = require('./model');
+const { buildIndexes } = require('./index-builder');
 
 const PROJECT_MODEL_VERSION = 1;
 
@@ -30,6 +31,27 @@ function pageFileFor(stateDirAbs, id) {
 
 function projectFileFor(stateDirAbs) {
   return path.join(stateDirAbs, 'project.yaml');
+}
+
+function indexDirFor(stateDirAbs) {
+  return path.join(stateDirAbs, 'index');
+}
+
+function forwardIndexFileFor(stateDirAbs) {
+  return path.join(indexDirFor(stateDirAbs), 'forward.json');
+}
+
+function reverseIndexFileFor(stateDirAbs) {
+  return path.join(indexDirFor(stateDirAbs), 'reverse.json');
+}
+
+function writeIndexes(stateDirAbs, pages, options) {
+  const { forward, reverse } = buildIndexes(pages, options);
+  const forwardFile = forwardIndexFileFor(stateDirAbs);
+  const reverseFile = reverseIndexFileFor(stateDirAbs);
+  writeText(forwardFile, JSON.stringify(forward, null, 2) + '\n');
+  writeText(reverseFile, JSON.stringify(reverse, null, 2) + '\n');
+  return [forwardFile, reverseFile];
 }
 
 /** 读出 pages/ 下所有页面文件。解析失败的记进 errors，不静默吞掉。 */
@@ -152,7 +174,7 @@ function renderProjectYaml(meta, pages) {
 }
 
 /** 写入全部页面文件与索引。返回写了哪些文件。 */
-function writeModel(stateDirAbs, meta, pages) {
+function writeModel(stateDirAbs, meta, pages, options = {}) {
   const written = [];
 
   for (const page of pages) {
@@ -165,7 +187,12 @@ function writeModel(stateDirAbs, meta, pages) {
   writeText(projectFile, renderProjectYaml(meta, pages));
   written.push(projectFile);
 
-  return { written, projectFile };
+  const indexFiles = options.docsOutputDir
+    ? writeIndexes(stateDirAbs, pages, options)
+    : [];
+  written.push(...indexFiles);
+
+  return { written, projectFile, indexFiles };
 }
 
 /** 删除页面文件（--prune 用）。返回真正删掉的路径。 */
@@ -186,6 +213,9 @@ module.exports = {
   pagesDirFor,
   pageFileFor,
   projectFileFor,
+  indexDirFor,
+  forwardIndexFileFor,
+  reverseIndexFileFor,
   readExistingPages,
   readPage: (stateDirAbs, id) => {
     const file = pageFileFor(stateDirAbs, id);
@@ -195,5 +225,6 @@ module.exports = {
   renderPageYaml,
   renderProjectYaml,
   writeModel,
+  writeIndexes,
   removePageFiles,
 };

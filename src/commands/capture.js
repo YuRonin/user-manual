@@ -381,7 +381,9 @@ async function run(argv) {
   }
   meta.generatedAt = capturedAt;
 
-  store.writeModel(stateDirAbs, meta, allPages);
+  store.writeModel(stateDirAbs, meta, allPages, {
+    docsOutputDir: config.docs.outputDir,
+  });
 
   if (json) {
     process.stdout.write(

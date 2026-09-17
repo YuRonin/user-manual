@@ -156,6 +156,12 @@ async function main() {
       const chat = proj.pages.find((p) => p.id === 'chat');
       assert.strictEqual(chat.browserVerified, true);
       assert.strictEqual(chat.screenshot, 'docs/manual/images/raw/chat.png');
+
+      const forward = JSON.parse(fs.readFileSync(
+        path.join(root, '.manual', 'index', 'forward.json'),
+        'utf8'
+      ));
+      assert.strictEqual(forward['/chat'].screenshot, 'docs/manual/images/raw/chat.png');
     } finally {
       fx.cleanup(root);
     }

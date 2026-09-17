@@ -45,6 +45,10 @@ function readYaml(file) {
   return yaml.load(fs.readFileSync(file, 'utf8'));
 }
 
+function readJson(file) {
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
 function projectYaml(root) {
   return readYaml(path.join(root, '.manual', 'project.yaml'));
 }
@@ -175,6 +179,44 @@ test('inspect 递归扫描并稳定持久化页面依赖', () => {
     r = run('inspect', root);
     assert.strictEqual(r.status, 0, r.stderr);
     assert.deepStrictEqual(pageYaml(root, 'chat').dependencies, first);
+  });
+});
+
+test('inspect 写入稳定的 forward.json 与 reverse.json', () => {
+  withFixture(fx.nextAppFixture, (root) => {
+    fx.writeFile(root, 'app/chat/page.tsx', [
+      "import Input from '../../components/shared/Input'",
+      'export default Input',
+    ].join('\n'));
+    fx.writeFile(root, 'components/shared/Input.tsx', 'export default function Input() {}\n');
+    initProject(root);
+
+    let r = run('inspect', root, ['--json']);
+    assert.strictEqual(r.status, 0, r.stderr);
+    const out = JSON.parse(r.stdout);
+    const forwardPath = path.join(root, '.manual', 'index', 'forward.json');
+    const reversePath = path.join(root, '.manual', 'index', 'reverse.json');
+
+    assert.ok(fs.existsSync(forwardPath));
+    assert.ok(fs.existsSync(reversePath));
+    assert.ok(out.writtenFiles.includes(forwardPath));
+    assert.ok(out.writtenFiles.includes(reversePath));
+
+    const forward = readJson(forwardPath);
+    const reverse = readJson(reversePath);
+    assert.deepStrictEqual(forward['/chat'].entry, ['app/chat/page.tsx']);
+    assert.deepStrictEqual(forward['/chat'].files, [
+      'app/chat/page.tsx',
+      'components/shared/Input.tsx',
+    ]);
+    assert.deepStrictEqual(reverse['components/shared/Input.tsx'], ['/chat']);
+
+    const firstForward = fs.readFileSync(forwardPath, 'utf8');
+    const firstReverse = fs.readFileSync(reversePath, 'utf8');
+    r = run('inspect', root);
+    assert.strictEqual(r.status, 0, r.stderr);
+    assert.strictEqual(fs.readFileSync(forwardPath, 'utf8'), firstForward);
+    assert.strictEqual(fs.readFileSync(reversePath, 'utf8'), firstReverse);
   });
 });
 
