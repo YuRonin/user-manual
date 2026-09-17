@@ -1,0 +1,23 @@
+{
+  "name": "living-manual",
+  "version": "0.1.0",
+  "description": "为 Web 项目生成并持续维护图文用户手册的工具链（Living User Manual）",
+  "private": true,
+  "type": "commonjs",
+  "bin": {
+    "manual": "bin/manual.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  },
+  "scripts": {
+    "test": "node test/run.js",
+    "test:init": "node test/init.test.js",
+    "test:inspect": "node test/inspect.test.js",
+    "test:capture": "node test/capture.test.js",
+    "test:generate": "node test/generate.test.js"
+  }
+}
