@@ -147,6 +147,37 @@ test('新页面初始状态：无标题、待分析、未经浏览器验证', ()
   });
 });
 
+test('inspect 递归扫描并稳定持久化页面依赖', () => {
+  withFixture(fx.nextAppFixture, (root) => {
+    fx.writeFile(root, 'app/chat/page.tsx', [
+      "import ChatPanel from '../../components/chat/ChatPanel'",
+      'export default ChatPanel',
+    ].join('\n'));
+    fx.writeFile(root, 'components/chat/ChatPanel.tsx', [
+      "import Input from '../shared/Input'",
+      'export default Input',
+    ].join('\n'));
+    fx.writeFile(root, 'components/shared/Input.tsx', 'export default function Input() {}\n');
+
+    initProject(root);
+    let r = run('inspect', root);
+    assert.strictEqual(r.status, 0, r.stderr);
+
+    const first = pageYaml(root, 'chat').dependencies;
+    assert.deepStrictEqual(first, {
+      files: [
+        'components/chat/ChatPanel.tsx',
+        'components/shared/Input.tsx',
+      ],
+      unresolved: [],
+    });
+
+    r = run('inspect', root);
+    assert.strictEqual(r.status, 0, r.stderr);
+    assert.deepStrictEqual(pageYaml(root, 'chat').dependencies, first);
+  });
+});
+
 test('project.yaml 记录技术栈与统计', () => {
   withFixture(fx.nextAppFixture, (root) => {
     initProject(root);
@@ -366,6 +397,27 @@ test('--json 输出含工作清单', () => {
     assert.strictEqual(item.reason, 'pending');
     // 被跳过的文件也报出来，方便核对扫描是否漏了东西
     assert.ok(out.skipped.some((s) => s.reason === 'parallel-slot'));
+  });
+});
+
+test('无法解析的本地依赖只产生 warning，不中断其它页面扫描', () => {
+  withFixture(fx.nextAppFixture, (root) => {
+    fx.writeFile(root, 'app/chat/page.tsx', [
+      "import Missing from '../../components/chat/Missing'",
+      'export default Missing',
+    ].join('\n'));
+    initProject(root);
+
+    const r = run('inspect', root, ['--json']);
+    assert.strictEqual(r.status, 0, r.stderr);
+    const out = JSON.parse(r.stdout);
+
+    assert.ok(out.warnings.some((warning) => warning.includes('/chat')));
+    assert.ok(out.warnings.some((warning) => warning.includes('Missing')));
+    assert.ok(out.pages.some((page) => page.route === '/membership'));
+    assert.deepStrictEqual(pageYaml(root, 'chat').dependencies.unresolved, [
+      'app/chat/page.tsx: ../../components/chat/Missing',
+    ]);
   });
 });
 

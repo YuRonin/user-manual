@@ -109,6 +109,13 @@ function isBrowserVerified(page) {
   return !!page?.status?.browserVerified; // 老文件兜底
 }
 
+function normalizeDependencies(dependencies) {
+  return {
+    files: Array.isArray(dependencies?.files) ? dependencies.files : [],
+    unresolved: Array.isArray(dependencies?.unresolved) ? dependencies.unresolved : [],
+  };
+}
+
 /** 全新发现的页面：只有扫描能确定的字段，语义留空等 describe 补。 */
 function createPage(scanned, id) {
   return {
@@ -121,6 +128,7 @@ function createPage(scanned, id) {
     detectedActions: [],
     entry: scanned.entry,
     source: [scanned.entry],
+    dependencies: normalizeDependencies(scanned.dependencies),
     includeInManual: true,
     confidence: CONFIDENCE.NONE,
     browser: emptyBrowserState(),
@@ -166,6 +174,7 @@ function mergePage(existing, scanned) {
     detectedActions: Array.isArray(existing.detectedActions) ? existing.detectedActions : [],
     entry: scanned.entry,
     source,
+    dependencies: normalizeDependencies(scanned.dependencies),
     includeInManual: existing.includeInManual !== false,
     confidence,
     browser,
@@ -232,6 +241,7 @@ module.exports = {
   emptyBrowserState,
   normalizePage,
   isBrowserVerified,
+  normalizeDependencies,
   routeToId,
   uniqueId,
   routeGlobToRegex,

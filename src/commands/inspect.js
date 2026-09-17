@@ -17,6 +17,7 @@ const { parseArgs } = require('../cli/args');
 const { loadConfig } = require('../config/load');
 const { detectFramework } = require('../inspect/detect');
 const { scanNextjs } = require('../inspect/nextjs');
+const { buildImportGraph } = require('../inspect/import-graph');
 const { reconcile, ANALYSIS } = require('../inspect/model');
 const store = require('../inspect/store');
 const { displayPath } = require('../util/fsx');
@@ -179,6 +180,14 @@ function run(argv) {
   if (!detected.ok) return fail(detected.errors, { json });
 
   const scan = scanNextjs(projectRoot, { appDir: detected.appDir, pagesDir: detected.pagesDir });
+  const dependencyWarnings = [];
+  scan.pages = scan.pages.map((page) => {
+    const dependencies = buildImportGraph(projectRoot, page.entry);
+    for (const unresolved of dependencies.unresolved) {
+      dependencyWarnings.push(`${page.route}: 无法解析依赖 ${unresolved}`);
+    }
+    return { ...page, dependencies };
+  });
 
   const stateDirAbs = path.join(projectRoot, config.artifacts.stateDir);
   const existing = store.readExistingPages(stateDirAbs);
@@ -190,6 +199,7 @@ function run(argv) {
   }
 
   const result = reconcile(scan.pages, existing.pages, config.inspect.exclude);
+  const warnings = [...loaded.warnings, ...dependencyWarnings];
 
   // 代码里已不存在的路由：默认只报告，加 --prune 才删。
   // 这些文件里可能有 AI 或人写的分析结果，静默删掉代价太大。
@@ -252,7 +262,7 @@ function run(argv) {
           skipped: scan.skipped,
           conflicts: scan.conflicts,
           worklist,
-          warnings: loaded.warnings,
+          warnings,
           writtenFiles: written,
         },
         null,
@@ -260,7 +270,7 @@ function run(argv) {
       ) + '\n'
     );
   } else {
-    for (const w of loaded.warnings) process.stderr.write(`[manual inspect] 注意: ${w}\n`);
+    for (const w of warnings) process.stderr.write(`[manual inspect] 注意: ${w}\n`);
     if (scan.conflicts.length > 0) {
       for (const c of scan.conflicts) {
         process.stderr.write(

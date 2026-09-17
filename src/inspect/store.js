@@ -80,6 +80,10 @@ function renderPageYaml(page) {
     detectedActions: page.detectedActions || [],
     entry: page.entry,
     source: page.source || [],
+    dependencies: {
+      files: page.dependencies?.files || [],
+      unresolved: page.dependencies?.unresolved || [],
+    },
     includeInManual: page.includeInManual !== false,
     confidence: page.confidence,
     // 真实浏览器验证的结果，由 `manual capture` 写入
