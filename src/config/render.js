@@ -124,8 +124,22 @@ function renderConfigYaml(config, meta = {}) {
   L.push('artifacts:');
   L.push(`  stateDir: ${scalar(config.artifacts.stateDir)}`);
   L.push(`  rawDir: ${scalar(config.artifacts.rawDir)}`);
+  L.push(`  taskRawDir: ${scalar(config.artifacts.taskRawDir)}`);
+  L.push(`  sanitizedDir: ${scalar(config.artifacts.sanitizedDir)}`);
+  L.push(`  diagnosticsDir: ${scalar(config.artifacts.diagnosticsDir)}`);
+  L.push(`  manifestsDir: ${scalar(config.artifacts.manifestsDir)}`);
   L.push(`  annotatedDir: ${scalar(config.artifacts.annotatedDir)}`);
   L.push(`  format: ${scalar(config.artifacts.format)}`);
+  L.push('');
+
+  L.push('# ---------------------------------------------------------------- 截图标注');
+  L.push('annotation:');
+  L.push(`  activeTheme: ${scalar(config.annotation.activeTheme)}`);
+  L.push('  themes:');
+  for (const [id, theme] of Object.entries(config.annotation.themes)) {
+    L.push(`    ${scalar(id)}:`);
+    for (const [key, value] of Object.entries(theme)) L.push(`      ${key}: ${scalar(value)}`);
+  }
   L.push('');
 
   // ---- inspect
@@ -161,6 +175,7 @@ function renderStateGitignore() {
     'session/',
     'cache/',
     'screenshots/',
+    'artifacts/',
     '*.bak',
     '',
   ].join('\n');

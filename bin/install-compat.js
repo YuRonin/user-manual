@@ -1,0 +1,6 @@
+#!/usr/bin/env node
+'use strict';
+const fs=require('fs'),os=require('os'),path=require('path');const {COMMANDS,aliasName,renderCodexAlias,renderClaudeCommand}=require('../src/compat/aliases');
+function value(argv,name,fallback){const i=argv.indexOf(name);return i>=0?argv[i+1]:fallback}
+function main(argv){const codexHome=path.resolve(value(argv,'--codex-home',process.env.CODEX_HOME||path.join(os.homedir(),'.codex'))),claudeHome=path.resolve(value(argv,'--claude-home',path.join(os.homedir(),'.claude'))),json=argv.includes('--json'),manualRoot=path.join(codexHome,'skills','manual'),installed=[];for(const command of COMMANDS){const name=aliasName(command),skillFile=path.join(codexHome,'skills',name,'SKILL.md'),commandFile=path.join(claudeHome,'commands',`${name}.md`);fs.mkdirSync(path.dirname(skillFile),{recursive:true});fs.mkdirSync(path.dirname(commandFile),{recursive:true});fs.writeFileSync(skillFile,renderCodexAlias(command,manualRoot),'utf8');fs.writeFileSync(commandFile,renderClaudeCommand(command,manualRoot),'utf8');installed.push(skillFile,commandFile)}const out={ok:true,manualRoot,installed};if(json)process.stdout.write(JSON.stringify(out,null,2)+'\n');else process.stdout.write(`已安装 ${COMMANDS.length} 组 manual 兼容别名。\n`);return 0}
+process.exitCode=main(process.argv.slice(2));

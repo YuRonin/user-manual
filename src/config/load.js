@@ -13,6 +13,7 @@ const path = require('path');
 const yaml = require('js-yaml');
 
 const { CONFIG_VERSION, DEFAULTS } = require('./schema');
+const { resolveAnnotationConfig } = require('./annotation');
 
 const CONFIG_RELATIVE = path.join(DEFAULTS.stateDir, 'config.yaml');
 
@@ -92,9 +93,20 @@ function loadConfig(projectRoot) {
   const config = {
     ...raw,
     docs: { language: DEFAULTS.language, ...(raw.docs || {}) },
-    artifacts: { stateDir: DEFAULTS.stateDir, ...(raw.artifacts || {}) },
+    artifacts: {
+      stateDir: DEFAULTS.stateDir,
+      taskRawDir: `${DEFAULTS.stateDir}/artifacts/raw`,
+      sanitizedDir: `${DEFAULTS.stateDir}/artifacts/sanitized`,
+      diagnosticsDir: `${DEFAULTS.stateDir}/artifacts/diagnostics`,
+      manifestsDir: `${DEFAULTS.stateDir}/artifacts/manifests`,
+      ...(raw.artifacts || {}),
+    },
     inspect: { exclude: [], ...(raw.inspect || {}) },
   };
+
+  const annotation = resolveAnnotationConfig(raw.annotation);
+  if (!annotation.ok) return { ok: false, errors: annotation.errors };
+  config.annotation = annotation.config;
 
   if (!Array.isArray(config.inspect.exclude)) {
     return { ok: false, errors: ['inspect.exclude 需要是数组。'] };

@@ -45,13 +45,30 @@ function reverseIndexFileFor(stateDirAbs) {
   return path.join(indexDirFor(stateDirAbs), 'reverse.json');
 }
 
-function writeIndexes(stateDirAbs, pages, options) {
-  const { forward, reverse } = buildIndexes(pages, options);
+function taskForwardIndexFileFor(stateDirAbs) {
+  return path.join(indexDirFor(stateDirAbs), 'task-forward.json');
+}
+
+function taskReverseIndexFileFor(stateDirAbs) {
+  return path.join(indexDirFor(stateDirAbs), 'task-reverse.json');
+}
+
+function writeIndexes(stateDirAbs, pages, options = {}) {
+  let tasks = options.tasks;
+  if (!Array.isArray(tasks)) {
+    const existingTasks = require('../tasks/store').readTasks(stateDirAbs);
+    tasks = existingTasks.errors.length === 0 ? existingTasks.tasks : [];
+  }
+  const { forward, reverse, taskForward, taskReverse } = buildIndexes(pages, { ...options, tasks });
   const forwardFile = forwardIndexFileFor(stateDirAbs);
   const reverseFile = reverseIndexFileFor(stateDirAbs);
   writeText(forwardFile, JSON.stringify(forward, null, 2) + '\n');
   writeText(reverseFile, JSON.stringify(reverse, null, 2) + '\n');
-  return [forwardFile, reverseFile];
+  const taskForwardFile = taskForwardIndexFileFor(stateDirAbs);
+  const taskReverseFile = taskReverseIndexFileFor(stateDirAbs);
+  writeText(taskForwardFile, JSON.stringify(taskForward || {}, null, 2) + '\n');
+  writeText(taskReverseFile, JSON.stringify(taskReverse || {}, null, 2) + '\n');
+  return [forwardFile, reverseFile, taskForwardFile, taskReverseFile];
 }
 
 /** 读出 pages/ 下所有页面文件。解析失败的记进 errors，不静默吞掉。 */
@@ -118,6 +135,7 @@ function renderPageYaml(page) {
       deviceScaleFactor: browser.deviceScaleFactor ?? null,
       provider: browser.provider ?? null,
     },
+    states: page.states || {},
     status: {
       router: page.status?.router ?? null,
       sourceAnalysis: page.status?.sourceAnalysis,
@@ -216,6 +234,8 @@ module.exports = {
   indexDirFor,
   forwardIndexFileFor,
   reverseIndexFileFor,
+  taskForwardIndexFileFor,
+  taskReverseIndexFileFor,
   readExistingPages,
   readPage: (stateDirAbs, id) => {
     const file = pageFileFor(stateDirAbs, id);

@@ -21,6 +21,8 @@ const { buildImportGraph } = require('../inspect/import-graph');
 const { reconcile, ANALYSIS } = require('../inspect/model');
 const store = require('../inspect/store');
 const { displayPath } = require('../util/fsx');
+const taskStore = require('../tasks/store');
+const { markAffectedTasks } = require('../tasks/staleness');
 
 const KNOWN_FLAGS = new Set(['projectRoot', 'prune', 'json', 'help']);
 
@@ -223,6 +225,13 @@ function run(argv) {
     ? result.pages
     : [...result.pages, ...result.removed].sort((a, b) => String(a.route).localeCompare(String(b.route)));
 
+  const existingTasks = taskStore.readTasks(stateDirAbs);
+  if (existingTasks.errors.length > 0) return fail(existingTasks.errors, { json });
+  const staleTasks = markAffectedTasks(existingTasks.tasks, {
+    pageIds: [...result.stale, ...result.removed].map((page) => page.id),
+  });
+  for (const task of staleTasks.tasks) taskStore.writeTask(stateDirAbs, task);
+
   const { written, projectFile } = store.writeModel(stateDirAbs, meta, indexPages, {
     docsOutputDir: config.docs.outputDir,
   });
@@ -265,6 +274,7 @@ function run(argv) {
           conflicts: scan.conflicts,
           worklist,
           warnings,
+          staleTasks: staleTasks.staleIds,
           writtenFiles: written,
         },
         null,

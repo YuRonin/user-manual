@@ -14,6 +14,7 @@
     "js-yaml": "^4.1.0"
   },
   "scripts": {
+    "install:compat": "node bin/install-compat.js",
     "test": "node test/run.js",
     "test:init": "node test/init.test.js",
     "test:inspect": "node test/inspect.test.js",

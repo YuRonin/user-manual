@@ -344,6 +344,116 @@ class PlaywrightBrowserProvider extends BrowserProvider {
     }
   }
 
+  locatorFor(target) {
+    if (!this.page) throw new Error('定位元素之前必须先 open()。');
+    if (!target || typeof target !== 'object') throw new Error('缺少语义目标。');
+    if (target.role && target.name) return this.page.getByRole(target.role, { name: target.name, exact: true });
+    if (target.label) return this.page.getByLabel(target.label, { exact: true });
+    if (target.text) return this.page.getByText(target.text, { exact: true });
+    if (target.testId) return this.page.getByTestId(target.testId);
+    if (target.selector) return this.page.locator(target.selector);
+    throw new Error('目标需要 role+name、label、text、testId 或 selector。');
+  }
+
+  async uniqueVisibleLocator(target) {
+    const locator = this.locatorFor(target);
+    const count = await locator.count();
+    const visible = [];
+    for (let index = 0; index < count; index++) {
+      const item = locator.nth(index);
+      if (await item.isVisible().catch(() => false)) visible.push(item);
+    }
+    if (visible.length === 0) throw Object.assign(new Error('目标元素不存在或不可见。'), { code: 'target-not-visible' });
+    if (visible.length > 1) throw Object.assign(new Error(`目标元素匹配到 ${visible.length} 个可见结果。`), { code: 'target-ambiguous' });
+    return visible[0];
+  }
+
+  async performAction(action) {
+    if (action.type === 'inspect' && !action.target) return { target: null, rect: null };
+    const locator = await this.uniqueVisibleLocator(action.target);
+    const rect = await locator.boundingBox();
+    if (action.type === 'click') await locator.click();
+    else if (action.type === 'fill') await locator.fill(String(action.value ?? ''));
+    else if (action.type === 'select') await locator.selectOption(action.value);
+    else if (action.type === 'check') await locator.check();
+    else if (action.type === 'uncheck') await locator.uncheck();
+    else if (action.type !== 'inspect') throw new Error(`不支持的交互类型: ${action.type}`);
+    return { target: action.target, rect };
+  }
+
+  async assertCondition(assertion) {
+    if (assertion.type === 'url') {
+      const actual = new URL(this.page.url());
+      if (actual.pathname !== assertion.value && this.page.url() !== assertion.value) {
+        throw Object.assign(new Error(`URL 断言失败，期望 ${assertion.value}，实际 ${actual.pathname}`), { code: 'state-assertion-failed' });
+      }
+      return { ok: true, actual: actual.pathname };
+    }
+    if (assertion.type === 'hidden') {
+      const count = await this.locatorFor(assertion.target).count();
+      for (let index = 0; index < count; index++) {
+        if (await this.locatorFor(assertion.target).nth(index).isVisible().catch(() => false)) {
+          throw Object.assign(new Error('目标仍然可见。'), { code: 'state-assertion-failed' });
+        }
+      }
+      return { ok: true };
+    }
+    const locator = await this.uniqueVisibleLocator(assertion.target);
+    if (assertion.type === 'editable' && !(await locator.isEditable())) {
+      throw Object.assign(new Error('目标字段不可编辑。'), { code: 'state-assertion-failed' });
+    }
+    if (!['visible', 'editable'].includes(assertion.type)) throw new Error(`不支持的状态断言: ${assertion.type}`);
+    return { ok: true };
+  }
+
+  async collectSensitiveElements() {
+    if (!this.page) return [];
+    return this.page.evaluate(() => {
+      const out = [];
+      const seen = new Set();
+      const add = (element, text, label) => {
+        const rect = element.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        const key = `${Math.round(rect.x)}:${Math.round(rect.y)}:${Math.round(rect.width)}:${Math.round(rect.height)}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        out.push({ text: String(text || ''), label: String(label || ''), rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height } });
+      };
+      for (const input of document.querySelectorAll('input,textarea,[data-redact]')) {
+        const id = input.id;
+        const label = input.getAttribute('aria-label') || (id ? document.querySelector(`label[for="${CSS.escape(id)}"]`)?.innerText : '') || input.getAttribute('name') || '';
+        add(input, input.value || input.textContent, label);
+      }
+      for (const element of document.querySelectorAll('body *')) {
+        if (element.children.length > 0) continue;
+        const text = (element.innerText || '').trim();
+        if (/1[3-9]\d{9}|[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(text)) add(element, text, element.getAttribute('aria-label') || '');
+      }
+      return out;
+    });
+  }
+
+  async renderEvidence({ sanitizedPath, annotatedPath, redactions, annotations, theme }) {
+    if (!this.page) throw new Error('renderEvidence 之前必须先 open()。');
+    fs.mkdirSync(path.dirname(sanitizedPath), { recursive: true });
+    fs.mkdirSync(path.dirname(annotatedPath), { recursive: true });
+    const overlayId = '__manual_evidence_overlay__';
+    await this.page.evaluate(({ overlayId, redactions }) => {
+      document.getElementById(overlayId)?.remove();
+      const root = document.createElement('div'); root.id = overlayId; root.style.cssText = 'position:fixed;inset:0;z-index:2147483647;pointer-events:none';
+      for (const item of redactions) { const el=document.createElement('div'); const r=item.rect; el.style.cssText=`position:absolute;left:${r.x}px;top:${r.y}px;width:${r.width}px;height:${r.height}px;background:#252C38;border-radius:4px`; root.appendChild(el); }
+      document.documentElement.appendChild(root);
+    }, { overlayId, redactions });
+    await this.page.screenshot({ path: sanitizedPath, type: 'png' });
+    await this.page.evaluate(({ overlayId, annotations, theme }) => {
+      const root=document.getElementById(overlayId);
+      for(const item of annotations){const box=document.createElement('div'),r=item.target;box.style.cssText=`position:absolute;left:${r.x}px;top:${r.y}px;width:${r.width}px;height:${r.height}px;border:${theme.outlineWidth}px solid ${theme.primary};border-radius:${theme.targetRadius}px;box-shadow:0 0 0 5px ${theme.halo}`;root.appendChild(box);const marker=document.createElement('div'),m=item.marker;marker.textContent=String(item.label);marker.style.cssText=`position:absolute;left:${m.x}px;top:${m.y}px;width:${m.size}px;height:${m.size}px;border-radius:50%;background:${theme.primary};color:white;border:2px solid white;display:flex;align-items:center;justify-content:center;font:700 16px sans-serif;box-sizing:border-box`;root.appendChild(marker)}
+    }, { overlayId, annotations, theme });
+    await this.page.screenshot({ path: annotatedPath, type: 'png' });
+    await this.page.evaluate((id) => document.getElementById(id)?.remove(), overlayId);
+    return { sanitizedPath, annotatedPath };
+  }
+
   /**
    * 截图落盘。
    * @returns {{ path, bytes, meta }}

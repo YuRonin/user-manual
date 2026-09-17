@@ -109,5 +109,38 @@ test('输入顺序和 Windows 路径不影响索引序列化结果', () => {
   assert.deepStrictEqual(first.reverse['src/components/Input.tsx'], ['/admin', '/login']);
 });
 
+test('任务索引连接页面、源码、步骤与正式文档', () => {
+  const { buildIndexes } = require('../src/inspect/index-builder');
+  const pages = [page({ id: 'user-center', route: '/user-center' })];
+  const tasks = [{
+    id: 'edit-profile',
+    title: '修改个人资料',
+    entryPage: 'user-center',
+    status: 'approved',
+    steps: [
+      { id: 'open', page: 'user-center', stateBefore: 'default', stateAfter: 'edit-profile-open' },
+    ],
+  }];
+
+  const indexes = buildIndexes(pages, { docsOutputDir: 'docs/manual', tasks });
+  assert.deepStrictEqual(indexes.forward['/user-center'].tasks, ['edit-profile']);
+  assert.deepStrictEqual(indexes.taskForward['edit-profile'], {
+    id: 'edit-profile',
+    title: '修改个人资料',
+    status: 'approved',
+    entryPage: 'user-center',
+    pages: ['user-center'],
+    files: [
+      'src/app/login/page.tsx',
+      'src/components/Input.tsx',
+      'src/components/LoginForm.tsx',
+      'src/hooks/useAuth.ts',
+    ],
+    steps: [{ id: 'open', page: 'user-center', stateBefore: 'default', stateAfter: 'edit-profile-open', screenshots: [] }],
+    manual: 'docs/manual/tasks/edit-profile.md',
+  });
+  assert.deepStrictEqual(indexes.taskReverse['src/components/Input.tsx'], ['edit-profile']);
+});
+
 process.stdout.write(`\n${passed} passed, ${failures.length} failed\n`);
 if (failures.length > 0) process.exitCode = 1;

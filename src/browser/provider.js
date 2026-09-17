@@ -61,6 +61,14 @@ class BrowserProvider {
     throw new Error(`${this.constructor.name} 没有实现 screenshot()`);
   }
 
+  async performAction(_action) {
+    throw new Error(`${this.constructor.name} 没有实现 performAction()`);
+  }
+
+  async assertCondition(_assertion) {
+    throw new Error(`${this.constructor.name} 没有实现 assertCondition()`);
+  }
+
   /**
    * 可选：读取页面事实（标题、是否有密码框、body 是否为空等），供上层判断失败原因。
    * 无法内省页面的 provider 返回 null，上层会跳过相应检查。

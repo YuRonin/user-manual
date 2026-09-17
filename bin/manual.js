@@ -31,12 +31,39 @@ const COMMANDS = {
     summary: '生成页面的 Markdown 手册（事实草稿 → 中文自然化 → 事实校验）',
     load: () => require('../src/commands/generate'),
   },
+  'approve-tasks': {
+    summary: '人工确认、调整或拒绝候选用户任务',
+    load: () => require('../src/commands/approve-tasks'),
+  },
+  'discover-tasks': {
+    summary: '从页面证据提出候选用户任务，等待人工确认',
+    load: () => require('../src/commands/discover-tasks'),
+  },
+  'plan-capture': {
+    summary: '为已批准任务生成可审阅的安全截图计划',
+    load: () => require('../src/commands/plan-capture'),
+  },
+  'capture-task': {
+    summary: '按安全边界执行任务步骤并采集原始证据',
+    load: () => require('../src/commands/capture-task'),
+  },
+  'generate-task': {
+    summary: '生成并校验任务型指南',
+    load: () => require('../src/commands/generate-task'),
+  },
+  verify: {
+    summary: '验证任务文档、图片和结构化事实',
+    load: () => require('../src/commands/verify'),
+  },
+  'migrate-artifacts': {
+    summary: '检查旧页面原图并安全复制到非发布产物目录',
+    load: () => require('../src/commands/migrate-artifacts'),
+  },
 };
 
 // 已规划但尚未实现的子命令：命中时给出明确说明，而不是「未知命令」
 const PLANNED = {
   update: '根据代码变化增量更新手册',
-  verify: '校验手册与实际页面是否一致',
 };
 
 const HELP = `

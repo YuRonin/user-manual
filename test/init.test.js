@@ -82,6 +82,13 @@ test('默认参数生成 config.yaml 与 .gitignore', (root) => {
   // 截图落在文档目录下：手册要引用它们，得跟手册一起入库
   assert.strictEqual(c.artifacts.rawDir, 'docs/manual/images/raw');
   assert.strictEqual(c.artifacts.annotatedDir, 'docs/manual/images/annotated');
+  assert.strictEqual(c.artifacts.taskRawDir, '.manual/artifacts/raw');
+  assert.strictEqual(c.artifacts.sanitizedDir, '.manual/artifacts/sanitized');
+  assert.strictEqual(c.artifacts.diagnosticsDir, '.manual/artifacts/diagnostics');
+  assert.strictEqual(c.artifacts.manifestsDir, '.manual/artifacts/manifests');
+  assert.strictEqual(c.annotation.activeTheme, 'default');
+  assert.strictEqual(c.annotation.themes.default.primary, '#E86349');
+  assert.strictEqual(c.annotation.themes.default.maxMarkersPerImage, 5);
   // 页面清单不在 config 里——它是 inspect 的产出，落在 project.yaml / pages/
   assert.strictEqual(c.pages, undefined, 'config 不应再有 pages 字段');
   assert.deepStrictEqual(c.inspect.exclude, []);

@@ -10,6 +10,7 @@
 const path = require('path');
 const profiles = require('./profiles');
 const providers = require('./providers');
+const { DEFAULT_ANNOTATION } = require('./annotation');
 
 /**
  * 配置结构版本。
@@ -237,9 +238,14 @@ function buildConfig(input) {
     artifacts: {
       stateDir,
       rawDir: `${docsDir}/images/raw`,
+      taskRawDir: `${stateDir}/artifacts/raw`,
+      sanitizedDir: `${stateDir}/artifacts/sanitized`,
+      diagnosticsDir: `${stateDir}/artifacts/diagnostics`,
+      manifestsDir: `${stateDir}/artifacts/manifests`,
       annotatedDir: `${docsDir}/images/annotated`,
       format: DEFAULTS.screenshotFormat,
     },
+    annotation: JSON.parse(JSON.stringify(DEFAULT_ANNOTATION)),
     // 页面清单不在 config 里——它是 `manual inspect` 的扫描产出，落在 project.yaml / pages/。
     // 这里只放扫描选项。
     inspect: { exclude: [] },

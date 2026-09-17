@@ -1,0 +1,3 @@
+'use strict';
+function markAffectedTasks(tasks,{pageIds=[],files=[]}={}){const pages=new Set(pageIds),changed=new Set(files.map(x=>String(x).replace(/\\/g,'/'))),staleIds=[];const updated=tasks.map(task=>{const taskPages=new Set([task.entryPage,...(task.steps||[]).map(s=>s.page)]);const taskFiles=new Set((task.evidence||[]).map(e=>String(e.file||'').replace(/\\/g,'/')));const affected=[...taskPages].some(p=>pages.has(p))||[...taskFiles].some(f=>changed.has(f));if(!affected||task.status==='candidate'||task.status==='stale')return task;staleIds.push(task.id);return {...task,status:'stale'}});return {tasks:updated,staleIds}}
+module.exports={markAffectedTasks};

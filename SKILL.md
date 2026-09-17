@@ -1,11 +1,11 @@
 ---
 name: manual
-description: 为 Web 项目生成并持续维护图文用户手册（Living User Manual）。当用户输入 /manual init、/manual inspect、/manual capture、/manual generate，或说「初始化用户手册」「给这个项目建手册」「扫描项目有哪些页面」「给某个页面截图」「写使用手册」「生成操作说明」「配置截图规格」时使用。init 收集截图规格与 Browser Provider；inspect 扫描前端路由建立页面模型；describe 写回页面语义；capture 用真实浏览器截图；generate 生成中文 Markdown 手册并做事实校验。与具体业务项目解耦，任何 Web 项目都能用，且不改动业务代码。
+description: Use when a Web project needs a living user manual, task-oriented操作指南, page discovery, real-browser screenshots, or maintained Markdown help content; also when the user invokes /manual commands or asks to 初始化、扫描、截图、生成或更新使用手册。
 ---
 
 # manual —— Living User Manual
 
-给任意 Web 项目建一份「活的」用户手册：真实浏览器打开页面 → 截图 → 生成 Markdown → 随代码变化持续更新。
+给任意 Web 项目建一份「活的」用户手册。页面模型提供位置与证据，用户任务模型组织最终指南；真实浏览器负责验证状态与截图，程序负责确定性校验和落盘。
 
 Skill 自身代码与项目数据分离：**Skill 只提供能力，项目状态一律落在业务项目的 `.manual/`。**
 
@@ -18,7 +18,12 @@ Skill 自身代码与项目数据分离：**Skill 只提供能力，项目状态
 | `manual describe` | ✅ V0.2 | 把页面的源码分析结果写回模型 |
 | `manual capture` | ✅ V0.3 | 用真实浏览器打开页面并截图 |
 | `manual generate` | ✅ V0.4 | 生成 Markdown 手册（含中文自然化） |
-| `manual update` / `verify` | ⏳ V0.6/0.7 | 增量更新 / 过期校验 |
+| `manual discover-tasks` | ✅ Task-first 基础 | 基于页面证据准备候选发现工作清单并写入候选任务 |
+| `manual approve-tasks` | ✅ Task-first 基础 | 由人工批准、调整或拒绝候选任务 |
+| `manual plan-capture` / `capture-task` | ✅ Task-first 采集 | 任务截图计划 / 安全交互采集 |
+| `manual generate-task` / `verify` | ✅ Task-first 发布 | 任务指南草稿、结构化事实校验与最终验证 |
+| `manual migrate-artifacts` | ✅ 兼容迁移 | 检查旧页面原图，显式复制到非发布产物目录且不删除源文件 |
+| `manual update` | ⏳ | 增量更新与过期处理 |
 
 未实现的命令被调用时 CLI 会明确提示，不会静默失败。
 
@@ -26,7 +31,31 @@ Skill 自身代码与项目数据分离：**Skill 只提供能力，项目状态
 
 ---
 
-## `/manual init` —— 初始化配置
+## 任务优先工作流
+
+当用户要的是“怎样完成某件事”，使用任务流程；不要把页面上的每个按钮机械地写成并列功能。页面式 `capture` / `generate` 在迁移期继续用于页面总览和静态证据。
+
+```text
+manual inspect
+→ manual describe
+→ manual discover-tasks <page-id|--all>
+→ AI 基于工作清单提出候选 JSON
+→ manual discover-tasks ... --input <候选.json>
+→ 把候选名称、目标、步骤、风险和证据摘要展示给用户
+→ 用户明确确认后 manual approve-tasks --input <决策.json>
+```
+
+候选任务必须保持 `candidate`；不得代替用户批准，也不得把“请生成手册”解释成对所有候选任务的批量批准。只有 `approved` 任务才能进入后续截图计划、任务采集和发布。
+
+任务批准后，先运行 `manual plan-capture <task-id> --json`，把计划里的动作、状态断言、截图点和风险边界展示给用户。确认计划符合预期后再运行 `manual capture-task <task-id>`。`read` / `local` 可执行，`write` 停在动作前，`destructive` 不执行；目标缺失、不可见、匹配多个或状态断言失败时立即停止，并保留诊断图。
+
+任务证据完成脱敏与标注后，运行 `manual generate-task <task-id> --json` 生成事实草稿。按中文写作规范编辑草稿，再用 `--finalize <文件>` 定稿；最后运行 `manual verify <task-id>`。正式任务文档只能引用 `images/annotated/`，任何 raw、sanitized、缺失图片或结构化事实变化都会阻止发布。
+
+执行候选发现或审批时，先读 [references/task-workflow.md](references/task-workflow.md)。
+
+---
+
+## `$manual-init` / `/manual-init` —— 初始化配置
 
 ### 1. 先问用户五项配置
 
@@ -57,7 +86,7 @@ node <skill>/bin/manual.js init \
 
 ---
 
-## `/manual inspect` —— 建立项目地图
+## `$manual-inspect` / `/manual-inspect` —— 建立项目地图
 
 回答一个问题：**这个 Web 产品有哪些用户可访问的页面？**
 
@@ -119,7 +148,7 @@ node <skill>/bin/manual.js describe --project-root <项目根> --input <分析�
 
 ---
 
-## `/manual capture <page>` —— 真实浏览器截图
+## `$manual-capture` / `/manual-capture` —— 真实浏览器截图
 
 ```
 node <skill>/bin/manual.js capture <page-id> --project-root <项目根> --json
@@ -163,7 +192,7 @@ DOM 连续静止 → 冻结 CSS 动画与过渡 → 静置回流。
 
 ---
 
-## `/manual generate <page>` —— 生成手册（含中文自然化）
+## `$manual-generate` / `/manual-generate` —— 生成手册（含中文自然化）
 
 三段式。**中文润色是 AI 的活，事实校验是程序的活**——AI 润色时最容易「顺手把事实改通顺」，
 靠提示词自觉挡不住，所以由程序逐项比对。
@@ -280,3 +309,4 @@ status:
 - inspect 不需要项目正在运行；capture 需要。
 - 动态路由记作 `/artifact/:id`。capture 必须给 `--params "id=123"`，不给就明确拒绝，不会去猜一个 id。
 - 设计约定与 Provider 接口契约见 `docs/ARCHITECTURE.md`。
+- 客户端调用必须使用各自原生别名：Codex 用 `$manual-<command>`，Claude Code 用 `/manual-<command>`。CLI 内部仍使用 `manual <command>`；运行 `npm run install:compat` 可生成全部别名。

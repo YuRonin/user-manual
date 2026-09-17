@@ -64,6 +64,16 @@ browser.verified: false ──capture──▶ true ──路由变更──▶ 
 
 `stale` 是 V0.6 增量更新的基础：入口文件变了就说明这页的描述可能过时，不用等 git diff 也能发现。
 
+页面可以有多个可复用的稳定状态。`states.default` 兼容旧式页面截图，其它状态必须提供可见断言；任务步骤通过 `stateBefore` / `stateAfter` 引用状态。`plan-capture` 在启动浏览器前解析这些引用，并把语义目标、断言和风险边界写入 `.manual/artifacts/manifests/`。
+
+## 用户任务模型
+
+任务事实位于 `.manual/tasks/<id>.yaml`，生命周期为 `candidate → approved → captured → generated → verified`。候选只能经 `approve-tasks` 的人工决策进入 `approved`；`capture-task` 只接受已批准任务。任务索引写入 `index/task-forward.json` 与 `index/task-reverse.json`，连接源码、页面、步骤和任务文档，同时页面正索引保留关联任务 ID。
+
+任务采集使用语义定位，优先级为 role+accessible name、label、可见文字、test id、人工 selector。匹配零个或多个可见元素都视为失败。每次交互后必须通过页面状态断言；失败时诊断图只进入 `.manual/artifacts/diagnostics/`。
+
+任务生成保护 `step.id` 与顺序、UI 原文、annotated 图片引用和完成验证边界。`generate-task` 先生成事实草稿与 facts sidecar，定稿校验通过后使用同目录临时文件原子替换；`verify` 再检查正式文档、图片存在性和事实指纹，之后任务才能进入 `verified`。页面入口变化或删除时，`inspect` 会把关联的非候选任务标为 `stale`。
+
 删除语义保守：代码里消失的路由默认只报告不删，加 `--prune` 才清理——那些文件里有 AI 或人写的分析成果，静默删掉代价太大。
 
 ## 源码依赖索引

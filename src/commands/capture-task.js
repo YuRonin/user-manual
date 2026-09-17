@@ -1,0 +1,71 @@
+'use strict';
+
+const path = require('path');
+const { parseArgs } = require('../cli/args');
+const { loadConfig } = require('../config/load');
+const { createProvider } = require('../browser');
+const pageStore = require('../inspect/store');
+const taskStore = require('../tasks/store');
+const { transitionTask } = require('../tasks/model');
+const { buildCapturePlan, writeCapturePlan } = require('../tasks/capture-plan');
+const { executeCapturePlan } = require('../tasks/executor');
+
+const KNOWN_FLAGS = new Set(['projectRoot', 'json', 'help']);
+const HELP = 'manual capture-task <task-id> [--project-root <路径>] [--json]';
+function fail(errors, json) {
+  const list = Array.isArray(errors) ? errors : [errors];
+  if (json) process.stdout.write(JSON.stringify({ ok: false, errors: list }, null, 2) + '\n');
+  else list.forEach((error) => process.stderr.write(`[manual capture-task] ${error}\n`));
+  return 1;
+}
+
+async function run(argv) {
+  const { values, positional, unknownFlags } = parseArgs(argv, { known: KNOWN_FLAGS });
+  const json = values.json === true;
+  if (values.help) { process.stdout.write(HELP + '\n'); return 0; }
+  if (unknownFlags.length) return fail(`未知参数: ${unknownFlags.join(', ')}`, json);
+  if (positional.length !== 1) return fail('需要一个 task-id。', json);
+  const projectRoot = path.resolve(values.projectRoot || process.cwd());
+  const loaded = loadConfig(projectRoot);
+  if (!loaded.ok) return fail(loaded.errors, json);
+  const { config } = loaded;
+  const stateDir = path.join(projectRoot, config.artifacts.stateDir);
+  const task = taskStore.readTask(stateDir, positional[0]);
+  if (!task) return fail(`找不到任务: ${positional[0]}`, json);
+  const pages = pageStore.readExistingPages(stateDir);
+  if (pages.errors.length) return fail(pages.errors, json);
+  const built = buildCapturePlan(task, pages.pages);
+  if (!built.ok) return fail(built.errors, json);
+  const planFile = writeCapturePlan(stateDir, built.plan);
+
+  const profileId = config.capture.activeProfile;
+  const providerId = config.browser.activeProvider;
+  const provider = createProvider({
+    id: providerId,
+    profile: config.capture.profiles[profileId],
+    providerConfig: config.browser.providers[providerId],
+  });
+  try {
+    const theme = config.annotation.themes[config.annotation.activeTheme];
+    const evidence = await executeCapturePlan(built.plan, provider, {
+      baseUrl: config.project.baseUrl,
+      stateDir,
+      projectRoot,
+      annotatedDir: config.artifacts.annotatedDir,
+      theme,
+      redactionRules: config.redaction || {},
+    });
+    const captured = transitionTask(task, 'captured');
+    taskStore.writeTask(stateDir, { ...captured, evidenceManifest: path.relative(projectRoot, evidence.manifestFile).replace(/\\/g, '/') });
+    const tasks = taskStore.readTasks(stateDir).tasks;
+    pageStore.writeIndexes(stateDir, pages.pages, { docsOutputDir: config.docs.outputDir, tasks });
+    const output = { ok: true, taskId: task.id, status: 'captured', planFile, evidence };
+    if (json) process.stdout.write(JSON.stringify(output, null, 2) + '\n');
+    else process.stdout.write(`[manual capture-task] ${task.title} 已完成安全采集。\n`);
+    return 0;
+  } catch (error) {
+    return fail([{ code: error.code || 'capture-task-failed', message: error.message, task: error.task, step: error.step, pageState: error.pageState, target: error.target, diagnostic: error.diagnostic, suggestion: error.suggestion }], json);
+  }
+}
+
+module.exports = { run, HELP, KNOWN_FLAGS };

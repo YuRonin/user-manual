@@ -1,5 +1,14 @@
 # Living User Manual
 
+## 客户端调用兼容
+
+主 skill 名为 `manual`，CLI 仍使用 `manual <command>`。运行 `npm run install:compat` 后，同时支持：
+
+- Codex：`$manual-init`、`$manual-inspect`、`$manual-capture`、`$manual-generate` 等。
+- Claude Code：`/manual-init`、`/manual-inspect`、`/manual-capture`、`/manual-generate` 等。
+
+兼容安装器为每个子命令生成薄别名，实际逻辑仍由同一份 `bin/manual.js` 执行。Codex 也可继续使用 `$manual` 后在参数中指定子命令。
+
 为任意 Web 项目生成并持续维护图文用户手册：真实浏览器打开页面 → 截图 → 生成 Markdown → 随代码变化持续更新。
 
 以 Claude Code Skill 形式交付，同时是一个可脱离 AI 独立运行的 Node CLI。
@@ -22,7 +31,9 @@
 npm install          # 唯一依赖 js-yaml
 ```
 
-作为 Skill 使用：把本目录复制或软链到 `~/.claude/skills/manual/`，之后在 Claude Code 里用 `/manual init`、`/manual inspect`。
+作为 Skill 使用：把本目录复制或软链到 Codex 的 `skills/manual/`，运行 `npm run install:compat`，之后在 Codex 使用 `$manual-init`、在 Claude Code 使用 `/manual-init`；其它子命令同样采用连字符形式。
+
+旧页面原图迁移到隐私隔离目录前，先执行 `manual migrate-artifacts` 查看清单；确认后再加 `--copy`。该命令不会删除旧文件，也不会覆盖已有目标。
 
 ## 用法
 

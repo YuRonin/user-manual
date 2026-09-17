@@ -97,10 +97,14 @@ function emptyBrowserState() {
  */
 function normalizePage(page) {
   if (!page || typeof page !== 'object') return page;
-  if (page.browser && typeof page.browser === 'object') return page;
-
   const legacyVerified = !!page.status?.browserVerified;
-  return { ...page, browser: { ...emptyBrowserState(), verified: legacyVerified } };
+  const browser = page.browser && typeof page.browser === 'object'
+    ? page.browser
+    : { ...emptyBrowserState(), verified: legacyVerified };
+  const states = page.states && typeof page.states === 'object'
+    ? page.states
+    : { default: { description: `${page.title || page.id || '页面'}初始状态`, assertions: [{ type: 'url', value: page.route }] } };
+  return { ...page, browser, states };
 }
 
 /** 页面是否已被真实浏览器验证过。读这一个地方，别再去看 status。 */
@@ -132,6 +136,9 @@ function createPage(scanned, id) {
     includeInManual: true,
     confidence: CONFIDENCE.NONE,
     browser: emptyBrowserState(),
+    states: {
+      default: { description: '页面初始状态', assertions: [{ type: 'url', value: scanned.route }] },
+    },
     status: {
       router: scanned.router,
       sourceAnalysis: ANALYSIS.PENDING,
@@ -178,6 +185,7 @@ function mergePage(existing, scanned) {
     includeInManual: existing.includeInManual !== false,
     confidence,
     browser,
+    states: normalizePage(existing).states,
     status: {
       router: scanned.router,
       sourceAnalysis,

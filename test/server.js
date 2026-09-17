@@ -38,6 +38,24 @@ ${body}
 }
 
 const PAGES = {
+  '/task-profile': html(`
+<h1>个人中心</h1>
+<button aria-label="编辑资料" onclick="document.getElementById('editor').hidden=false">编辑资料</button>
+<button aria-label="学校权益" onclick="document.getElementById('benefits').hidden=false">学校权益</button>
+<section id="editor" role="dialog" aria-label="编辑资料" hidden>
+  <label for="nickname">昵称</label><input id="nickname" value="星河老师">
+  <label for="phone">手机号</label><input id="phone" value="13812345678">
+  <label for="profile-school">学校</label><input id="profile-school" value="星海中学">
+  <p data-redact aria-label="会话标题">七年级数学备课讨论</p>
+  <button aria-label="保存修改">保存修改</button>
+</section>
+<section id="benefits" role="dialog" aria-label="学校权益" hidden>
+  <label for="school">学校</label><input id="school" aria-label="学校" value="星海中学">
+  <p>当前权益：教师版</p>
+  <label for="benefit-option">可用选项</label><select id="benefit-option"><option>教师版</option><option>学校专业版</option></select>
+  <p>不可切换原因：需要管理员授权</p>
+  <button aria-label="切换权益">切换权益</button>
+</section>`),
   '/': html('<h1>首页</h1><p>Home</p>'),
 
   // 典型页面：有异步内容、有慢图片、有无限动画——三样都是截图不稳定的来源
