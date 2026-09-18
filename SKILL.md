@@ -57,7 +57,7 @@ manual inspect
 
 ## `$manual-init` / `/manual-init` —— 初始化配置
 
-### 1. 先问用户五项配置
+### 1. 先问用户六项配置
 
 用一次 AskUserQuestion 把下面五项一起问完：
 
@@ -68,6 +68,7 @@ manual inspect
 | 项目访问 URL | 必填。**先问清开发服务器是否在跑、端口多少**，不要想当然填 3000 |
 | 文档语言 | `zh-CN`（默认）· `en-US` · 其它 BCP-47 标签 |
 | 文档输出目录 | `docs/manual`（默认），相对项目根 |
+| 发布范围 | `public` 面向外部（默认）· `internal` 仅内部 |
 
 选 `custom` 时补问视口（如 `1600x1000`）与 DPR（如 `2`）。
 
@@ -79,8 +80,10 @@ node <skill>/bin/manual.js init \
   --base-url http://localhost:5173 \
   --profile desktop-standard \
   --provider playwright-headless \
-  --lang zh-CN --docs-dir docs/manual --json
+  --lang zh-CN --docs-dir docs/manual --audience public --json
 ```
+
+受保护页面需要登录时，使用 `manual auth login` 建立可跨 worktree 复用的命名认证档案；不要临时编写登录脚本。
 
 自定义规格加 `--profile custom --viewport 1600x1000 --dpr 2`。已存在配置时 CLI 以退出码 1 拒绝覆盖；确认用户要重置后再加 `--force`（会先备份 `.bak`）。
 

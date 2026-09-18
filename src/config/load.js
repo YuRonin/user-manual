@@ -12,7 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
 
-const { CONFIG_VERSION, DEFAULTS } = require('./schema');
+const { CONFIG_VERSION, DEFAULTS, deriveCacheKey, AUDIENCES } = require('./schema');
 const { resolveAnnotationConfig } = require('./annotation');
 
 const CONFIG_RELATIVE = path.join(DEFAULTS.stateDir, 'config.yaml');
@@ -102,6 +102,27 @@ function loadConfig(projectRoot) {
       ...(raw.artifacts || {}),
     },
     inspect: { exclude: [], ...(raw.inspect || {}) },
+    privacy: {
+      audience: 'public',
+      redaction: 'balanced',
+      maskStyle: 'neutral-mosaic',
+      rules: { redact: [], preserve: [], ...(raw.privacy?.rules || {}) },
+      ...(raw.privacy || {}),
+    },
+    auth: {
+      enabled: true,
+      cacheKey: deriveCacheKey(raw.project.name, raw.project.baseUrl),
+      activeProfile: 'default',
+      loginUrl: '/login',
+      verifyPath: null,
+      ...(raw.auth || {}),
+    },
+  };
+
+  config.privacy.rules = {
+    redact: [],
+    preserve: [],
+    ...(raw.privacy?.rules || {}),
   };
 
   const annotation = resolveAnnotationConfig(raw.annotation);
@@ -110,6 +131,16 @@ function loadConfig(projectRoot) {
 
   if (!Array.isArray(config.inspect.exclude)) {
     return { ok: false, errors: ['inspect.exclude 需要是数组。'] };
+  }
+  if (!AUDIENCES.includes(config.privacy.audience)) {
+    return { ok: false, errors: ['privacy.audience 需要是 public 或 internal。'] };
+  }
+  if (!Array.isArray(config.privacy.rules.redact) || !Array.isArray(config.privacy.rules.preserve)) {
+    return { ok: false, errors: ['privacy.rules.redact/preserve 需要是数组。'] };
+  }
+  const safeName = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+  if (!safeName.test(String(config.auth.cacheKey)) || !safeName.test(String(config.auth.activeProfile))) {
+    return { ok: false, errors: ['auth.cacheKey 与 auth.activeProfile 只能使用安全名称字符。'] };
   }
 
   return { ok: true, config, configPath, warnings };

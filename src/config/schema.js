@@ -8,6 +8,7 @@
  */
 
 const path = require('path');
+const crypto = require('crypto');
 const profiles = require('./profiles');
 const providers = require('./providers');
 const { DEFAULT_ANNOTATION } = require('./annotation');
@@ -31,10 +32,26 @@ const DEFAULTS = {
 
 /** 常见文档语言，仅用于 CLI 提示，不构成白名单（其它 BCP-47 标签同样接受）。 */
 const COMMON_LANGUAGES = ['zh-CN', 'zh-TW', 'en-US', 'ja-JP'];
+const AUDIENCES = ['public', 'internal'];
 
 const LANGUAGE_RE = /^[A-Za-z]{2,8}(-[A-Za-z0-9]{2,8})*$/;
 // 项目名进文件名和 YAML 标量，限制成安全字符集
 const PROJECT_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+function deriveCacheKey(name, baseUrl) {
+  const origin = new URL(baseUrl).origin;
+  const suffix = crypto.createHash('sha256').update(origin).digest('hex').slice(0, 8);
+  return `${name}-${suffix}`.slice(0, 64);
+}
+
+function validateAudience(raw, errors) {
+  const value = String(raw == null || raw === '' ? 'public' : raw).trim();
+  if (!AUDIENCES.includes(value)) {
+    errors.push(`--audience 只支持 public/internal，收到: ${value}`);
+    return null;
+  }
+  return value;
+}
 
 // ---------------------------------------------------------------- 单项校验
 
@@ -208,6 +225,7 @@ function buildConfig(input) {
   const baseUrl = validateBaseUrl(input.baseUrl, errors);
   const name = validateProjectName(input.name, projectRoot, errors);
   const language = validateLanguage(input.language, errors);
+  const audience = validateAudience(input.audience, errors);
   const docsDir = validateDocsDir(input.docsDir, errors);
   const resolvedProfile = resolveProfile(
     { profileId: input.profileId, viewport: input.viewport, dpr: input.dpr },
@@ -246,6 +264,19 @@ function buildConfig(input) {
       format: DEFAULTS.screenshotFormat,
     },
     annotation: JSON.parse(JSON.stringify(DEFAULT_ANNOTATION)),
+    privacy: {
+      audience,
+      redaction: 'balanced',
+      maskStyle: 'neutral-mosaic',
+      rules: { redact: [], preserve: [] },
+    },
+    auth: {
+      enabled: true,
+      cacheKey: deriveCacheKey(name, baseUrl),
+      activeProfile: 'default',
+      loginUrl: '/login',
+      verifyPath: null,
+    },
     // 页面清单不在 config 里——它是 `manual inspect` 的扫描产出，落在 project.yaml / pages/。
     // 这里只放扫描选项。
     inspect: { exclude: [] },
@@ -264,6 +295,7 @@ function buildConfig(input) {
       providerType: resolvedProvider.provider.type,
       headless: resolvedProvider.provider.headless,
       language,
+      audience,
       docsDir,
     },
   };
@@ -273,7 +305,10 @@ module.exports = {
   CONFIG_VERSION,
   DEFAULTS,
   COMMON_LANGUAGES,
+  AUDIENCES,
   buildConfig,
+  deriveCacheKey,
+  validateAudience,
   // 导出供测试直接打点
   validateBaseUrl,
   validateDocsDir,

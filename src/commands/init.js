@@ -20,7 +20,7 @@ const { writeText, backupFile, displayPath } = require('../util/fsx');
 
 const KNOWN_FLAGS = new Set([
   'projectRoot', 'baseUrl', 'profile', 'viewport', 'dpr', 'provider',
-  'lang', 'docsDir', 'name', 'force', 'yes', 'json', 'help',
+  'lang', 'docsDir', 'name', 'audience', 'force', 'yes', 'json', 'help',
 ]);
 
 const HELP = `
@@ -41,6 +41,7 @@ manual init —— 初始化当前项目的用户手册配置
   --lang <语言标签>        文档语言，默认 ${schema.DEFAULTS.language}（常见: ${schema.COMMON_LANGUAGES.join(', ')}）
   --docs-dir <相对路径>    文档输出目录，默认 ${schema.DEFAULTS.docsDir}
   --name <项目名>          项目名，默认取项目根目录名
+  --audience <范围>        发布范围，public（默认）或 internal
   --project-root <路径>    项目根目录，默认当前工作目录
   --force                 已存在配置时覆盖（先备份为 config.yaml.bak）
   --yes                   非交互模式，未给出的项一律用默认值
@@ -88,6 +89,7 @@ function renderSummary(summary, files, projectRoot) {
     `(${summary.providerType}, ${summary.headless ? '无头' : '有头'})`
   );
   lines.push(`  文档语言         ${summary.language}`);
+  lines.push(`  发布范围         ${summary.audience}`);
   lines.push(`  文档输出目录     ${summary.docsDir}/`);
   lines.push('');
   lines.push('  写入文件:');
@@ -135,6 +137,7 @@ function run(argv) {
     viewport: values.viewport,
     dpr: values.dpr,
     providerId: values.provider,
+    audience: values.audience,
   });
 
   if (!built.ok) return fail(built.errors, { json });

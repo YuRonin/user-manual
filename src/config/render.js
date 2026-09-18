@@ -142,6 +142,28 @@ function renderConfigYaml(config, meta = {}) {
   }
   L.push('');
 
+  L.push('# ---------------------------------------------------------------- 隐私与发布范围');
+  L.push('privacy:');
+  L.push(`  audience: ${scalar(config.privacy.audience)}`);
+  L.push(`  redaction: ${scalar(config.privacy.redaction)}`);
+  L.push(`  maskStyle: ${scalar(config.privacy.maskStyle)}`);
+  L.push('  rules:');
+  L.push(`    redact: ${config.privacy.rules.redact.length ? '' : '[]'}`);
+  for (const item of config.privacy.rules.redact) L.push(`      - ${scalar(item)}`);
+  L.push(`    preserve: ${config.privacy.rules.preserve.length ? '' : '[]'}`);
+  for (const item of config.privacy.rules.preserve) L.push(`      - ${scalar(item)}`);
+  L.push('');
+
+  L.push('# ---------------------------------------------------------------- 登录状态复用');
+  L.push('# 这里只保存引用；cookie 和 localStorage 位于当前系统用户的缓存目录。');
+  L.push('auth:');
+  L.push(`  enabled: ${scalar(config.auth.enabled)}`);
+  L.push(`  cacheKey: ${scalar(config.auth.cacheKey)}`);
+  L.push(`  activeProfile: ${scalar(config.auth.activeProfile)}`);
+  L.push(`  loginUrl: ${scalar(config.auth.loginUrl)}`);
+  L.push(`  verifyPath: ${scalar(config.auth.verifyPath)}`);
+  L.push('');
+
   // ---- inspect
   L.push('# ---------------------------------------------------------------- 项目扫描');
   L.push('# `manual inspect` 的扫描选项。页面清单本身不在这里——它是扫描产出，');

@@ -89,6 +89,17 @@ test('默认参数生成 config.yaml 与 .gitignore', (root) => {
   assert.strictEqual(c.annotation.activeTheme, 'default');
   assert.strictEqual(c.annotation.themes.default.primary, '#E86349');
   assert.strictEqual(c.annotation.themes.default.maxMarkersPerImage, 5);
+  assert.deepStrictEqual(c.privacy, {
+    audience: 'public',
+    redaction: 'balanced',
+    maskStyle: 'neutral-mosaic',
+    rules: { redact: [], preserve: [] },
+  });
+  assert.strictEqual(c.auth.enabled, true);
+  assert.strictEqual(c.auth.activeProfile, 'default');
+  assert.match(c.auth.cacheKey, /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/);
+  assert.strictEqual(c.auth.loginUrl, '/login');
+  assert.strictEqual(c.auth.verifyPath, null);
   // 页面清单不在 config 里——它是 inspect 的产出，落在 project.yaml / pages/
   assert.strictEqual(c.pages, undefined, 'config 不应再有 pages 字段');
   assert.deepStrictEqual(c.inspect.exclude, []);
@@ -132,6 +143,27 @@ test('--provider playwright-headed 正确生效', (root) => {
   assert.strictEqual(c.browser.providers['playwright-headed'].type, 'playwright');
 });
 
+test('--audience internal 写入内部发布策略', (root) => {
+  const r = runInit(root, ['--base-url', 'https://app.example.com', '--audience', 'internal']);
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.strictEqual(readConfig(root).privacy.audience, 'internal');
+});
+
+test('旧配置缺少 auth/privacy 时由读取器补默认值', (root) => {
+  const r = runInit(root, ['--base-url', 'https://app.example.com']);
+  assert.strictEqual(r.status, 0, r.stderr);
+  const file = configPath(root);
+  const legacy = readConfig(root);
+  delete legacy.auth;
+  delete legacy.privacy;
+  fs.writeFileSync(file, yaml.dump(legacy), 'utf8');
+  const loaded = require('../src/config/load').loadConfig(root);
+  assert.strictEqual(loaded.ok, true, loaded.errors?.join('\n'));
+  assert.strictEqual(loaded.config.version, 1);
+  assert.strictEqual(loaded.config.privacy.audience, 'public');
+  assert.strictEqual(loaded.config.auth.activeProfile, 'default');
+});
+
 // ---------------------------------------------------------------- 4. 幂等与覆盖
 test('已存在配置时不覆盖，退出码 1', (root) => {
   runInit(root, ['--base-url', 'http://localhost:5173']);
@@ -165,6 +197,7 @@ const badCases = [
   ['缺少 baseUrl', [], /缺少 --base-url/],
   ['未知 profile', ['--base-url', 'http://a.co', '--profile', 'nope'], /未知的截图规格/],
   ['未知 provider', ['--base-url', 'http://a.co', '--provider', 'nope'], /未知的 Browser Provider/],
+  ['未知 audience', ['--base-url', 'http://a.co', '--audience', 'partner'], /--audience/],
   ['docsDir 逃逸', ['--base-url', 'http://a.co', '--docs-dir', '../escape'], /不能超出项目根目录/],
   ['docsDir 绝对路径', ['--base-url', 'http://a.co', '--docs-dir', 'C:\\abs'], /不能是绝对路径/],
   ['docsDir 是 node_modules', ['--base-url', 'http://a.co', '--docs-dir', 'node_modules/x'], /不能放在 node_modules/],
