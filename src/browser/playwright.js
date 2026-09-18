@@ -13,6 +13,8 @@ const path = require('path');
 
 const { BrowserProvider, DEFAULT_READY_OPTIONS } = require('./provider');
 const { CaptureError, REASON, classifyNavigationError } = require('./errors');
+const { clipRect } = require('../privacy/geometry');
+const { neutralMosaicStyle } = require('../privacy/renderer');
 
 /**
  * Playwright 不在全局。按候选路径解析，策略沿用 manual-shot/scripts/shot.js 里
@@ -410,29 +412,72 @@ class PlaywrightBrowserProvider extends BrowserProvider {
 
   async collectSensitiveElements() {
     if (!this.page) return [];
-    return this.page.evaluate(() => {
+    const candidates = await this.page.evaluate(() => {
       const out = [];
       const seen = new Set();
-      const add = (element, text, label) => {
-        const rect = element.getBoundingClientRect();
+      const add = (element, text, label, source, inputType, rectOverride) => {
+        const rect = rectOverride || element.getBoundingClientRect();
         if (!rect.width || !rect.height) return;
-        const key = `${Math.round(rect.x)}:${Math.round(rect.y)}:${Math.round(rect.width)}:${Math.round(rect.height)}`;
+        const key = `${source}:${Math.round(rect.x)}:${Math.round(rect.y)}:${Math.round(rect.width)}:${Math.round(rect.height)}`;
         if (seen.has(key)) return;
         seen.add(key);
-        out.push({ text: String(text || ''), label: String(label || ''), rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height } });
+        out.push({
+          text: String(text || ''), label: String(label || ''), source,
+          inputType: String(inputType || ''), pagePath: location.pathname,
+          selectorHint: element.id ? `#${element.id}` : '',
+          rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        });
       };
       for (const input of document.querySelectorAll('input,textarea,[data-redact]')) {
         const id = input.id;
         const label = input.getAttribute('aria-label') || (id ? document.querySelector(`label[for="${CSS.escape(id)}"]`)?.innerText : '') || input.getAttribute('name') || '';
-        add(input, input.value || input.textContent, label);
+        if (input.hasAttribute('data-redact')) {
+          add(input, input.value || input.textContent, label, 'explicit', input.type);
+          continue;
+        }
+        const outer = input.getBoundingClientRect();
+        const style = getComputedStyle(input);
+        const borderLeft = parseFloat(style.borderLeftWidth) || 0;
+        const borderTop = parseFloat(style.borderTopWidth) || 0;
+        const paddingLeft = parseFloat(style.paddingLeft) || 0;
+        const paddingRight = parseFloat(style.paddingRight) || 0;
+        const paddingTop = parseFloat(style.paddingTop) || 0;
+        const paddingBottom = parseFloat(style.paddingBottom) || 0;
+        const available = Math.max(0, outer.width - borderLeft - (parseFloat(style.borderRightWidth) || 0) - paddingLeft - paddingRight);
+        let measured = available;
+        if (input.tagName !== 'TEXTAREA') {
+          const canvas = document.createElement('canvas');
+          const context = canvas.getContext('2d');
+          if (context) {
+            context.font = style.font;
+            measured = Math.min(available, context.measureText(String(input.value || '')).width + 2);
+          }
+        }
+        const lineHeight = Number.parseFloat(style.lineHeight);
+        const contentHeight = input.tagName === 'TEXTAREA'
+          ? Math.max(0, outer.height - borderTop - (parseFloat(style.borderBottomWidth) || 0) - paddingTop - paddingBottom)
+          : Math.min(Number.isFinite(lineHeight) ? lineHeight : outer.height * 0.6, outer.height - paddingTop - paddingBottom);
+        const contentRect = {
+          x: outer.x + borderLeft + paddingLeft,
+          y: outer.y + Math.max(0, (outer.height - contentHeight) / 2),
+          width: measured,
+          height: contentHeight,
+        };
+        add(input, input.value || input.textContent, label, 'form-control', input.type, contentRect);
       }
       for (const element of document.querySelectorAll('body *')) {
         if (element.children.length > 0) continue;
         const text = (element.innerText || '').trim();
-        if (/1[3-9]\d{9}|[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(text)) add(element, text, element.getAttribute('aria-label') || '');
+        if (/1[3-9]\d{9}|[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(text)) {
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          add(element, text, element.getAttribute('aria-label') || '', 'text-pattern', '', range.getBoundingClientRect());
+        }
       }
       return out;
     });
+    const viewport = this.page.viewportSize() || this.profile.viewport;
+    return candidates.map((candidate) => ({ ...candidate, rect: clipRect(candidate.rect, viewport) })).filter((candidate) => candidate.rect);
   }
 
   async renderEvidence({ sanitizedPath, annotatedPath, redactions, annotations, theme }) {
@@ -440,12 +485,13 @@ class PlaywrightBrowserProvider extends BrowserProvider {
     fs.mkdirSync(path.dirname(sanitizedPath), { recursive: true });
     fs.mkdirSync(path.dirname(annotatedPath), { recursive: true });
     const overlayId = '__manual_evidence_overlay__';
+    const renderedRedactions = redactions.map((item) => ({ ...item, cssText: neutralMosaicStyle(item.rect) }));
     await this.page.evaluate(({ overlayId, redactions }) => {
       document.getElementById(overlayId)?.remove();
       const root = document.createElement('div'); root.id = overlayId; root.style.cssText = 'position:fixed;inset:0;z-index:2147483647;pointer-events:none';
-      for (const item of redactions) { const el=document.createElement('div'); const r=item.rect; el.style.cssText=`position:absolute;left:${r.x}px;top:${r.y}px;width:${r.width}px;height:${r.height}px;background:#252C38;border-radius:4px`; root.appendChild(el); }
+      for (const item of redactions) { const el=document.createElement('div'); el.style.cssText=item.cssText; root.appendChild(el); }
       document.documentElement.appendChild(root);
-    }, { overlayId, redactions });
+    }, { overlayId, redactions: renderedRedactions });
     await this.page.screenshot({ path: sanitizedPath, type: 'png' });
     await this.page.evaluate(({ overlayId, annotations, theme }) => {
       const root=document.getElementById(overlayId);

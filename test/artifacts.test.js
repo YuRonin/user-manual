@@ -90,5 +90,26 @@ test('标注布局限制数量并将标签放在目标外侧', () => {
   assert.ok(result.annotations.every((item) => item.marker.x < item.target.x));
 });
 
+test('隐私矩形会裁剪、去重并丢弃零面积区域', () => {
+  const { normalizeRects } = require('../src/privacy/geometry');
+  assert.deepStrictEqual(
+    normalizeRects([
+      { x: -5, y: 10, width: 20, height: 10 },
+      { x: -5, y: 10, width: 20, height: 10 },
+      { x: 20, y: 20, width: 0, height: 10 },
+    ], { width: 100, height: 100 }),
+    [{ x: 0, y: 10, width: 15, height: 10 }]
+  );
+});
+
+test('neutral mosaic 完全不透明且不采样底图', () => {
+  const { neutralMosaicStyle } = require('../src/privacy/renderer');
+  const style = neutralMosaicStyle({ x: 1, y: 2, width: 10, height: 12 });
+  assert.match(style, /background-color:#[0-9A-F]{6}/i);
+  assert.match(style, /repeating-conic-gradient/);
+  assert.doesNotMatch(style, /blur|backdrop-filter|rgba\([^)]*,\s*0\./i);
+  assert.match(style, /width:24px/);
+});
+
 process.stdout.write(`\n${passed} passed, ${failures.length} failed\n`);
 if (failures.length > 0) process.exitCode = 1;

@@ -201,6 +201,9 @@ async function completeTask(root, stateDir, taskId) {
     const profileRedactionKinds = profileEvidence.steps[1].screenshots[0].redactions.map((item) => item.kind);
     assert.ok(profileRedactionKinds.includes('phone'));
     assert.ok(profileRedactionKinds.includes('semantic'));
+    assert.ok(profileEvidence.steps[1].screenshots[0].redactions.every((item) => item.result === 'neutral-mosaic'));
+    const nicknameMask = profileEvidence.steps[1].screenshots[0].redactions.find((item) => item.kind === 'semantic');
+    assert.ok(nicknameMask.rect.width < 150, `昵称遮罩应只覆盖文字，实际宽度 ${nicknameMask.rect.width}`);
     const benefitsEvidence = await completeTask(root, stateDir, 'view-school-benefits');
     assert.strictEqual(benefitsEvidence.steps.length, 3);
     assert.strictEqual(benefitsEvidence.steps[2].status, 'not-executed');
