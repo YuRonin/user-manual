@@ -42,12 +42,40 @@ test('脱敏清单只保存类型和区域，不保存敏感原文', () => {
   assert.ok(!JSON.stringify(result).includes('user@example.com'));
 });
 
-test('姓名学校等不确定语义会阻止发布，redact/preserve 冲突也阻止', () => {
-  const { planRedactions } = require('../src/artifacts/redaction');
-  const uncertain = planRedactions([{ text: '星海中学', label: '学校', rect: { x: 0, y: 0, width: 50, height: 20 } }]);
-  assert.strictEqual(uncertain.ok, false);
-  assert.match(uncertain.errors.join('\n'), /人工确认/);
-  const conflict = planRedactions([], { redact: ['学校'], preserve: ['学校'] });
+test('公开模式遮盖模糊个人字段但跳过已脱敏内容', () => {
+  const { detectRedactions } = require('../src/privacy/detector');
+  const result = detectRedactions([
+    { text: '星海中学', label: '学校', rect: { x: 0, y: 0, width: 50, height: 20 }, source: 'form-control' },
+    { text: '134****1255', label: '联系电话', rect: { x: 0, y: 30, width: 80, height: 20 }, source: 'form-control' },
+    { text: 'secret-token', label: 'access_token', inputType: 'password', rect: { x: 0, y: 60, width: 80, height: 20 }, source: 'form-control' },
+  ], { audience: 'public', rules: { redact: [], preserve: [] } });
+  assert.strictEqual(result.ok, true);
+  assert.deepStrictEqual(result.redactions.map((item) => item.kind), ['semantic', 'credential']);
+  assert.ok(result.redactions.every((item) => item.result === 'neutral-mosaic'));
+  assert.ok(!JSON.stringify(result).includes('星海中学'));
+  assert.ok(!JSON.stringify(result).includes('secret-token'));
+});
+
+test('高风险规则、显式规则和账号标签按优先级处理', () => {
+  const { detectRedactions } = require('../src/privacy/detector');
+  const rect = { x: 1, y: 2, width: 30, height: 10 };
+  const result = detectRedactions([
+    { text: '13812345678', label: '手机号', rect, source: 'text-pattern' },
+    { text: 'user@example.com', label: '邮箱', rect, source: 'text-pattern' },
+    { text: 'u-123', label: '用户ID', rect, source: 'form-control' },
+    { text: '安全演示标题', label: '标题', rect, source: 'explicit' },
+  ], { audience: 'public', rules: { redact: [], preserve: ['手机号', '邮箱', '用户ID'] } });
+  assert.deepStrictEqual(result.redactions.map((item) => item.kind), ['phone', 'email', 'account', 'explicit']);
+});
+
+test('内部模式允许 preserve 普通语义字段，配置冲突仍阻止', () => {
+  const { detectRedactions } = require('../src/privacy/detector');
+  const preserved = detectRedactions([
+    { text: '星海中学', label: '学校', rect: { x: 0, y: 0, width: 50, height: 20 }, source: 'form-control' },
+  ], { audience: 'internal', rules: { redact: [], preserve: ['学校'] } });
+  assert.strictEqual(preserved.ok, true);
+  assert.deepStrictEqual(preserved.redactions, []);
+  const conflict = detectRedactions([], { audience: 'public', rules: { redact: ['学校'], preserve: ['学校'] } });
   assert.strictEqual(conflict.ok, false);
   assert.match(conflict.errors.join('\n'), /冲突/);
 });

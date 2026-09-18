@@ -58,7 +58,7 @@ async function run(argv) {
       projectRoot,
       annotatedDir: config.artifacts.annotatedDir,
       theme,
-      redactionRules: config.redaction || {},
+      redactionRules: config.privacy || {},
       authRuntime: {
         assertAuthenticated: (openResult) => assertAuthenticated(openResult, auth),
         refresh: (actualProvider) => refreshAuth(actualProvider, auth),
