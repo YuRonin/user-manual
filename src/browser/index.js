@@ -31,7 +31,7 @@ function availableTypes() {
  * @param {object} options.providerConfig 该 provider 的配置（含 type）
  * @param {object} options.profile        截图规格
  */
-function createProvider({ id, providerConfig, profile }) {
+function createProvider({ id, providerConfig, profile, storageState = null }) {
   const type = providerConfig && providerConfig.type;
 
   if (!type) {
@@ -50,7 +50,7 @@ function createProvider({ id, providerConfig, profile }) {
     );
   }
 
-  return new Adapter({ id, providerConfig, profile });
+  return new Adapter({ id, providerConfig, profile, storageState });
 }
 
 module.exports = { createProvider, availableTypes, ADAPTERS, BrowserProvider, DEFAULT_READY_OPTIONS };

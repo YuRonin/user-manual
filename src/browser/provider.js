@@ -35,13 +35,14 @@ class BrowserProvider {
    * @param {object} options.providerConfig 该 provider 在 config.yaml 里的配置
    * @param {string} options.id             provider 在配置里的 id，仅用于报错和元数据
    */
-  constructor({ profile, providerConfig, id }) {
+  constructor({ profile, providerConfig, id, storageState = null }) {
     if (!profile || !profile.viewport) {
       throw new CaptureError(REASON.PROVIDER_UNAVAILABLE, 'BrowserProvider 需要一个带 viewport 的截图规格。');
     }
     this.profile = profile;
     this.providerConfig = providerConfig || {};
     this.id = id || 'unknown';
+    this.storageState = storageState;
   }
 
   /** provider 类型，用于元数据。子类覆盖。 */
@@ -74,6 +75,10 @@ class BrowserProvider {
    * 无法内省页面的 provider 返回 null，上层会跳过相应检查。
    */
   async probe() {
+    return null;
+  }
+
+  async exportStorageState() {
     return null;
   }
 

@@ -207,6 +207,7 @@ class PlaywrightBrowserProvider extends BrowserProvider {
       colorScheme: this.profile.colorScheme || undefined,
       // 动画对截图是噪音：同一页面两次截图不该因为动画相位不同而不一样
       reducedMotion: 'reduce',
+      ...(this.storageState ? { storageState: this.storageState } : {}),
     });
 
     this.page = await this.context.newPage();
@@ -485,6 +486,11 @@ class PlaywrightBrowserProvider extends BrowserProvider {
         headless: this.headless,
       },
     };
+  }
+
+  async exportStorageState() {
+    if (!this.context) throw new Error('exportStorageState 之前必须先 launch()。');
+    return this.context.storageState();
   }
 
   async close() {
