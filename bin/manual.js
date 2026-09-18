@@ -11,6 +11,10 @@
 const pkg = require('../package.json');
 
 const COMMANDS = {
+  auth: {
+    summary: '登录并管理可跨 worktree 复用的浏览器认证档案',
+    load: () => require('../src/commands/auth'),
+  },
   init: {
     summary: '初始化当前项目的用户手册配置，生成 .manual/config.yaml',
     load: () => require('../src/commands/init'),

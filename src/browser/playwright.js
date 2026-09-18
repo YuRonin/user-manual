@@ -63,6 +63,7 @@ const FREEZE_CSS = `
   caret-color: transparent !important;
 }
 `;
+const LOGIN_PATH_RE = /\/(login|signin|sign-in|sign_in|auth|sso|account\/login)(\/|$|\?)/i;
 
 // ---------------------------------------------------------------- 浏览器侧脚本
 // 这些函数被序列化到页面里执行，必须自包含、且都带自己的超时上限——
@@ -491,6 +492,30 @@ class PlaywrightBrowserProvider extends BrowserProvider {
   async exportStorageState() {
     if (!this.context) throw new Error('exportStorageState 之前必须先 launch()。');
     return this.context.storageState();
+  }
+
+  async waitForAuthentication({ loginUrl, verifyUrl = null, timeout = 300000 }) {
+    if (!this.page) throw new Error('waitForAuthentication 之前必须先 open()。');
+    const expectedOrigin = new URL(verifyUrl || loginUrl).origin;
+    const authenticated = (url) => {
+      const parsed = new URL(String(url));
+      return parsed.origin === expectedOrigin && !LOGIN_PATH_RE.test(parsed.pathname);
+    };
+    if (!authenticated(this.page.url())) {
+      try {
+        await this.page.waitForURL((url) => authenticated(url), { timeout });
+      } catch (_) {
+        throw Object.assign(new Error('等待登录完成超时，请完成登录后重试。'), { code: 'auth-timeout' });
+      }
+    }
+    if (verifyUrl) {
+      await this.open(verifyUrl, { timeout: Math.min(timeout, 30000) });
+      if (!authenticated(this.page.url())) {
+        throw Object.assign(new Error('登录验证失败，验证页面仍然要求登录。'), { code: 'auth-verification-failed' });
+      }
+    }
+    await this.waitUntilReady({ timeout: Math.min(timeout, 30000) });
+    return { finalUrl: this.page.url() };
   }
 
   async close() {

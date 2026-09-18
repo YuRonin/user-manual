@@ -9,6 +9,7 @@ const FILES = [
   'init.test.js',
   'auth-cache.test.js',
   'auth-session.test.js',
+  'auth-command.test.js',
   'import-graph.test.js',
   'index-builder.test.js',
   'index-store.test.js',
