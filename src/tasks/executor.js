@@ -58,7 +58,8 @@ async function executeCapturePlan(plan, provider, options) {
   };
   let activeStep = null;
   try {
-    await provider.open(result.url);
+    const openResult = await provider.open(result.url);
+    if (options.authRuntime?.assertAuthenticated) options.authRuntime.assertAuthenticated(openResult);
     await provider.waitUntilReady();
     for (const step of plan.steps) {
       activeStep = step;
@@ -88,6 +89,10 @@ async function executeCapturePlan(plan, provider, options) {
     }
     const manifestFile = path.join(stateDir, 'artifacts', 'manifests', `${plan.taskId}--evidence.json`);
     writeText(manifestFile, JSON.stringify(result, null, 2) + '\n');
+    if (options.authRuntime?.refresh) {
+      const refreshed = await options.authRuntime.refresh(provider);
+      if (refreshed?.warning) result.warnings = [...(result.warnings || []), refreshed.warning];
+    }
     result.manifestFile = manifestFile;
     return result;
   } catch (cause) {

@@ -125,8 +125,14 @@ function startServer() {
     }
 
     if (pathname === '/protected') {
-      res.writeHead(302, { Location: '/login' });
-      res.end();
+      const authenticated = String(req.headers.cookie || '').includes('manual_sid=cookie-secret');
+      if (authenticated) {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(html('<h1>受保护页面</h1><p>Authenticated content</p>'));
+      } else {
+        res.writeHead(302, { Location: '/login' });
+        res.end();
+      }
       return;
     }
 

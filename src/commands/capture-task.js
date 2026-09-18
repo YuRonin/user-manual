@@ -9,6 +9,7 @@ const taskStore = require('../tasks/store');
 const { transitionTask } = require('../tasks/model');
 const { buildCapturePlan, writeCapturePlan } = require('../tasks/capture-plan');
 const { executeCapturePlan } = require('../tasks/executor');
+const { prepareAuth, assertAuthenticated, refreshAuth } = require('../auth/runtime');
 
 const KNOWN_FLAGS = new Set(['projectRoot', 'json', 'help']);
 const HELP = 'manual capture-task <task-id> [--project-root <路径>] [--json]';
@@ -40,10 +41,14 @@ async function run(argv) {
 
   const profileId = config.capture.activeProfile;
   const providerId = config.browser.activeProvider;
+  let auth;
+  try { auth = prepareAuth(config); }
+  catch (error) { return fail([{ code: error.reason || error.code, message: error.message, hint: error.hint }], json); }
   const provider = createProvider({
     id: providerId,
     profile: config.capture.profiles[profileId],
     providerConfig: config.browser.providers[providerId],
+    storageState: auth.storageState,
   });
   try {
     const theme = config.annotation.themes[config.annotation.activeTheme];
@@ -54,6 +59,10 @@ async function run(argv) {
       annotatedDir: config.artifacts.annotatedDir,
       theme,
       redactionRules: config.redaction || {},
+      authRuntime: {
+        assertAuthenticated: (openResult) => assertAuthenticated(openResult, auth),
+        refresh: (actualProvider) => refreshAuth(actualProvider, auth),
+      },
     });
     const captured = transitionTask(task, 'captured');
     taskStore.writeTask(stateDir, { ...captured, evidenceManifest: path.relative(projectRoot, evidence.manifestFile).replace(/\\/g, '/') });

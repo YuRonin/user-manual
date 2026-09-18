@@ -15,6 +15,7 @@ const yaml = require('js-yaml');
 
 const fx = require('./fixtures');
 const { startServer } = require('./server');
+const authCache = require('../src/auth/cache');
 
 const CLI = path.resolve(__dirname, '..', 'bin', 'manual.js');
 
@@ -37,10 +38,11 @@ async function test(name, fn) {
  * 测试服务器跑在本进程里，spawnSync 会阻塞事件循环 —— 服务器就没法响应
  * 被测浏览器的请求，整个测试直接死锁。这个坑踩过一次。
  */
-function run(cmd, root, args = []) {
+function run(cmd, root, args = [], env = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [CLI, cmd, ...args, '--project-root', root], {
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, ...env },
     });
 
     let stdout = '';
@@ -395,9 +397,51 @@ async function main() {
     try {
       const r = await run('capture', root, ['protected']);
       assert.strictEqual(r.status, 1);
-      assert.match(r.stderr, /login-required/);
+      assert.match(r.stderr, /auth-missing/);
       assert.match(r.stderr, /重定向到了登录页/);
+      assert.match(r.stderr, /manual auth login --profile default/);
       assert.ok(!fs.existsSync(path.join(root, 'docs', 'manual', 'images', 'raw', 'protected.png')));
+    } finally {
+      fx.cleanup(root);
+    }
+  });
+
+  await test('认证缓存中的 cookie 与 localStorage 可用于受保护页面并被刷新', async () => {
+    const root = await prepareProject(server.baseUrl);
+    const cacheRoot = path.join(root, '.auth-cache');
+    try {
+      const config = yaml.load(fs.readFileSync(path.join(root, '.manual', 'config.yaml'), 'utf8'));
+      const origin = new URL(server.baseUrl).origin;
+      const ref = { root: cacheRoot, cacheKey: config.auth.cacheKey, profile: 'default' };
+      const seeded = authCache.writeState(ref, {
+        origin,
+        storageState: {
+          cookies: [{ name: 'manual_sid', value: 'cookie-secret', domain: '127.0.0.1', path: '/', expires: -1, httpOnly: true, secure: false, sameSite: 'Lax' }],
+          origins: [{ origin, localStorage: [{ name: 'manual_token', value: 'local-secret' }] }],
+        },
+      }, { now: () => new Date('2026-01-01T00:00:00.000Z') });
+      const r = await run('capture', root, ['protected', '--json'], { MANUAL_AUTH_CACHE_DIR: cacheRoot });
+      assert.strictEqual(r.status, 0, r.stderr || r.stdout);
+      assert.ok(!r.stdout.includes('cookie-secret'));
+      assert.ok(!r.stdout.includes('local-secret'));
+      assert.ok(authCache.readState(ref).updatedAt > seeded.updatedAt);
+    } finally {
+      fx.cleanup(root);
+    }
+  });
+
+  await test('存在但无效的认证缓存分类为 auth-expired', async () => {
+    const root = await prepareProject(server.baseUrl);
+    const cacheRoot = path.join(root, '.auth-cache');
+    try {
+      const config = yaml.load(fs.readFileSync(path.join(root, '.manual', 'config.yaml'), 'utf8'));
+      authCache.writeState({ root: cacheRoot, cacheKey: config.auth.cacheKey, profile: 'default' }, {
+        origin: new URL(server.baseUrl).origin,
+        storageState: { cookies: [], origins: [] },
+      });
+      const r = await run('capture', root, ['protected'], { MANUAL_AUTH_CACHE_DIR: cacheRoot });
+      assert.strictEqual(r.status, 1);
+      assert.match(r.stderr, /auth-expired/);
     } finally {
       fx.cleanup(root);
     }

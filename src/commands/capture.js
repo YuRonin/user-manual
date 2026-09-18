@@ -21,6 +21,7 @@ const { CONFIDENCE, ANALYSIS, normalizePage } = require('../inspect/model');
 const store = require('../inspect/store');
 const { readIndexes, findForwardPage } = require('../inspect/index-store');
 const { displayPath } = require('../util/fsx');
+const { prepareAuth, classifyAuthFailure, refreshAuth } = require('../auth/runtime');
 
 const KNOWN_FLAGS = new Set([
   'projectRoot', 'params', 'url', 'waitFor', 'timeout', 'quietMs', 'settleMs',
@@ -322,9 +323,16 @@ async function run(argv) {
     waitFor: values.waitFor || null,
   };
 
+  let auth;
+  try {
+    auth = prepareAuth(config);
+  } catch (e) {
+    return fail(e, { json });
+  }
+
   let provider;
   try {
-    provider = createProvider({ id: providerId, providerConfig, profile });
+    provider = createProvider({ id: providerId, providerConfig, profile, storageState: auth.storageState });
   } catch (e) {
     return fail(e, { json });
   }
@@ -344,9 +352,12 @@ async function run(argv) {
       fullPage: values.fullPage === true,
       format: config.artifacts.format || 'png',
     });
+    const refreshed = await refreshAuth(provider, auth);
+    if (refreshed.warning) ready.warnings.push(refreshed.warning);
   } catch (e) {
     await provider.close();
-    return fail(e instanceof CaptureError ? e : new CaptureError(REASON.NAVIGATION_FAILED, String(e.message || e), { url }), { json });
+    const normalized = e instanceof CaptureError ? e : new CaptureError(REASON.NAVIGATION_FAILED, String(e.message || e), { url });
+    return fail(classifyAuthFailure(normalized, auth), { json });
   } finally {
     await provider.close();
   }

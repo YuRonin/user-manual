@@ -64,6 +64,25 @@ function plan() {
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 
+  await test('任务成功后在关闭浏览器前刷新认证状态', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'manual-executor-'));
+    try {
+      const provider = new FakeProvider();
+      let refreshed = false;
+      const { executeCapturePlan } = require('../src/tasks/executor');
+      await executeCapturePlan(plan(), provider, {
+        baseUrl: 'http://example.test',
+        stateDir: path.join(root, '.manual'),
+        projectRoot: root,
+        annotatedDir: 'docs/manual/images/annotated',
+        theme: { maxMarkersPerImage: 5, markerSize: 30, targetPadding: 5 },
+        authRuntime: { async refresh(actual) { assert.strictEqual(actual, provider); refreshed = true; } },
+      });
+      assert.strictEqual(refreshed, true);
+      assert.ok(provider.calls.findIndex((call) => call[0] === 'close') > provider.calls.findIndex((call) => call[0] === 'shot'));
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
   process.stdout.write(`\n${passed} passed, ${failures.length} failed\n`);
   if (failures.length > 0) process.exitCode = 1;
 })();
