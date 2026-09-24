@@ -97,11 +97,11 @@ async function completeTask(root, stateDir, taskId) {
         },
         editor: {
           description: '编辑资料面板打开',
-          assertions: [{ type: 'visible', target: { role: 'dialog', name: '编辑资料' } }],
+          assertions: [{ id: 'editor-visible', type: 'visible', target: { role: 'dialog', name: '编辑资料' } }],
         },
         benefits: {
           description: '学校权益面板打开',
-          assertions: [{ type: 'visible', target: { role: 'dialog', name: '学校权益' } }],
+          assertions: [{ id: 'benefits-visible', type: 'visible', target: { role: 'dialog', name: '学校权益' } }],
         },
       },
       status: { router: 'app', sourceAnalysis: 'completed' },
@@ -149,7 +149,14 @@ async function completeTask(root, stateDir, taskId) {
         action: { type: 'click', target: { role: 'button', name: '保存修改' } },
         risk: 'write',
       }],
-      completion: { description: '资料保存后个人中心显示更新内容', verification: 'expected' },
+      completion: {
+        description: '资料保存后个人中心显示更新内容',
+        verification: 'expected',
+        claims: [
+          { id: 'editor-opened', text: '编辑资料面板已打开。', assertionRefs: ['editor-visible'] },
+          { id: 'profile-saved', text: '资料保存后个人中心显示更新内容。', assertionRefs: ['profile-updated'] },
+        ],
+      },
       branches: [{ id: 'teaching-info-cooldown', condition: '教学信息处于冷却期', effect: '学校等教学信息不可修改' }],
       relatedTasks: ['view-school-benefits'],
     }, {
@@ -184,7 +191,11 @@ async function completeTask(root, stateDir, taskId) {
         action: { type: 'click', target: { role: 'button', name: '切换权益' } },
         risk: 'write',
       }],
-      completion: { description: '学校权益面板显示当前权益、可用选项和限制原因', verification: 'verified' },
+      completion: {
+        description: '学校权益面板显示当前权益、可用选项和限制原因',
+        verification: 'verified',
+        claims: [{ id: 'benefits-shown', text: '学校权益面板显示当前权益、可用选项和限制原因。', assertionRefs: ['benefits-visible'] }],
+      },
       branches: [{ id: 'switch-denied', condition: '当前账号没有管理员授权', effect: '只能查看，不能切换权益' }],
       relatedTasks: ['edit-profile'],
     }] };
@@ -214,7 +225,13 @@ async function completeTask(root, stateDir, taskId) {
     assert.ok(profileEvidence.steps[1].screenshots[0].redactions.every((item) => item.result === 'neutral-mosaic'));
     const nicknameMask = profileEvidence.steps[1].screenshots[0].redactions.find((item) => item.kind === 'semantic');
     assert.ok(nicknameMask.rect.width < 150, `昵称遮罩应只覆盖文字，实际宽度 ${nicknameMask.rect.width}`);
+    // 保存未执行：编辑器声明有证据，保存结果只能是预期
+    const profileDoc = fs.readFileSync(path.join(root, 'docs', 'manual', 'tasks', 'edit-profile.md'), 'utf8');
+    assert.match(profileDoc, /已验证界面结果：编辑资料面板已打开。/);
+    assert.match(profileDoc, /预期业务结果：资料保存后个人中心显示更新内容。/);
+    assert.match(profileDoc, /验证范围/);
     const benefitsEvidence = await completeTask(root, stateDir, 'view-school-benefits');
+    assert.match(fs.readFileSync(path.join(root, 'docs', 'manual', 'tasks', 'view-school-benefits.md'), 'utf8'), /已验证界面结果：学校权益面板/);
     assert.strictEqual(benefitsEvidence.steps.length, 3);
     assert.strictEqual(benefitsEvidence.steps[2].status, 'not-executed');
     assert.strictEqual(benefitsEvidence.steps[2].reason, 'stop-before-action');

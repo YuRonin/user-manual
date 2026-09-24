@@ -152,15 +152,15 @@ function isUrlOnly(assertions) {
  * @param {string} scope     page-identity / scenario-state
  * @param {string} idPrefix  断言没有显式 id 时用 `${idPrefix}#${index}`
  */
-async function runAssertions(provider, assertions, { scope, idPrefix, phase = null, timeoutMs } = {}) {
+async function runAssertions(provider, assertions, { scope, idPrefix, phase = null, stepId = null, timeoutMs } = {}) {
   const validations = [];
   for (const [index, assertion] of (assertions || []).entries()) {
     const assertionId = assertion.id || `${idPrefix}#${index}`;
     try {
       await assertWithin(provider, assertion, { timeoutMs });
-      validations.push(passed(scope, assertion.type, { assertionId, phase }));
+      validations.push(passed(scope, assertion.type, { assertionId, phase, stepId }));
     } catch (error) {
-      error.validation = { scope, check: assertion.type, assertionId, phase, outcome: 'failed', checkedAt: new Date().toISOString() };
+      error.validation = { scope, check: assertion.type, assertionId, phase, stepId, outcome: 'failed', checkedAt: new Date().toISOString() };
       throw error;
     }
   }

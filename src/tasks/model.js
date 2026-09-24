@@ -94,8 +94,28 @@ function validateTask(input) {
     errors.push('completion 是必填对象。');
   } else {
     if (!nonEmpty(input.completion.description)) errors.push('completion.description 需要是非空字符串。');
-    if (!COMPLETION_VERIFICATIONS.includes(input.completion.verification)) {
+    // verification 只是旧字段：保留校验以兼容，但验证等级由证据计算（src/evidence/claims.js），不由它决定。
+    if (input.completion.verification !== undefined && !COMPLETION_VERIFICATIONS.includes(input.completion.verification)) {
       errors.push('completion.verification 需要是 expected 或 verified。');
+    }
+    const claims = input.completion.claims;
+    if (claims !== undefined) {
+      if (!Array.isArray(claims)) errors.push('completion.claims 需要是数组。');
+      else {
+        const seen = new Set();
+        claims.forEach((claim, index) => {
+          const where = `completion.claims[${index}]`;
+          if (!claim || typeof claim !== 'object') { errors.push(`${where} 需要是对象。`); return; }
+          if (!nonEmpty(claim.id) || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(claim.id)) errors.push(`${where}.id 只能使用小写字母、数字和连字符。`);
+          else if (seen.has(claim.id)) errors.push(`${where}.id 重复: ${claim.id}`);
+          else seen.add(claim.id);
+          if (!nonEmpty(claim.text)) errors.push(`${where}.text 需要是非空字符串。`);
+          if (!Array.isArray(claim.assertionRefs) || claim.assertionRefs.length === 0 || claim.assertionRefs.some((ref) => !nonEmpty(ref))) {
+            errors.push(`${where}.assertionRefs 需要是非空的断言 id 数组。`);
+          }
+          if (claim.checkpoint !== undefined && !nonEmpty(claim.checkpoint)) errors.push(`${where}.checkpoint 需要是步骤 id。`);
+        });
+      }
     }
   }
 

@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { toMarkdownHref, toPosix } = require('../publication/paths');
 const { fileSha256 } = require('../util/hash');
+const { computeClaims, claimLabel } = require('../evidence/claims');
 
 function uiTexts(text) { return [...String(text || '').matchAll(/「([^」]+)」/g)].map((m) => m[1]); }
 
@@ -49,7 +50,13 @@ function buildTaskDraft(task, evidence, context = {}) {
     if (record?.status === 'not-executed') L.push('', '   > 此操作未执行，指南停在提交前。');
     L.push('');
   });
-  L.push('## 完成标志', '', task.completion.verification === 'verified' ? '已验证结果：' : '预期结果：', task.completion.description, '');
+  // 完成声明的等级由证据计算：只有对应断言在本次采集中 passed 才能写"已验证界面结果"。
+  const claims = computeClaims(task, evidence);
+  L.push('## 完成标志', '');
+  const firstSkipped = task.steps.findIndex((step) => byId.get(step.id)?.status === 'not-executed');
+  if (firstSkipped === 0) L.push('> 验证范围：本指南的步骤均未实际执行。', '');
+  else if (firstSkipped > 0) L.push(`> 验证范围：只实际执行到第 ${firstSkipped} 步，之后的步骤未执行。`, '');
+  for (const claim of claims) L.push(`<!-- claim:${claim.id} -->`, `${claimLabel(claim.status)}${claim.text}`, '');
   if ((task.branches || []).length) {
     L.push('## 条件分支', '');
     for (const b of task.branches) L.push(`- **${b.condition}**：${b.effect}`);
@@ -69,7 +76,7 @@ function buildTaskDraft(task, evidence, context = {}) {
       stepIds: task.steps.map((s) => s.id),
       images,
       uiTexts: task.steps.flatMap((s) => uiTexts(s.instruction)),
-      completionVerification: task.completion.verification,
+      claims: claims.map(({ id, text, status, assertionRefs, checkpoint, evidence: refs }) => ({ id, text, status, assertionRefs, checkpoint, evidence: refs })),
     },
   };
 }

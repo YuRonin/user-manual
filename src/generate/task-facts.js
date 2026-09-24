@@ -1,5 +1,8 @@
 'use strict';
 const { listMarkdownImages, normalizeImageFact } = require('../publication/paths');
+const { claimLabel } = require('../evidence/claims');
+
+const CLAIM_RE = /<!-- claim:([^ ]+) -->[ \t]*\r?\n[ \t]*(已验证界面结果：|预期业务结果：)?/g;
 
 function extract(markdown) {
   return {
@@ -7,9 +10,34 @@ function extract(markdown) {
     stepIds: [...markdown.matchAll(/<!-- step:([^ ]+) -->/g)].map((m) => m[1]),
     images: listMarkdownImages(markdown),
     uiTexts: [...markdown.matchAll(/「([^」]+)」/g)].map((m) => m[1]),
-    verified: /已验证结果：/.test(markdown),
-    expected: /预期结果：/.test(markdown),
+    claims: [...markdown.matchAll(CLAIM_RE)].map((m) => ({ id: m[1], label: m[2] || null })),
+    verifiedLabels: (markdown.match(/已验证界面结果：/g) || []).length,
+    legacyVerified: /已验证结果：/.test(markdown),
   };
+}
+
+/** 完成声明必须与 facts 一一对应，等级标签只能来自证据计算结果。 */
+function checkClaims(got, facts, errors) {
+  if (!Array.isArray(facts.claims)) {
+    errors.push('事实文件缺少完成声明（旧版格式），请重新运行 generate-task 生成草稿。');
+    return;
+  }
+  const known = new Map(facts.claims.map((claim) => [claim.id, claim]));
+  for (const block of got.claims) {
+    if (!known.has(block.id)) errors.push(`unsupported-claim: 文档包含事实文件中不存在的完成声明 ${block.id}。`);
+  }
+  if (JSON.stringify(got.claims.map((c) => c.id)) !== JSON.stringify(facts.claims.map((c) => c.id))) {
+    errors.push('完成声明（claim）缺失或顺序发生变化。');
+  }
+  for (const block of got.claims) {
+    const claim = known.get(block.id);
+    if (claim && block.label !== claimLabel(claim.status)) {
+      errors.push(`claim ${block.id} 的验证等级被改动：证据状态为 ${claim.status}，只能写「${claimLabel(claim.status)}」。`);
+    }
+  }
+  const verified = facts.claims.filter((claim) => claim.status === 'verified').length;
+  if (got.verifiedLabels !== verified) errors.push('unsupported-claim: 文档中"已验证界面结果"的数量与有证据的声明不一致。');
+  if (got.legacyVerified) errors.push('unsupported-claim: 不允许使用未绑定证据的"已验证结果"表述。');
 }
 
 /** 结构一致性检查。图片只比对文档 href；产物存在性与发布根由 publication/paths 校验。 */
@@ -26,8 +54,7 @@ function validateTaskFinal(markdown, facts) {
   }
   if (got.images.some((i) => i.kind === 'html')) errors.push('正式文档不允许原始 HTML 图片。');
   if (JSON.stringify(got.uiTexts) !== JSON.stringify(facts.uiTexts)) errors.push('已确认的 UI 原文发生变化。');
-  if (facts.completionVerification === 'expected' && got.verified) errors.push('未执行写操作时不能声称结果已验证。');
-  if (facts.completionVerification === 'verified' && !got.verified) errors.push('完成标志丢失 verified 语义。');
+  checkClaims(got, facts, errors);
   return errors.length ? { ok: false, errors } : { ok: true };
 }
 

@@ -91,11 +91,15 @@ async function executeCapturePlan(plan, provider, options) {
       if (!step.willExecute) {
         record.status = 'not-executed';
         record.reason = step.execution;
+        // 风险边界之后的步骤一律显式记录为未执行，不能被默认补成完成。
+        for (const rest of plan.steps.slice(plan.steps.indexOf(step) + 1)) {
+          result.steps.push({ id: rest.id, page: rest.page, status: 'not-executed', reason: 'skipped-by-boundary', action: rest.action, screenshots: [], validations: [] });
+        }
         break;
       }
       // 动作之前先确认处于 stateBefore；不满足时绝不执行动作。
       record.validations.push(...await runAssertions(provider, step.beforeState?.assertions || [], {
-        scope: 'scenario-state', phase: 'before', idPrefix: `${step.page}:${step.stateBefore}`, timeoutMs,
+        scope: 'scenario-state', phase: 'before', stepId: step.id, idPrefix: `${step.page}:${step.stateBefore}`, timeoutMs,
       }));
       let inspected = null;
       if (step.capture?.timing === 'before') {
@@ -106,7 +110,7 @@ async function executeCapturePlan(plan, provider, options) {
       await provider.waitUntilReady();
       const afterAssertions = step.expectedState?.assertions || [];
       record.validations.push(...await runAssertions(provider, afterAssertions, {
-        scope: 'scenario-state', phase: 'after', idPrefix: `${step.page}:${step.expectedState?.id || step.stateBefore}`, timeoutMs,
+        scope: 'scenario-state', phase: 'after', stepId: step.id, idPrefix: `${step.page}:${step.expectedState?.id || step.stateBefore}`, timeoutMs,
       }));
       // 只有非 URL 断言通过才算验证了状态；只有 URL 的旧状态记为 observed。
       record.status = afterAssertions.length > 0 && !isUrlOnly(afterAssertions) ? 'verified' : 'observed';
