@@ -4,71 +4,12 @@
 /*
  * Living User Manual CLI 入口。
  *
- * V0.1 只注册 init。generate / update / verify 在后续版本加到 COMMANDS 里，
+ * 命令清单来自 src/cli/commands.js（与 compat 别名共用）。
  * 每个子命令导出 run(argv) 并自己负责参数解析与退出码。
  */
 
 const pkg = require('../package.json');
-
-const COMMANDS = {
-  auth: {
-    summary: '登录并管理可跨 worktree 复用的浏览器认证档案',
-    load: () => require('../src/commands/auth'),
-  },
-  init: {
-    summary: '初始化当前项目的用户手册配置，生成 .manual/config.yaml',
-    load: () => require('../src/commands/init'),
-  },
-  inspect: {
-    summary: '扫描项目路由，建立页面模型，生成 .manual/project.yaml 与 pages/',
-    load: () => require('../src/commands/inspect'),
-  },
-  describe: {
-    summary: '把页面的源码分析结果（标题/用途/操作）写回页面模型',
-    load: () => require('../src/commands/describe'),
-  },
-  capture: {
-    summary: '用真实浏览器打开页面，按配置的规格截图',
-    load: () => require('../src/commands/capture'),
-  },
-  generate: {
-    summary: '生成页面的 Markdown 手册（事实草稿 → 中文自然化 → 事实校验）',
-    load: () => require('../src/commands/generate'),
-  },
-  'approve-tasks': {
-    summary: '人工确认、调整或拒绝候选用户任务',
-    load: () => require('../src/commands/approve-tasks'),
-  },
-  'discover-tasks': {
-    summary: '从页面证据提出候选用户任务，等待人工确认',
-    load: () => require('../src/commands/discover-tasks'),
-  },
-  'plan-capture': {
-    summary: '为已批准任务生成可审阅的安全截图计划',
-    load: () => require('../src/commands/plan-capture'),
-  },
-  'capture-task': {
-    summary: '按安全边界执行任务步骤并采集原始证据',
-    load: () => require('../src/commands/capture-task'),
-  },
-  'generate-task': {
-    summary: '生成并校验任务型指南',
-    load: () => require('../src/commands/generate-task'),
-  },
-  verify: {
-    summary: '验证任务文档、图片和结构化事实',
-    load: () => require('../src/commands/verify'),
-  },
-  'migrate-artifacts': {
-    summary: '检查旧页面原图并安全复制到非发布产物目录',
-    load: () => require('../src/commands/migrate-artifacts'),
-  },
-};
-
-// 已规划但尚未实现的子命令：命中时给出明确说明，而不是「未知命令」
-const PLANNED = {
-  update: '根据代码变化增量更新手册',
-};
+const { COMMANDS, PLANNED, findCommand, loadCommand } = require('../src/cli/commands');
 
 const HELP = `
 manual —— Living User Manual (v${pkg.version})
@@ -78,10 +19,10 @@ manual —— Living User Manual (v${pkg.version})
   manual <命令> [选项]
 
 命令:
-${Object.entries(COMMANDS).map(([name, c]) => `  ${name.padEnd(10)} ${c.summary}`).join('\n')}
+${COMMANDS.map((c) => `  ${c.name.padEnd(10)} ${c.summary}`).join('\n')}
 
 尚未实现（后续版本）:
-${Object.entries(PLANNED).map(([name, s]) => `  ${name.padEnd(10)} ${s}`).join('\n')}
+${PLANNED.map((c) => `  ${c.name.padEnd(10)} ${c.summary}`).join('\n')}
 
 全局选项:
   --help      显示帮助（manual <命令> --help 查看子命令用法）
@@ -105,12 +46,13 @@ function main(argv) {
     return 0;
   }
 
-  const entry = COMMANDS[command];
-  if (entry) return entry.load().run(rest);
+  const entry = findCommand(command);
+  if (entry) return loadCommand(entry).run(rest);
 
-  if (PLANNED[command]) {
+  const planned = PLANNED.find((c) => c.name === command);
+  if (planned) {
     process.stderr.write(
-      `[manual] \`${command}\` 尚未实现（计划中：${PLANNED[command]}）。当前版本只支持: ${Object.keys(COMMANDS).join(', ')}\n`
+      `[manual] \`${command}\` 尚未实现（计划中：${planned.summary}）。当前版本只支持: ${COMMANDS.map((c) => c.name).join(', ')}\n`
     );
     return 2;
   }

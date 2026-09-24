@@ -16,37 +16,66 @@ const { CaptureError, REASON, classifyNavigationError } = require('./errors');
 const { clipRect } = require('../privacy/geometry');
 const { neutralMosaicStyle } = require('../privacy/renderer');
 
-/**
- * Playwright 不在全局。按候选路径解析，策略沿用 manual-shot/scripts/shot.js 里
- * 验证过的那套（~/gstack 自带的副本最稳），避免为本 Skill 再装一份浏览器内核。
- */
-function loadPlaywright() {
-  const home = os.homedir();
+/** 过渡期的旧搜索路径（~/gstack、npx 缓存）；仅在 MANUAL_PLAYWRIGHT_LEGACY_SEARCH=1 时启用。 */
+function legacyPlaywrightCandidates(home = os.homedir()) {
   const candidates = [
     path.join(home, 'gstack', 'node_modules', 'playwright'),
     path.join(home, '.claude', 'skills', 'gstack', 'node_modules', 'playwright'),
-    path.join(process.cwd(), 'node_modules', 'playwright'),
   ];
-
   const npxRoot = path.join(home, 'npm-cache', '_npx');
   try {
     for (const dir of fs.readdirSync(npxRoot)) {
       candidates.push(path.join(npxRoot, dir, 'node_modules', 'playwright'));
     }
   } catch (_) { /* npx 缓存可能不存在 */ }
+  return candidates;
+}
 
-  for (const candidate of candidates) {
+/**
+ * 按固定顺序解析 Playwright，保证安装与 CI 可复现：
+ * 1. MANUAL_PLAYWRIGHT_PATH 显式覆盖；2. 工具自身 package.json 固定的依赖；
+ * 3. 仅在显式开启 legacy 开关时搜索个人目录。
+ * @returns {{ playwright: object, source: string, path: string }}
+ */
+function resolvePlaywright({ env = process.env, requireImpl = require, home = os.homedir() } = {}) {
+  const attempts = [];
+  const tryLoad = (source, request) => {
     try {
-      if (fs.existsSync(candidate)) return require(candidate);
-    } catch (_) { /* 换下一个 */ }
+      const resolved = requireImpl.resolve(request);
+      return { playwright: requireImpl(resolved), source, path: resolved };
+    } catch (error) {
+      attempts.push({ source, request, error: error.code || error.message });
+      return null;
+    }
+  };
+
+  if (env.MANUAL_PLAYWRIGHT_PATH) {
+    const hit = tryLoad('env', path.resolve(env.MANUAL_PLAYWRIGHT_PATH));
+    if (hit) return hit;
+    // 显式覆盖失败时不静默回退到别的副本，避免用错版本。
+    throw new CaptureError(REASON.PROVIDER_UNAVAILABLE, `MANUAL_PLAYWRIGHT_PATH 指向的 playwright 无法加载: ${env.MANUAL_PLAYWRIGHT_PATH}`, { attempts });
   }
-  try { return require('playwright'); } catch (_) { /* 落到下面报错 */ }
+
+  const own = tryLoad('dependency', 'playwright');
+  if (own) return own;
+
+  if (env.MANUAL_PLAYWRIGHT_LEGACY_SEARCH === '1') {
+    for (const candidate of legacyPlaywrightCandidates(home)) {
+      if (!fs.existsSync(candidate)) continue;
+      const hit = tryLoad('legacy', candidate);
+      if (hit) return hit;
+    }
+  }
 
   throw new CaptureError(
     REASON.PROVIDER_UNAVAILABLE,
-    '找不到 playwright 包。',
-    { searched: candidates }
+    '找不到 playwright 包。请在工具目录运行 `npm ci`，或用 MANUAL_PLAYWRIGHT_PATH 指定。',
+    { attempts }
   );
+}
+
+function loadPlaywright() {
+  return resolvePlaywright().playwright;
 }
 
 /**
@@ -578,4 +607,4 @@ class PlaywrightBrowserProvider extends BrowserProvider {
   }
 }
 
-module.exports = { PlaywrightBrowserProvider, loadPlaywright, FREEZE_CSS };
+module.exports = { PlaywrightBrowserProvider, loadPlaywright, resolvePlaywright, legacyPlaywrightCandidates, FREEZE_CSS };

@@ -8,10 +8,13 @@
     "manual": "bin/manual.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20.9.0"
   },
   "dependencies": {
-    "js-yaml": "^4.1.0"
+    "js-yaml": "^4.1.0",
+    "markdown-it": "15.0.2",
+    "playwright": "1.63.0",
+    "sharp": "0.35.4"
   },
   "scripts": {
     "install:compat": "node bin/install-compat.js",

@@ -7,6 +7,7 @@ const path = require('path');
 
 const FILES = [
   'init.test.js',
+  'doctor.test.js',
   'auth-cache.test.js',
   'auth-session.test.js',
   'auth-command.test.js',
