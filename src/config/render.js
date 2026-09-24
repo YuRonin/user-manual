@@ -118,9 +118,9 @@ function renderConfigYaml(config, meta = {}) {
 
   // ---- artifacts
   L.push('# ---------------------------------------------------------------- 截图产物');
-  L.push('# 原图与标注图都留存：原图可复用、可重新标注，标注图进手册。');
-  L.push('# 两者都在文档目录下，跟手册一起入库——手册要引用它们。');
-  L.push('# rawDir 是 `manual capture` 的输出目录。');
+  L.push('# 原图（raw/sanitized/diagnostics）只留在本机 .manual 下，不能被手册引用；');
+  L.push('# 只有 annotatedDir 中经过隐私检测与完整性记录的发布图可以进入手册。');
+  L.push('# rawDir 是 `manual capture` 的页面原图输出目录，不要放在文档目录下。');
   L.push('artifacts:');
   L.push(`  stateDir: ${scalar(config.artifacts.stateDir)}`);
   L.push(`  rawDir: ${scalar(config.artifacts.rawDir)}`);

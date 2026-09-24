@@ -22,11 +22,12 @@ function screenshotRelativeToDocs(docsOutputDir, screenshotPath) {
 /**
  * 拼出事实草稿。
  * @param {object} page    页面模型（pages/<id>.yaml 的内容）
- * @param {object} context { docsOutputDir, pageFilePath, includeScreenshot }
+ * @param {object} context { docsOutputDir, pageFilePath, includeScreenshot, image }
+ *   image: { artifactPath, markdownHref } —— 已通过发布门槛的页面发布图
  * @returns {{ markdown, facts }}  facts 是给用户看的事实来源说明
  */
 function buildDraft(page, context) {
-  const { docsOutputDir, pageFilePath, includeScreenshot = true, indexContext = null } = context;
+  const { docsOutputDir, pageFilePath, includeScreenshot = true, indexContext = null, image = null } = context;
   const browser = page.browser || {};
   const L = [];
 
@@ -59,10 +60,9 @@ function buildDraft(page, context) {
   L.push(`访问地址：\`${page.route}\``);
   L.push('');
 
-  // ---- 截图
-  if (includeScreenshot && browser.screenshot) {
-    const src = screenshotRelativeToDocs(docsOutputDir, browser.screenshot);
-    L.push(`![${page.title}](${src})`);
+  // ---- 截图：只引用经过发布门槛的产物（context.image），从不直接引用原图
+  if (includeScreenshot && image) {
+    L.push(`![${page.title}](${image.markdownHref || screenshotRelativeToDocs(docsOutputDir, image.artifactPath)})`);
     L.push('');
   }
 
@@ -82,7 +82,7 @@ function buildDraft(page, context) {
       route: page.route,
       purpose: page.purpose,
       actionCount: actions.length,
-      screenshot: browser.screenshot || null,
+      screenshot: includeScreenshot && image ? image.artifactPath : null,
       capturedAt: browser.lastCapture || null,
       capturedUrl: browser.url || null,
       viewport: browser.viewport || null,

@@ -4,6 +4,7 @@ const path = require('path');
 const { writeText } = require('../util/fsx');
 const { planRedactions } = require('../artifacts/redaction');
 const { layoutAnnotations } = require('../artifacts/annotation');
+const { buildPrivacyRecord } = require('../publication/validate');
 
 class TaskExecutionError extends Error {
   constructor(code, message, details = {}) {
@@ -42,6 +43,8 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, kind = 'ra
     output.sanitized = sanitizedPath;
     output.annotated = annotatedRelative;
     output.redactions = privacy.redactions;
+    // 实际执行过检测的记录；缺这条记录的截图在发布时按 privacy unknown 处理。
+    output.privacy = buildPrivacyRecord({ redactions: privacy.redactions, config: { privacy: options.redactionRules || {} } });
     output.annotations = layout.annotations;
   }
   return output;

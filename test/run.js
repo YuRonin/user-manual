@@ -22,6 +22,7 @@ const FILES = [
   'capture-task.test.js',
   'artifacts.test.js',
   'publication-paths.test.js',
+  'publication-gates.test.js',
   'generate-task.test.js',
   'staleness.test.js',
   'migrate-artifacts.test.js',

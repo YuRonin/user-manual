@@ -24,7 +24,12 @@ const { readIndexes, findForwardPage } = require('../inspect/index-store');
 const { buildDraft } = require('../generate/draft');
 const { extractFacts, compareFacts, formatViolations } = require('../generate/facts');
 const { writeText, displayPath } = require('../util/fsx');
-const { checkDocumentImages } = require('../publication/paths');
+const { toMarkdownHref } = require('../publication/paths');
+const { validateArtifact, validatePublication, formatIssues } = require('../publication/validate');
+
+function draftFactsPath(stateDirAbs, pageId) {
+  return path.join(stateDirAbs, 'drafts', `${pageId}.facts.json`);
+}
 
 const KNOWN_FLAGS = new Set([
   'projectRoot', 'finalize', 'noScreenshot', 'fallbackDraft', 'force', 'json', 'help',
@@ -134,36 +139,51 @@ function runDraft({ projectRoot, config, page, stateDirAbs, skillRoot, indexCont
   }
   if (errors.length > 0) return fail(errors, { json });
 
-  const screenshotAbs = page.browser?.screenshot
-    ? path.join(projectRoot, page.browser.screenshot)
-    : null;
+  const finalPath = path.join(projectRoot, config.docs.outputDir, `${page.id}.md`);
 
-  // 截图记录在模型里但文件被删了——这属于事实缺失，必须说出来而不是生成一个坏链接
-  if (screenshotAbs && !fs.existsSync(screenshotAbs)) {
-    return fail(
-      [
-        `页面模型记录的截图不存在: ${page.browser.screenshot}`,
-        `重新截一张: \`manual capture ${page.id}\``,
-      ],
-      { json }
-    );
+  // 手册只能引用经过发布门槛的页面发布图（page.browser.published）；原图不能直接进文档。
+  let image = null;
+  if (!noScreenshot) {
+    const published = page.browser?.published;
+    if (!published) {
+      return fail(
+        [
+          `unsafe-page-artifact: "${page.id}" 只有未经隐私处理的原始截图（${page.browser.screenshot}），不能进入手册。`,
+          '当前版本尚未为页面截图生成经隐私检测的发布图；需要文字版手册可以加 --no-screenshot。',
+        ],
+        { json }
+      );
+    }
+    const artifactFile = path.resolve(projectRoot, published.artifactPath);
+    // 截图记录在模型里但文件被删了——这属于事实缺失，必须说出来而不是生成一个坏链接
+    if (!fs.existsSync(artifactFile)) {
+      return fail([`页面模型记录的截图不存在: ${published.artifactPath}`, `重新截一张: \`manual capture ${page.id}\``], { json });
+    }
+    image = {
+      artifactPath: published.artifactPath,
+      markdownHref: toMarkdownHref({ manualFile: finalPath, artifactFile }),
+      sha256: published.sha256 || null,
+      privacy: published.privacy || null,
+    };
+    const issues = validateArtifact(image, { projectRoot, config });
+    if (issues.length > 0) return fail(formatIssues(issues), { json });
   }
 
-  // 两边都传「相对项目根」的路径：path.relative 对同基准的相对路径是纯字符串运算，
-  // 混用绝对与相对会被当前工作目录带偏。
   const { markdown, facts } = buildDraft(page, {
     docsOutputDir: config.docs.outputDir,
     pageFilePath: `.manual/pages/${page.id}.yaml`,
     includeScreenshot: !noScreenshot,
     indexContext,
+    image,
   });
 
   const draftPath = path.join(stateDirAbs, 'drafts', `${page.id}.md`);
   writeText(draftPath, markdown);
+  // 发布事实与草稿一起落盘：finalize 用它核对图片 hash 与隐私记录，而不是信任润色稿。
+  writeText(draftFactsPath(stateDirAbs, page.id), JSON.stringify({ pageId: page.id, images: image ? [image] : [] }, null, 2) + '\n');
 
   const draftFacts = extractFacts(markdown);
   const styleGuidePath = path.join(skillRoot, STYLE_GUIDE_RELATIVE);
-  const finalPath = path.join(projectRoot, config.docs.outputDir, `${page.id}.md`);
 
   if (json) {
     process.stdout.write(
@@ -199,7 +219,7 @@ function runDraft({ projectRoot, config, page, stateDirAbs, skillRoot, indexCont
     L.push('');
     L.push(`  页面        ${page.id}  ${page.title}`);
     L.push(`  草稿        ${displayPath(draftPath, projectRoot)}`);
-    L.push(`  截图        ${page.browser?.screenshot || '（无）'}`);
+    L.push(`  截图        ${image ? image.artifactPath : '（无）'}`);
     L.push(`  操作步骤    ${facts.actionCount} 条`);
     L.push('');
     L.push('  下一步：');
@@ -288,11 +308,14 @@ function runFinalize({ projectRoot, config, page, stateDirAbs, finalizeInput, fa
   const content = result.ok ? polished : draftMarkdown;
   const body = content.replace(/\s*$/, '') + '\n';
 
-  // 每个图片引用按正式文档位置解析，必须落在文档目录内的真实文件上（含 --fallback-draft）。
-  const refs = checkDocumentImages({
-    projectRoot, manualFile: finalPath, markdown: body, publishRoot: config.docs.outputDir,
-  });
-  if (!refs.ok) return fail(refs.errors.map((e) => `${e.code}: ${e.message}`), { json });
+  // 统一发布门槛（含 --fallback-draft）：图片引用、hash、产物位置与隐私记录都以草稿 facts 为准。
+  const factsFile = draftFactsPath(stateDirAbs, page.id);
+  if (!fs.existsSync(factsFile)) {
+    return fail([`缺少草稿事实文件: ${displayPath(factsFile, projectRoot)}`, `重新运行 \`manual generate ${page.id}\`。`], { json });
+  }
+  const draftImages = JSON.parse(fs.readFileSync(factsFile, 'utf8')).images || [];
+  const gate = validatePublication({ projectRoot, manualFile: finalPath, markdown: body, images: draftImages, config });
+  if (!gate.ok) return fail(formatIssues(gate.errors), { json });
   writeText(finalPath, body);
 
   if (json) {

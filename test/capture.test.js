@@ -96,7 +96,7 @@ async function main() {
       const r = await run('capture', root, ['chat']);
       assert.strictEqual(r.status, 0, r.stderr);
 
-      const out = path.join(root, 'docs', 'manual', 'images', 'raw', 'chat.png');
+      const out = path.join(root, '.manual', 'artifacts', 'raw', 'pages', 'chat.png');
       assert.ok(fs.existsSync(out), `截图未生成: ${out}`);
 
       // 1440x900 @2x → 2880x1800 像素
@@ -108,13 +108,13 @@ async function main() {
     }
   });
 
-  await test('输出路径就是 docs/manual/images/raw/<page-id>.png', async () => {
+  await test('输出路径是 .manual/artifacts/raw/pages/<page-id>.png（原图不进文档目录）', async () => {
     const root = await prepareProject(server.baseUrl);
     try {
       const r = await run('capture', root, ['chat', '--json']);
       assert.strictEqual(r.status, 0, r.stderr);
       const out = JSON.parse(r.stdout);
-      assert.strictEqual(out.screenshot, 'docs/manual/images/raw/chat.png');
+      assert.strictEqual(out.screenshot, '.manual/artifacts/raw/pages/chat.png');
     } finally {
       fx.cleanup(root);
     }
@@ -165,7 +165,7 @@ async function main() {
 
       const after = pageYaml(root, 'chat');
       assert.strictEqual(after.browser.verified, true);
-      assert.strictEqual(after.browser.screenshot, 'docs/manual/images/raw/chat.png');
+      assert.strictEqual(after.browser.screenshot, '.manual/artifacts/raw/pages/chat.png');
       assert.strictEqual(after.browser.url, `${server.baseUrl}/chat`);
       assert.strictEqual(after.browser.viewport, '1440x900');
       assert.strictEqual(after.browser.deviceScaleFactor, 2);
@@ -191,13 +191,13 @@ async function main() {
       assert.strictEqual(proj.summary.captured, 1);
       const chat = proj.pages.find((p) => p.id === 'chat');
       assert.strictEqual(chat.browserVerified, true);
-      assert.strictEqual(chat.screenshot, 'docs/manual/images/raw/chat.png');
+      assert.strictEqual(chat.screenshot, '.manual/artifacts/raw/pages/chat.png');
 
       const forward = JSON.parse(fs.readFileSync(
         path.join(root, '.manual', 'index', 'forward.json'),
         'utf8'
       ));
-      assert.strictEqual(forward['/chat'].screenshot, 'docs/manual/images/raw/chat.png');
+      assert.strictEqual(forward['/chat'].screenshot, '.manual/artifacts/raw/pages/chat.png');
     } finally {
       fx.cleanup(root);
     }
@@ -279,7 +279,7 @@ async function main() {
     const root = await prepareProject(server.baseUrl);
     try {
       await run('capture', root, ['chat']);
-      const out = path.join(root, 'docs', 'manual', 'images', 'raw', 'chat.png');
+      const out = path.join(root, '.manual', 'artifacts', 'raw', 'pages', 'chat.png');
       const first = fs.readFileSync(out);
       await run('capture', root, ['chat']);
       const second = fs.readFileSync(out);
@@ -296,7 +296,7 @@ async function main() {
       const r = await run('capture', root, ['chat', '--profile', 'desktop-wide']);
       assert.strictEqual(r.status, 0, r.stderr);
       // desktop-wide = 1920x1080 @1x
-      const size = readPngSize(path.join(root, 'docs', 'manual', 'images', 'raw', 'chat.png'));
+      const size = readPngSize(path.join(root, '.manual', 'artifacts', 'raw', 'pages', 'chat.png'));
       assert.deepStrictEqual(size, { width: 1920, height: 1080 });
     } finally {
       fx.cleanup(root);
@@ -309,7 +309,7 @@ async function main() {
       const r = await run('capture', root, ['chat']);
       assert.strictEqual(r.status, 0, r.stderr);
       // laptop = 1280x800 @2x → 2560x1600
-      const size = readPngSize(path.join(root, 'docs', 'manual', 'images', 'raw', 'chat.png'));
+      const size = readPngSize(path.join(root, '.manual', 'artifacts', 'raw', 'pages', 'chat.png'));
       assert.deepStrictEqual(size, { width: 2560, height: 1600 });
     } finally {
       fx.cleanup(root);
@@ -321,7 +321,7 @@ async function main() {
     try {
       await run('capture', root, ['public-with-password', '--full-page']);
       const size = readPngSize(
-        path.join(root, 'docs', 'manual', 'images', 'raw', 'public-with-password.png')
+        path.join(root, '.manual', 'artifacts', 'raw', 'pages', 'public-with-password.png')
       );
       assert.strictEqual(size.width, 2880);
       assert.ok(size.height > 1800, `整页高度应超过一屏，实际 ${size.height}`);
@@ -369,7 +369,7 @@ async function main() {
       assert.match(r.stderr, /server-unreachable/);
       assert.match(r.stderr, /没在跑|启动开发服务器/);
       assert.ok(
-        !fs.existsSync(path.join(root, 'docs', 'manual', 'images', 'raw', 'chat.png')),
+        !fs.existsSync(path.join(root, '.manual', 'artifacts', 'raw', 'pages', 'chat.png')),
         '失败时绝不能产出截图'
       );
       assert.strictEqual(pageYaml(root, 'chat').browser.verified, false, '失败不该标记为已验证');
@@ -386,7 +386,7 @@ async function main() {
       assert.match(r.stderr, /404/);
       assert.match(r.stderr, /http-not-found/);
       assert.match(r.stderr, /manual inspect/);
-      assert.ok(!fs.existsSync(path.join(root, 'docs', 'manual', 'images', 'raw', 'missing-route.png')));
+      assert.ok(!fs.existsSync(path.join(root, '.manual', 'artifacts', 'raw', 'pages', 'missing-route.png')));
     } finally {
       fx.cleanup(root);
     }
@@ -400,7 +400,7 @@ async function main() {
       assert.match(r.stderr, /auth-missing/);
       assert.match(r.stderr, /重定向到了登录页/);
       assert.match(r.stderr, /manual auth login --profile default/);
-      assert.ok(!fs.existsSync(path.join(root, 'docs', 'manual', 'images', 'raw', 'protected.png')));
+      assert.ok(!fs.existsSync(path.join(root, '.manual', 'artifacts', 'raw', 'pages', 'protected.png')));
     } finally {
       fx.cleanup(root);
     }
@@ -452,7 +452,7 @@ async function main() {
     try {
       const r = await run('capture', root, ['login']);
       assert.strictEqual(r.status, 0, r.stderr);
-      assert.ok(fs.existsSync(path.join(root, 'docs', 'manual', 'images', 'raw', 'login.png')));
+      assert.ok(fs.existsSync(path.join(root, '.manual', 'artifacts', 'raw', 'pages', 'login.png')));
     } finally {
       fx.cleanup(root);
     }
@@ -464,7 +464,7 @@ async function main() {
       const r = await run('capture', root, ['public-with-password']);
       assert.strictEqual(r.status, 0, r.stderr);
       assert.ok(
-        fs.existsSync(path.join(root, 'docs', 'manual', 'images', 'raw', 'public-with-password.png'))
+        fs.existsSync(path.join(root, '.manual', 'artifacts', 'raw', 'pages', 'public-with-password.png'))
       );
     } finally {
       fx.cleanup(root);
@@ -477,7 +477,7 @@ async function main() {
       const r = await run('capture', root, ['error500']);
       assert.strictEqual(r.status, 1);
       assert.match(r.stderr, /HTTP 500/);
-      assert.ok(!fs.existsSync(path.join(root, 'docs', 'manual', 'images', 'raw', 'error500.png')));
+      assert.ok(!fs.existsSync(path.join(root, '.manual', 'artifacts', 'raw', 'pages', 'error500.png')));
     } finally {
       fx.cleanup(root);
     }
@@ -489,7 +489,7 @@ async function main() {
       const r = await run('capture', root, ['blank']);
       assert.strictEqual(r.status, 1);
       assert.match(r.stderr, /blank-page/);
-      assert.ok(!fs.existsSync(path.join(root, 'docs', 'manual', 'images', 'raw', 'blank.png')));
+      assert.ok(!fs.existsSync(path.join(root, '.manual', 'artifacts', 'raw', 'pages', 'blank.png')));
     } finally {
       fx.cleanup(root);
     }
@@ -501,7 +501,7 @@ async function main() {
       const r = await run('capture', root, ['chat', '--url', `${server.baseUrl}/hang`, '--timeout', '2000']);
       assert.strictEqual(r.status, 1);
       assert.match(r.stderr, /timeout|超时/);
-      assert.ok(!fs.existsSync(path.join(root, 'docs', 'manual', 'images', 'raw', 'chat.png')));
+      assert.ok(!fs.existsSync(path.join(root, '.manual', 'artifacts', 'raw', 'pages', 'chat.png')));
     } finally {
       fx.cleanup(root);
     }

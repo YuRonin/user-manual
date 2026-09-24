@@ -41,8 +41,26 @@ try {
   assert.strictEqual(result.status, 0, result.stderr);
   output = JSON.parse(result.stdout);
   assert.deepStrictEqual(output.skipped, ['.manual/artifacts/raw/legacy/profile.png']);
+  assert.strictEqual(output.complete, false, '复制原图不等于迁移完成');
+  assert.ok(output.pending.some((item) => item.code === 'recapture-required'));
 
-  process.stdout.write('\nartifact migration\n  ✓ 默认只报告，显式复制且不删除旧文件\n  ✓ 已存在目标不会被静默覆盖\n\n2 passed, 0 failed\n');
+  // 旧配置（rawDir 在文档目录内）与仍引用原图的文档都进入 pending，且只报告不修改。
+  const configFile = path.join(root, '.manual', 'config.yaml');
+  const legacyConfig = fs.readFileSync(configFile, 'utf8').replace(/rawDir: .*/, 'rawDir: docs/manual/images/raw');
+  fs.writeFileSync(configFile, legacyConfig);
+  const doc = path.join(root, 'docs', 'manual', 'profile.md');
+  const docText = '# 个人中心\n\n![个人中心](images/raw/profile.png)\n';
+  fs.writeFileSync(doc, docText);
+  result = run(['migrate-artifacts', '--project-root', root, '--json']);
+  assert.strictEqual(result.status, 0, result.stderr);
+  output = JSON.parse(result.stdout);
+  const codes = output.pending.map((item) => item.code);
+  assert.ok(codes.includes('legacy-raw-config'), JSON.stringify(output.pending));
+  assert.ok(codes.includes('legacy-raw-reference'), JSON.stringify(output.pending));
+  assert.strictEqual(fs.readFileSync(configFile, 'utf8'), legacyConfig);
+  assert.strictEqual(fs.readFileSync(doc, 'utf8'), docText);
+
+  process.stdout.write('\nartifact migration\n  ✓ 默认只报告，显式复制且不删除旧文件\n  ✓ 已存在目标不会被静默覆盖\n  ✓ 报告旧配置、原图引用与重新采集等待处理项，不声称迁移完成\n\n3 passed, 0 failed\n');
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
 }

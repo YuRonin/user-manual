@@ -95,7 +95,7 @@ async function main() {
   await test('生成事实草稿到 .manual/drafts/<id>.md', async () => {
     const root = await prepareProject(server.baseUrl);
     try {
-      const r = await run('generate', root, ['chat']);
+      const r = await run('generate', root, ['chat', '--no-screenshot']);
       assert.strictEqual(r.status, 0, r.stderr);
       assert.ok(fs.existsSync(draftPath(root, 'chat')), '草稿未生成');
 
@@ -110,13 +110,71 @@ async function main() {
     }
   });
 
-  await test('草稿里的图片路径相对最终文档位置', async () => {
+  await test('页面只有原始截图：不生成带图草稿，提示原图不能进入手册', async () => {
     const root = await prepareProject(server.baseUrl);
     try {
-      await run('generate', root, ['chat']);
+      const r = await run('generate', root, ['chat', '--json']);
+      assert.strictEqual(r.status, 1, r.stdout);
+      const out = JSON.parse(r.stdout);
+      assert.match(out.errors.join('\n'), /unsafe-page-artifact/);
+      assert.match(out.errors.join('\n'), /--no-screenshot/);
+      assert.ok(!fs.existsSync(draftPath(root, 'chat')), '被阻止时不应写出草稿');
+      // 原图留在 .manual 下，文档目录里没有任何原图
+      assert.ok(fs.existsSync(path.join(root, '.manual', 'artifacts', 'raw', 'pages', 'chat.png')));
+      assert.ok(!fs.existsSync(path.join(root, 'docs', 'manual', 'images', 'raw')));
+    } finally {
+      fx.cleanup(root);
+    }
+  });
+
+  await test('事实比对：改截图路径与删掉截图都判为截图引用改动', async () => {
+    const { extractFacts, compareFacts } = require('../src/generate/facts');
+    const draft = '# 工作台\n\n![工作台](images/annotated/chat.png)\n';
+    for (const final of [draft.replace('images/annotated/chat.png', 'images/chat.png'), '# 工作台\n']) {
+      const result = compareFacts(extractFacts(draft), extractFacts(final));
+      assert.strictEqual(result.ok, false);
+      assert.ok(result.violations.some((v) => v.kind === 'image'));
+    }
+  });
+
+  await test('文字版定稿里插入原图：被拦截，--fallback-draft 也不能引入', async () => {
+    const root = await prepareProject(server.baseUrl);
+    try {
+      await run('generate', root, ['chat', '--no-screenshot']);
+      const withRaw = readDraft(root, 'chat') + '\n![工作台](../../.manual/artifacts/raw/pages/chat.png)\n';
+      let r = await run('generate', root, ['chat', '--finalize', writePolished(root, 'chat', withRaw)]);
+      assert.strictEqual(r.status, 1);
+      assert.match(r.stderr, /截图引用被改动/);
+      assert.ok(!fs.existsSync(finalPath(root, 'chat')));
+
+      r = await run('generate', root, ['chat', '--finalize', writePolished(root, 'chat', withRaw), '--fallback-draft']);
+      assert.strictEqual(r.status, 0, r.stderr);
+      assert.ok(!/!\[/.test(fs.readFileSync(finalPath(root, 'chat'), 'utf8')), 'fallback 只能回退到草稿原文');
+    } finally {
+      fx.cleanup(root);
+    }
+  });
+
+  await test('草稿事实文件缺失或被篡改为原图：定稿被发布门槛阻止', async () => {
+    const root = await prepareProject(server.baseUrl);
+    try {
+      await run('generate', root, ['chat', '--no-screenshot']);
+      const factsFile = path.join(root, '.manual', 'drafts', 'chat.facts.json');
       const draft = readDraft(root, 'chat');
-      // 正式文档在 docs/manual/chat.md，截图在 docs/manual/images/raw/chat.png
-      assert.match(draft, /!\[工作台\]\(images\/raw\/chat\.png\)/, `图片路径不对:\n${draft}`);
+      fs.rmSync(factsFile);
+      let r = await run('generate', root, ['chat', '--finalize', writePolished(root, 'chat', draft)]);
+      assert.strictEqual(r.status, 1);
+      assert.match(r.stderr, /缺少草稿事实文件/);
+
+      // 手工把草稿和 facts 都改成引用原图：统一门槛仍按产物位置阻止
+      const rawHref = '../../.manual/artifacts/raw/pages/chat.png';
+      const tampered = draft.replace('访问地址', `![工作台](${rawHref})\n\n访问地址`);
+      fs.writeFileSync(draftPath(root, 'chat'), tampered);
+      fs.writeFileSync(factsFile, JSON.stringify({ pageId: 'chat', images: [{ artifactPath: '.manual/artifacts/raw/pages/chat.png', markdownHref: rawHref }] }));
+      r = await run('generate', root, ['chat', '--finalize', writePolished(root, 'chat', tampered), '--json']);
+      assert.strictEqual(r.status, 1);
+      assert.match(r.stdout, /forbidden-artifact|invalid-artifact-path/);
+      assert.ok(!fs.existsSync(finalPath(root, 'chat')));
     } finally {
       fx.cleanup(root);
     }
@@ -125,7 +183,7 @@ async function main() {
   await test('--json 给出受保护事实清单', async () => {
     const root = await prepareProject(server.baseUrl);
     try {
-      const r = await run('generate', root, ['chat', '--json']);
+      const r = await run('generate', root, ['chat', '--no-screenshot', '--json']);
       assert.strictEqual(r.status, 0, r.stderr);
       const out = JSON.parse(r.stdout);
 
@@ -133,7 +191,8 @@ async function main() {
       assert.strictEqual(out.facts.title, '工作台');
       assert.strictEqual(out.facts.route, '/chat');
       assert.strictEqual(out.facts.actionCount, 3);
-      assert.deepStrictEqual(out.protected.images, ['images/raw/chat.png']);
+      assert.deepStrictEqual(out.protected.images, []);
+      assert.strictEqual(out.facts.screenshot, null);
       assert.ok(out.protected.uiTerms.includes('发送'));
       assert.ok(out.protected.uiTerms.includes('新对话'));
       assert.ok(out.protected.codeSpans.includes('/chat'));
@@ -147,7 +206,7 @@ async function main() {
   await test('generate 将 forward index 源码上下文加入草稿与 JSON 输出', async () => {
     const root = await prepareProject(server.baseUrl);
     try {
-      const r = await run('generate', root, ['chat', '--json']);
+      const r = await run('generate', root, ['chat', '--no-screenshot', '--json']);
       assert.strictEqual(r.status, 0, r.stderr);
       const out = JSON.parse(r.stdout);
 
@@ -167,14 +226,14 @@ async function main() {
     const root = await prepareProject(server.baseUrl);
     try {
       fs.rmSync(path.join(root, '.manual', 'index'), { recursive: true });
-      let r = await run('generate', root, ['chat', '--json']);
+      let r = await run('generate', root, ['chat', '--no-screenshot', '--json']);
       assert.strictEqual(r.status, 0, r.stderr);
       assert.strictEqual(JSON.parse(r.stdout).indexContext, null);
 
       fs.mkdirSync(path.join(root, '.manual', 'index'), { recursive: true });
       fs.writeFileSync(path.join(root, '.manual', 'index', 'forward.json'), '{broken', 'utf8');
       fs.writeFileSync(path.join(root, '.manual', 'index', 'reverse.json'), '{}', 'utf8');
-      r = await run('generate', root, ['chat', '--json']);
+      r = await run('generate', root, ['chat', '--no-screenshot', '--json']);
       assert.strictEqual(r.status, 0, r.stderr);
       assert.strictEqual(JSON.parse(r.stdout).indexContext, null);
     } finally {
@@ -186,7 +245,7 @@ async function main() {
   await test('合规的中文润色可以通过并输出正式文档', async () => {
     const root = await prepareProject(server.baseUrl);
     try {
-      await run('generate', root, ['chat']);
+      await run('generate', root, ['chat', '--no-screenshot']);
 
       // 只改句式与语序：去掉「用户可以」「能够」「并且」，事实一个没动
       const polished = [
@@ -195,8 +254,6 @@ async function main() {
         '在这个页面与 AI 助手对话，也可以管理历史会话。',
         '',
         '访问地址：`/chat`',
-        '',
-        '![工作台](images/raw/chat.png)',
         '',
         '## 主要操作',
         '',
@@ -238,14 +295,9 @@ async function main() {
       expect: /UI 名称在定稿里消失/,
     },
     {
-      // 注意替换目标要带上 ]( ，否则 String.replace 只会命中草稿头部注释里的那一处
-      name: '改了截图路径',
-      mutate: (d) => d.replace('](images/raw/chat.png)', '](images/chat.png)'),
-      expect: /截图引用被改动/,
-    },
-    {
-      name: '删掉了截图',
-      mutate: (d) => d.replace(/!\[[^\]]*\]\([^)]*\)\n/, ''),
+      // 页面发布图管线就绪前草稿是文字版；删图/改路径由上方 compareFacts 用例覆盖
+      name: '凭空加入截图',
+      mutate: (d) => d.replace('## 主要操作', '![工作台](images/annotated/chat.png)\n\n## 主要操作'),
       expect: /截图引用被改动/,
     },
     {
@@ -284,7 +336,7 @@ async function main() {
     await test(`拦截：${c.name}`, async () => {
       const root = await prepareProject(server.baseUrl);
       try {
-        await run('generate', root, ['chat']);
+        await run('generate', root, ['chat', '--no-screenshot']);
         const mutated = c.mutate(readDraft(root, 'chat'));
 
         const r = await run('generate', root, ['chat', '--finalize', writePolished(root, 'chat', mutated)]);
@@ -304,7 +356,7 @@ async function main() {
   await test('纯粹的中文润色（不碰事实）全部放行', async () => {
     const root = await prepareProject(server.baseUrl);
     try {
-      await run('generate', root, ['chat']);
+      await run('generate', root, ['chat', '--no-screenshot']);
       const draft = readDraft(root, 'chat');
       // 把用途段改得彻底不同，但事实（标题/路由/图片/步骤/UI 原文）一个没动
       const polished = draft.replace(
@@ -322,7 +374,7 @@ async function main() {
   await test('--fallback-draft：校验不过时用草稿原文定稿，事实优先', async () => {
     const root = await prepareProject(server.baseUrl);
     try {
-      await run('generate', root, ['chat']);
+      await run('generate', root, ['chat', '--no-screenshot']);
       const mutated = readDraft(root, 'chat').replace('「新对话」', '「开启新会话」');
 
       const r = await run('generate', root, [
@@ -379,14 +431,13 @@ async function main() {
     }
   });
 
-  await test('截图文件被删了：报事实缺失而不是生成坏链接', async () => {
+  await test('截图文件被删了：报错而不是生成坏链接', async () => {
     const root = await prepareProject(server.baseUrl);
     try {
-      fs.rmSync(path.join(root, 'docs', 'manual', 'images', 'raw', 'chat.png'));
+      fs.rmSync(path.join(root, '.manual', 'artifacts', 'raw', 'pages', 'chat.png'));
       const r = await run('generate', root, ['chat']);
       assert.strictEqual(r.status, 1);
-      assert.match(r.stderr, /截图不存在/);
-      assert.match(r.stderr, /manual capture chat/);
+      assert.ok(!fs.existsSync(draftPath(root, 'chat')), '不能生成带坏链接的草稿');
     } finally {
       fx.cleanup(root);
     }
@@ -396,7 +447,7 @@ async function main() {
     const root = await prepareProject(server.baseUrl);
     try {
       await run('describe', root, ['--id', 'chat', '--include-in-manual', 'false']);
-      const r = await run('generate', root, ['chat']);
+      const r = await run('generate', root, ['chat', '--no-screenshot']);
       assert.strictEqual(r.status, 1);
       assert.match(r.stderr, /不在手册范围内/);
     } finally {
@@ -419,7 +470,7 @@ async function main() {
   await test('正式文档已存在时不覆盖，--force 才覆盖', async () => {
     const root = await prepareProject(server.baseUrl);
     try {
-      await run('generate', root, ['chat']);
+      await run('generate', root, ['chat', '--no-screenshot']);
       const draft = readDraft(root, 'chat');
       const p = writePolished(root, 'chat', draft);
 
@@ -453,7 +504,7 @@ async function main() {
     const root = await prepareProject(server.baseUrl);
     try {
       const before = fs.readFileSync(path.join(root, 'app', 'chat', 'page.tsx'), 'utf8');
-      await run('generate', root, ['chat']);
+      await run('generate', root, ['chat', '--no-screenshot']);
       const p = writePolished(root, 'chat', readDraft(root, 'chat'));
       await run('generate', root, ['chat', '--finalize', p]);
       assert.strictEqual(fs.readFileSync(path.join(root, 'app', 'chat', 'page.tsx'), 'utf8'), before);

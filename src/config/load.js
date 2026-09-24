@@ -95,6 +95,8 @@ function loadConfig(projectRoot) {
     docs: { language: DEFAULTS.language, ...(raw.docs || {}) },
     artifacts: {
       stateDir: DEFAULTS.stateDir,
+      rawDir: `${DEFAULTS.stateDir}/artifacts/raw/pages`,
+      annotatedDir: `${raw.docs?.outputDir || DEFAULTS.docsDir}/images/annotated`,
       taskRawDir: `${DEFAULTS.stateDir}/artifacts/raw`,
       sanitizedDir: `${DEFAULTS.stateDir}/artifacts/sanitized`,
       diagnosticsDir: `${DEFAULTS.stateDir}/artifacts/diagnostics`,
@@ -124,6 +126,15 @@ function loadConfig(projectRoot) {
     preserve: [],
     ...(raw.privacy?.rules || {}),
   };
+
+  // 旧版默认把页面原图放进文档目录：仍可读取，但发布时会被阻止，这里提前提示迁移。
+  const docsPrefix = String(config.docs.outputDir || DEFAULTS.docsDir).replace(/\\/g, '/').replace(/\/$/, '') + '/';
+  if (String(config.artifacts.rawDir).replace(/\\/g, '/').startsWith(docsPrefix)) {
+    warnings.push(
+      `legacy-raw-reference: artifacts.rawDir (${config.artifacts.rawDir}) 位于文档目录内，其中的原图不能发布。` +
+      ` 改为 ${DEFAULTS.stateDir}/artifacts/raw/pages 后重新 \`manual capture\`；可用 \`manual migrate-artifacts\` 查看旧原图。`
+    );
+  }
 
   const annotation = resolveAnnotationConfig(raw.annotation);
   if (!annotation.ok) return { ok: false, errors: annotation.errors };

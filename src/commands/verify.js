@@ -6,8 +6,7 @@ const { loadConfig } = require('../config/load');
 const store = require('../tasks/store');
 const { transitionTask } = require('../tasks/model');
 const { validateTaskFinal } = require('../generate/task-facts');
-const { checkDocumentImages } = require('../publication/paths');
-const { validatePublishedImages, validatePublicationFacts } = require('../privacy/publication');
+const { validatePublication, formatIssues } = require('../publication/validate');
 
 async function run(argv) {
   const { values, positional } = parseArgs(argv, { known: new Set(['projectRoot', 'json', 'help']) });
@@ -35,14 +34,11 @@ async function run(argv) {
   const facts = JSON.parse(fs.readFileSync(factsFile, 'utf8'));
   const checked = validateTaskFinal(markdown, facts);
   if (!checked.ok) return fail(checked.errors);
-  // 图片按正式文档所在目录解析，并核对解析结果与 facts 记录的产物是同一文件。
-  const refs = checkDocumentImages({ projectRoot: root, manualFile: manual, markdown, publishRoot: config.docs.outputDir, expected: facts.images });
-  if (!refs.ok) return fail(refs.errors.map((e) => e.message));
-  const images = validatePublishedImages(facts.images, config);
-  const publication = validatePublicationFacts(facts.publication, config);
-  if (!images.ok || !publication.ok) return fail([...images.errors, ...publication.errors]);
+  // 图片按正式文档所在目录解析，核对产物位置、hash 与隐私记录（与 finalize 同一门槛）。
+  const gate = validatePublication({ projectRoot: root, manualFile: manual, markdown, images: facts.images, config });
+  if (!gate.ok) return fail(formatIssues(gate.errors));
   store.writeTask(state, transitionTask(task, 'verified'));
-  if (json) process.stdout.write(JSON.stringify({ ok: true, status: 'verified', manual, images: refs.images.map((ref) => ref.artifactPath) }, null, 2) + '\n');
+  if (json) process.stdout.write(JSON.stringify({ ok: true, status: 'verified', manual, images: facts.images.map((image) => image.artifactPath) }, null, 2) + '\n');
   return 0;
 }
 

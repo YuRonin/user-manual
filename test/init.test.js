@@ -80,7 +80,7 @@ test('默认参数生成 config.yaml 与 .gitignore', (root) => {
   assert.strictEqual(c.docs.outputDir, 'docs/manual');
   assert.strictEqual(c.docs.imagesDir, 'docs/manual/images');
   // 截图落在文档目录下：手册要引用它们，得跟手册一起入库
-  assert.strictEqual(c.artifacts.rawDir, 'docs/manual/images/raw');
+  assert.strictEqual(c.artifacts.rawDir, '.manual/artifacts/raw/pages');
   assert.strictEqual(c.artifacts.annotatedDir, 'docs/manual/images/annotated');
   assert.strictEqual(c.artifacts.taskRawDir, '.manual/artifacts/raw');
   assert.strictEqual(c.artifacts.sanitizedDir, '.manual/artifacts/sanitized');

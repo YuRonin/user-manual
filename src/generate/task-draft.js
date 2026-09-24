@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { toMarkdownHref, toPosix } = require('../publication/paths');
+const { fileSha256 } = require('../util/hash');
 
 function uiTexts(text) { return [...String(text || '').matchAll(/「([^」]+)」/g)].map((m) => m[1]); }
 
@@ -24,9 +25,15 @@ function buildTaskDraft(task, evidence, context = {}) {
         errors.push(`步骤 ${record.id} 的正式图片必须来自 annotated 目录。`);
         continue;
       }
-      const markdownHref = toMarkdownHref({ manualFile: finalPath, artifactFile: path.resolve(projectRoot, artifactPath) });
+      const artifactFile = path.resolve(projectRoot, artifactPath);
+      if (!fs.existsSync(artifactFile)) {
+        errors.push(`步骤 ${record.id} 的发布图不存在: ${artifactPath}`);
+        continue;
+      }
+      const markdownHref = toMarkdownHref({ manualFile: finalPath, artifactFile });
       hrefByShot.set(shot, markdownHref);
-      images.push({ artifactPath, markdownHref });
+      // sha256 固定草稿时的图片内容；privacy 只能来自采集时实际执行的检测记录，缺失即 unknown。
+      images.push({ artifactPath, markdownHref, sha256: fileSha256(artifactFile), privacy: shot.privacy || null });
     }
   }
   if (images.length === 0) errors.push('任务指南至少需要一张 annotated 关键状态截图。');

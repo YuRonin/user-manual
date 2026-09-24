@@ -7,8 +7,7 @@ const store = require('../tasks/store');
 const { transitionTask } = require('../tasks/model');
 const { buildTaskDraft, publishAtomic } = require('../generate/task-draft');
 const { validateTaskFinal } = require('../generate/task-facts');
-const { checkDocumentImages } = require('../publication/paths');
-const { validateEvidence, validatePublishedImages, validatePublicationFacts } = require('../privacy/publication');
+const { validatePublication, validateArtifact, summarizePrivacy, formatIssues } = require('../publication/validate');
 
 const KNOWN_FLAGS = new Set(['projectRoot', 'finalize', 'json', 'help']);
 
@@ -30,11 +29,8 @@ function runFinalize({ root, config, state, task, factsFile, finalizeInput, json
   const checked = validateTaskFinal(final, facts);
   if (!checked.ok) return fail(checked.errors, json);
   const out = manualFileFor(root, config, task.id);
-  const refs = checkDocumentImages({ projectRoot: root, manualFile: out, markdown: final, publishRoot: config.docs.outputDir, expected: facts.images });
-  if (!refs.ok) return fail(refs.errors.map((e) => e.message), json);
-  const images = validatePublishedImages(facts.images, config);
-  const publication = validatePublicationFacts(facts.publication, config);
-  if (!images.ok || !publication.ok) return fail([...images.errors, ...publication.errors], json);
+  const gate = validatePublication({ projectRoot: root, manualFile: out, markdown: final, images: facts.images, config });
+  if (!gate.ok) return fail(formatIssues(gate.errors), json);
   publishAtomic(out, final);
   store.writeTask(state, transitionTask(task, 'generated'));
   if (json) process.stdout.write(JSON.stringify({ ok: true, status: 'generated', manual: out }, null, 2) + '\n');
@@ -47,11 +43,12 @@ function runDraft({ root, config, task, draftDir, draftFile, factsFile, json }) 
   const evidenceFile = path.join(root, task.evidenceManifest);
   if (!fs.existsSync(evidenceFile)) return fail(`证据清单不存在: ${evidenceFile}`, json);
   const evidence = JSON.parse(fs.readFileSync(evidenceFile, 'utf8'));
-  const privacy = validateEvidence(evidence, config);
-  if (!privacy.ok) return fail(privacy.errors, json);
   const built = buildTaskDraft(task, evidence, { projectRoot: root, finalPath: manualFileFor(root, config, task.id) });
   if (!built.ok) return fail(built.errors, json);
-  built.facts.publication = privacy.summary;
+  // 草稿阶段就执行同一产物门槛：隐私未知或位置非法时不给出可定稿的草稿。
+  const issues = built.facts.images.flatMap((image) => validateArtifact(image, { projectRoot: root, config }));
+  if (issues.length) return fail(formatIssues(issues), json);
+  built.facts.publication = { audience: config.privacy?.audience || 'public', ...summarizePrivacy(built.facts.images.map((image) => image.privacy)) };
   fs.mkdirSync(draftDir, { recursive: true });
   fs.writeFileSync(draftFile, built.markdown, 'utf8');
   fs.writeFileSync(factsFile, JSON.stringify(built.facts, null, 2) + '\n', 'utf8');

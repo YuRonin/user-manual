@@ -251,11 +251,11 @@ function buildConfig(input) {
     capture: { activeProfile: resolvedProfile.id, profiles: profileMap },
     browser: { activeProvider: resolvedProvider.id, providers: providerMap },
     docs: { language, outputDir: docsDir, imagesDir: `${docsDir}/images` },
-    // 截图放在文档目录下：手册要引用它们，得跟手册一起入库。
-    // 标注功能落地前，raw 就是手册直接引用的图。
+    // 页面原图是未经隐私处理的本地证据，放在 .manual 下，不进入文档目录；
+    // 手册只引用 annotatedDir 中经过发布门槛的图。
     artifacts: {
       stateDir,
-      rawDir: `${docsDir}/images/raw`,
+      rawDir: `${stateDir}/artifacts/raw/pages`,
       taskRawDir: `${stateDir}/artifacts/raw`,
       sanitizedDir: `${stateDir}/artifacts/sanitized`,
       diagnosticsDir: `${stateDir}/artifacts/diagnostics`,
