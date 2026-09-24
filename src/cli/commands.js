@@ -18,6 +18,7 @@ const COMMANDS = [
   { name: 'capture-task', module: 'capture-task', summary: '按安全边界执行任务步骤并采集原始证据' },
   { name: 'generate-task', module: 'generate-task', summary: '生成并校验任务型指南' },
   { name: 'verify', module: 'verify', summary: '验证任务文档、图片和结构化事实' },
+  { name: 'publication', module: 'publication', summary: '查看与恢复中断的发布事务（status / repair）' },
   { name: 'migrate', module: 'migrate', summary: '显式迁移旧项目到 v2 模型（--dry-run / --apply / --rollback）' },
   { name: 'migrate-artifacts', module: 'migrate-artifacts', summary: '检查旧页面原图并安全复制到非发布产物目录' },
   { name: 'doctor', module: 'doctor', summary: '只读检查 Node、依赖、浏览器、配置与认证缓存环境' },

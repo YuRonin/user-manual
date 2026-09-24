@@ -96,11 +96,11 @@
   - [x] 模型只能修改允许文案块，业务动作确定性渲染。
   - [x] zh-CN/en-US 模板和旧 Markdown 兼容验证。
   - [x] stale draft、否定动作、单位变化等反例通过。
-- [ ] **P1-07 发布 journal / release**（依赖 P1-02/06/08）
-  - [ ] prepare/asset/doc/release/current 提交状态。
-  - [ ] old/new doc hash 对账及第三种内容冲突。
-  - [ ] 正式验证不再依赖可变 drafts。
-  - [ ] 每个边界杀进程和重复恢复测试通过。
+- [x] **P1-07 发布 journal / release**（依赖 P1-02/06/08）
+  - [x] prepare/asset/doc/release/current 提交状态。
+  - [x] old/new doc hash 对账及第三种内容冲突。
+  - [x] 正式验证不再依赖可变 drafts。
+  - [x] 每个边界杀进程和重复恢复测试通过。
 - [ ] **Gate 1：迁移可重复、重跑合法、证据不可变、并发不丢更新、发布可对账。**
 
 ## Phase 2 — Runtime / cache / resume
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 完成 8 / 32，Gate 0 已通过（2026-09-24）。Phase 1 进行中：已完成 P1-01～P1-06、P1-08。下一项：P1-07。
+- 工程实施：Phase 0 完成 8 / 32，Gate 0 已通过（2026-09-24）。Phase 1 进行中：8 个任务均已完成。下一项：Phase 1 集成验收（Gate 1）。
 
 ### 执行记录
 
@@ -569,4 +569,26 @@ Task ID: P1-08
 产物 / commit 引用: 见 git log（P1-08 提交）
 剩余风险: 页面 draft-stale 只比较 inputRevision / 模板（图片内容由发布门槛的 hash 校验兜底）。
 下一项可执行任务: P1-07
+```
+
+```text
+Task ID: P1-07
+状态: completed
+开始时基线 commit / dirty files: 4d07d47（P1-08）；工作区干净
+实际修改文件: src/publication/publisher.js（新）、src/publication/reconcile.js（新）、src/publication/release-store.js（新）、src/commands/publication.js（新）、src/cli/commands.js、src/commands/generate.js、src/commands/generate-task.js、src/commands/verify.js、src/config/render.js、test/publication-recovery.test.js（新）、test/gate0.test.js、test/run.js
+契约变更: 无（实现 C10）。manualId 使用类型前缀（task-<id> / page-<id>），避免同名页面与任务共用发布历史。src/generate/task-draft.js 的 publishAtomic 兼容导出保留，finalize 不再使用。
+执行命令与结果:
+  - node test/publication-recovery.test.js：11 passed（正常发布与旧发布保留；在 prepared / assets-installed / document-installed / release-committed 之后真实杀子进程，读者只见完整旧版或新版，repair 完成且重复恢复不产生第二条记录；中途手改文档 → conflict 并保留修改；发布后手改 → publication-conflict，--force 覆盖并保留旧发布；发布图缺失或被替换 → 事务作废不阻塞；记录不完整时零写入；未完成事务阻止新发布）。
+  - gate0：6 passed（verify 改为以发布记录为准：改 / 删草稿不影响；篡改发布记录的隐私、替换发布图、改验证等级、发布后手改文档均失败）。
+  - generate 36、generate-task 8、finalize-safety 10、publication-gates 11、task-rerun 8 passed；npm test：45 个测试文件全部通过。
+行为变更（有意）:
+  - 页面与任务定稿都走发布事务：prepared（检查手工修改冲突、写暂存文档与发布记录草案）→ assets-installed（核对内容寻址发布图存在与 hash）→ document-installed（同目录唯一 temp rename）→ release-committed（.manual/releases/<manualId>/<releaseId>.json，含 documentHash、factsHash、facts、captureIds、definitionRevisions、图片 hash、语言 / 模板 revision、previousReleaseId）→ completed（current.json 指针）。journal 位于 .manual/publication/<txId>/。
+  - 文档在上次发布之后被手改：再次定稿返回 publication-conflict；generate-task 新增 --force。
+  - 新命令 manual publication status | repair [--dry-run]：按 oldDocHash / newDocHash 继续，第三种内容标 conflict 保留用户修改；幂等。文档仍是旧内容时失败的事务标为 aborted，不阻塞下一次发布。
+  - verify 读取当前发布记录中的 facts（没有发布记录的旧项目才回退草稿 facts），并报告发布后被修改的文档（document-modified）。
+  - .manual/.gitignore 增加 publication/。
+失败或跳过的验收及原因: 普通 docs 路径下文档替换与发布记录写入之间存在短暂不一致窗口，由恢复协议保证最终一致，不是多文件瞬时原子事务（与契约一致）；三方合并（C11 手工修改合并）未实现，冲突时要求人工处理或 --force。
+产物 / commit 引用: 见 git log（P1-07 提交）
+剩余风险: 任务状态投影在发布完成之后提交，二者之间失败仍报告 partial-commit（发布记录已是权威，状态可重新 verify 得到）；conflict 事务需人工确认后删除其 journal 目录或重新发布。
+下一项可执行任务: Gate 1 集成验收
 ```

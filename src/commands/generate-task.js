@@ -5,14 +5,17 @@ const { parseArgs } = require('../cli/args');
 const { loadConfig } = require('../config/load');
 const { createProjectStore } = require('../store/project');
 const { checkEvidenceUsable } = require('../model/approval');
-const { buildTaskDraft, publishAtomic } = require('../generate/task-draft');
+const { buildTaskDraft } = require('../generate/task-draft');
+const { publish } = require('../publication/publisher');
+const { manualIdFor } = require('../publication/release-store');
+const { definitionRevision } = require('../model/revision');
 const { validateTaskFinal } = require('../generate/task-facts');
 const { renderTask } = require('../generate/render');
 const { diffPacks } = require('../generate/fact-pack');
 const { validateCopy, checkPolishedMarkdown, formatFindings } = require('../generate/markdown-validate');
 const { validatePublication, validateArtifact, summarizePrivacy, formatIssues } = require('../publication/validate');
 
-const KNOWN_FLAGS = new Set(['projectRoot', 'finalize', 'copy', 'acceptReview', 'json', 'help']);
+const KNOWN_FLAGS = new Set(['projectRoot', 'finalize', 'copy', 'acceptReview', 'force', 'json', 'help']);
 const HELP = `
 manual generate-task <task-id> [--json]
     生成事实草稿（.manual/drafts/tasks/<id>.md）与事实包（<id>.facts.json）。
@@ -68,10 +71,24 @@ function validateFinalize({ root, config, task, pages, final, facts }) {
  * 提交：先原子替换正式文档，再写任务状态。两者不是一个事务——
  * 文档已替换而状态写入失败时明确报告 partial-commit，交给后续对账（P1-07），不伪称成功。
  */
-function commitFinalize({ root, projectStore, base, manualFile, final, nextTask }) {
+function commitFinalize({ root, config, projectStore, base, manualFile, final, facts, task, force, nextTask }) {
   try {
-    publishAtomic(manualFile, final);
+    // 发布事务：文档、发布记录（含 facts 与 Capture）、current 指针，按 journal 推进，可对账
+    publish({
+      projectRoot: root,
+      stateDirAbs: path.join(root, config.artifacts.stateDir),
+      manualId: manualIdFor('task', task.id),
+      documentFile: manualFile,
+      markdown: final,
+      facts,
+      captureIds: task.lastCapture?.captureIds || task.captureIds || (facts.images || []).map((image) => image.captureId),
+      definitionRevisions: { [task.id]: definitionRevision('userTask', task) },
+      force,
+    });
   } catch (error) {
+    if (error.transactionId && error.code !== 'publication-conflict' && !['file-busy', 'write-failed'].includes(error.code)) {
+      return { ok: false, code: error.code || 'publication-failed', errors: [`${error.code || 'publication-failed'}: ${error.message}（事务 ${error.transactionId}，运行 manual publication repair 对账）`] };
+    }
     return { ok: false, code: error.code || 'write-failed', errors: [`${error.code || 'write-failed'}: 正式文档未改变。${error.message}`] };
   }
   try {
@@ -122,7 +139,7 @@ function reviewGate(findings, acceptReview) {
   return { ok: true, accepted: findings.review };
 }
 
-function runFinalize({ root, config, projectStore, base, task, pages, factsFile, draftFile, finalizeInput, copyInput, acceptReview, json }) {
+function runFinalize({ root, config, projectStore, base, task, pages, factsFile, draftFile, finalizeInput, copyInput, acceptReview, force = false, json }) {
   if (!fs.existsSync(factsFile)) return fail('缺少任务事实文件，请先生成草稿。', json);
   const facts = JSON.parse(fs.readFileSync(factsFile, 'utf8'));
   const fresh = checkDraftFresh({ root, config, task, facts });
@@ -152,7 +169,7 @@ function runFinalize({ root, config, projectStore, base, task, pages, factsFile,
   const loaded = { final, facts };
   const checked = validateFinalize({ root, config, task, pages, final: loaded.final, facts: loaded.facts });
   if (!checked.ok) return fail(checked.errors, json);
-  const committed = commitFinalize({ root, projectStore, base, manualFile: checked.manualFile, final: loaded.final, nextTask: checked.nextTask });
+  const committed = commitFinalize({ root, config, projectStore, base, manualFile: checked.manualFile, final: loaded.final, facts: loaded.facts, task, force, nextTask: checked.nextTask });
   if (!committed.ok) {
     if (json) process.stdout.write(JSON.stringify({ ok: false, code: committed.code, committed: committed.committed || [], errors: committed.errors }, null, 2) + '\n');
     else committed.errors.forEach((x) => process.stderr.write(`[manual generate-task] ${x}\n`));
@@ -190,7 +207,7 @@ function runDraft({ root, config, task, pages, draftDir, draftFile, factsFile, j
 }
 
 function run(argv) {
-  const { values, positional, unknownFlags } = parseArgs(argv, { known: KNOWN_FLAGS, booleans: ['acceptReview'] });
+  const { values, positional, unknownFlags } = parseArgs(argv, { known: KNOWN_FLAGS, booleans: ['acceptReview', 'force'] });
   const json = values.json === true;
   if (values.help) { process.stdout.write(HELP + '\n'); return 0; }
   if (values.finalize && values.copy) return fail('--finalize 与 --copy 只能选一个。', json);
@@ -213,7 +230,7 @@ function run(argv) {
   if (values.finalize || values.copy) {
     return runFinalize({
       root, config, projectStore, base, task, pages, factsFile, draftFile,
-      finalizeInput: values.finalize, copyInput: values.copy, acceptReview: values.acceptReview === true, json,
+      finalizeInput: values.finalize, copyInput: values.copy, acceptReview: values.acceptReview === true, force: values.force === true, json,
     });
   }
   return runDraft({ root, config, task, pages, draftDir, draftFile, factsFile, json });

@@ -211,6 +211,7 @@ function renderStateGitignore() {
     'artifacts/',
     'locks/',
     'evidence/staging/',
+    'publication/',
     '*.bak',
     '',
   ].join('\n');

@@ -140,17 +140,27 @@ async function step(name, fn) {
       assert.ok(fs.readdirSync(path.join(state, 'artifacts', 'raw', 'pages')).some((f) => /^chat--[0-9a-f]{16}\.png$/.test(f)));
     });
 
-    await step('篡改检测：删除隐私记录、替换发布图、修改完成声明都会让 verify 失败', async () => {
+    await step('篡改检测：删除发布记录中的隐私记录、替换发布图、修改完成声明都会让 verify 失败', async () => {
+      // verify 以当前发布记录为准：草稿 facts 可变，改它不影响已发布文档的验证
+      const releaseDir = path.join(state, 'releases', 'task-edit-profile');
+      const releaseFile = path.join(releaseDir, `${JSON.parse(fs.readFileSync(path.join(releaseDir, 'current.json'), 'utf8')).releaseId}.json`);
       const factsFile = path.join(state, 'drafts', 'tasks', 'edit-profile.facts.json');
       const manual = path.join(docs, 'tasks', 'edit-profile.md');
-      const originalFacts = fs.readFileSync(factsFile, 'utf8');
+      const originalRelease = fs.readFileSync(releaseFile, 'utf8');
+      const originalFacts = JSON.parse(originalRelease).facts;
       const originalDoc = fs.readFileSync(manual, 'utf8');
       const reset = () => taskStore.writeTask(state, { ...taskStore.readTask(state, 'edit-profile'), status: 'generated' });
 
+      fs.writeFileSync(factsFile, '{"images":[]}');
+      await ok(root, ['verify', 'edit-profile', '--json']);
+      fs.rmSync(path.join(state, 'drafts'), { recursive: true });
+      await ok(root, ['verify', 'edit-profile', '--json']);
+
       const cases = [
-        ['privacy-unknown', () => { const f = JSON.parse(originalFacts); delete f.images[0].privacy; fs.writeFileSync(factsFile, JSON.stringify(f)); }],
-        ['hash-mismatch', () => { const img = path.join(root, JSON.parse(originalFacts).images[0].artifactPath); fs.writeFileSync(`${img}.orig`, fs.readFileSync(img)); fs.copyFileSync(path.join(root, require('js-yaml').load(fs.readFileSync(path.join(state, 'pages', 'chat.yaml'), 'utf8')).browser.screenshot), img); }],
+        ['privacy-unknown', () => { const r = JSON.parse(originalRelease); delete r.facts.images[0].privacy; fs.writeFileSync(releaseFile, JSON.stringify(r)); }],
+        ['hash-mismatch', () => { const img = path.join(root, originalFacts.images[0].artifactPath); fs.writeFileSync(`${img}.orig`, fs.readFileSync(img)); fs.copyFileSync(path.join(root, require('js-yaml').load(fs.readFileSync(path.join(state, 'pages', 'chat.yaml'), 'utf8')).browser.screenshot), img); }],
         ['验证等级被改动', () => { fs.writeFileSync(manual, originalDoc.replace('预期业务结果：资料已保存。', '已验证界面结果：资料已保存。')); }],
+        ['document-modified', () => { fs.writeFileSync(manual, `${originalDoc}\n补充一句说明。\n`); }],
       ];
       for (const [expected, tamper] of cases) {
         reset();
@@ -158,9 +168,9 @@ async function step(name, fn) {
         const result = await cli(root, ['verify', 'edit-profile', '--json']);
         assert.strictEqual(result.status, 1, `${expected} 应当失败`);
         assert.ok(result.stdout.includes(expected), `${expected}: ${result.stdout}`);
-        fs.writeFileSync(factsFile, originalFacts);
+        fs.writeFileSync(releaseFile, originalRelease);
         fs.writeFileSync(manual, originalDoc);
-        const img = path.join(root, JSON.parse(originalFacts).images[0].artifactPath);
+        const img = path.join(root, originalFacts.images[0].artifactPath);
         if (fs.existsSync(`${img}.orig`)) fs.renameSync(`${img}.orig`, img);
       }
       reset();

@@ -25,6 +25,9 @@ const { buildDraft } = require('../generate/draft');
 const { extractFacts, compareFacts, formatViolations } = require('../generate/facts');
 const { buildPageFactPack } = require('../generate/fact-pack');
 const { renderPage } = require('../generate/render');
+const { publish } = require('../publication/publisher');
+const { manualIdFor } = require('../publication/release-store');
+const { definitionRevision } = require('../model/revision');
 const { validateCopy, checkPolishedMarkdown, formatFindings } = require('../generate/markdown-validate');
 const { writeText, displayPath } = require('../util/fsx');
 const { toMarkdownHref } = require('../publication/paths');
@@ -390,14 +393,30 @@ function runFinalize({ projectRoot, config, page, stateDirAbs, finalizeInput, co
   if (!fs.existsSync(factsFile)) {
     return fail([`缺少草稿事实文件: ${displayPath(factsFile, projectRoot)}`, `重新运行 \`manual generate ${page.id}\`。`], { json });
   }
-  const draftImages = JSON.parse(fs.readFileSync(factsFile, 'utf8')).images || [];
+  const draftFacts = JSON.parse(fs.readFileSync(factsFile, 'utf8'));
+  const draftImages = draftFacts.images || [];
   const gate = validatePublication({ projectRoot, manualFile: finalPath, markdown: body, images: draftImages, config });
   if (!gate.ok) return fail(formatIssues(gate.errors), { json });
   // 所有检查都已在写入前完成；原子替换失败（如文件被占用）时旧文档保持不变。
+  let published;
   try {
-    writeText(finalPath, body);
+    // 发布事务：文档 + 不可变发布记录（含 facts 与 Capture 引用）+ current 指针，可对账
+    published = publish({
+      projectRoot,
+      stateDirAbs,
+      manualId: manualIdFor('page', page.id),
+      documentFile: finalPath,
+      markdown: body,
+      facts: draftFacts,
+      captureIds: draftImages.map((image) => image.captureId).filter(Boolean),
+      definitionRevisions: { [page.id]: definitionRevision('page', page) },
+      force,
+    });
   } catch (error) {
-    return fail([`${error.code || 'write-failed'}: 正式文档未改变。${error.message}`], { json });
+    const hint = error.transactionId && !['file-busy', 'write-failed'].includes(error.code)
+      ? `（事务 ${error.transactionId}，运行 manual publication repair 对账）`
+      : '正式文档未改变。';
+    return fail([`${error.code || 'write-failed'}: ${error.message}${hint}`], { json });
   }
 
   if (json) {
@@ -410,6 +429,7 @@ function runFinalize({ projectRoot, config, page, stateDirAbs, finalizeInput, co
           finalPath,
           draftPath,
           factCheck: result.ok ? 'passed' : 'failed-used-draft',
+          releaseId: published.release.id,
           violations: result.violations,
           bytes: Buffer.byteLength(body, 'utf8'),
         },
