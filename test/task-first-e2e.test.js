@@ -7,6 +7,7 @@ const path = require('path');
 const yaml = require('js-yaml');
 const { spawn, spawnSync } = require('child_process');
 const { startServer } = require('./server');
+const { listMarkdownImages } = require('../src/publication/paths');
 
 const CLI = path.resolve(__dirname, '..', 'bin', 'manual.js');
 
@@ -45,6 +46,15 @@ async function completeTask(root, stateDir, taskId) {
 
   result = runSync(['generate-task', taskId, '--project-root', root, '--finalize', draft, '--json']);
   assert.strictEqual(result.status, 0, result.stdout + result.stderr);
+
+  // 正式文档中的每张图都按文档所在目录解析到真实的 annotated 文件。
+  const manualFile = JSON.parse(result.stdout).manual;
+  const images = listMarkdownImages(fs.readFileSync(manualFile, 'utf8'));
+  assert.ok(images.length > 0);
+  for (const image of images) {
+    assert.match(image.src, /^\.\.\/images\/annotated\//);
+    assert.ok(fs.existsSync(path.resolve(path.dirname(manualFile), image.src)), image.src);
+  }
 
   result = runSync(['verify', taskId, '--project-root', root, '--json']);
   assert.strictEqual(result.status, 0, result.stdout + result.stderr);

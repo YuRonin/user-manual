@@ -18,6 +18,8 @@
  *           读者照做的结果就不会变。想让某个措辞不可动，就把它写成「」或 `` ` ``。
  */
 
+const { listMarkdownImages } = require('../publication/paths');
+
 /** 去掉围栏代码块和 HTML 注释，避免把它们里的内容当成正文事实。 */
 function stripNonProse(markdown) {
   return String(markdown)
@@ -34,12 +36,9 @@ function matchAll(text, re) {
   return out;
 }
 
-/** 图片引用。src 是事实（截图路径），alt 是文案，允许润色。 */
+/** 图片引用（Markdown AST，含原始 HTML <img>）。src 是事实（截图路径），alt 是文案，允许润色。 */
 function extractImages(text) {
-  return matchAll(text, /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g).map((m) => ({
-    alt: m[1],
-    src: m[2],
-  }));
+  return listMarkdownImages(text).map((image) => ({ alt: image.alt, src: image.src }));
 }
 
 /** 「」包裹的 UI 原文。 */

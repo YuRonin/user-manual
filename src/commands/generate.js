@@ -24,6 +24,7 @@ const { readIndexes, findForwardPage } = require('../inspect/index-store');
 const { buildDraft } = require('../generate/draft');
 const { extractFacts, compareFacts, formatViolations } = require('../generate/facts');
 const { writeText, displayPath } = require('../util/fsx');
+const { checkDocumentImages } = require('../publication/paths');
 
 const KNOWN_FLAGS = new Set([
   'projectRoot', 'finalize', 'noScreenshot', 'fallbackDraft', 'force', 'json', 'help',
@@ -286,6 +287,12 @@ function runFinalize({ projectRoot, config, page, stateDirAbs, finalizeInput, fa
 
   const content = result.ok ? polished : draftMarkdown;
   const body = content.replace(/\s*$/, '') + '\n';
+
+  // 每个图片引用按正式文档位置解析，必须落在文档目录内的真实文件上（含 --fallback-draft）。
+  const refs = checkDocumentImages({
+    projectRoot, manualFile: finalPath, markdown: body, publishRoot: config.docs.outputDir,
+  });
+  if (!refs.ok) return fail(refs.errors.map((e) => `${e.code}: ${e.message}`), { json });
   writeText(finalPath, body);
 
   if (json) {

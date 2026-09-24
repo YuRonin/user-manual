@@ -12,12 +12,11 @@
  */
 
 const path = require('path');
+const { toMarkdownHref } = require('../publication/paths');
 
-/** 截图相对文档目录的路径。Markdown 里的图片引用必须相对最终文档位置，而不是草稿位置。 */
+/** 截图相对页面正式文档（<docsOutputDir>/<id>.md）的路径，与任务文档共用同一规则。 */
 function screenshotRelativeToDocs(docsOutputDir, screenshotPath) {
-  const rel = path.relative(docsOutputDir, screenshotPath).replace(/\\/g, '/');
-  // path.relative 在同级目录下不带 './'，Markdown 里两种写法都能用，保持原样更干净
-  return rel;
+  return toMarkdownHref({ manualFile: path.join(docsOutputDir, 'page.md'), artifactFile: screenshotPath });
 }
 
 /**

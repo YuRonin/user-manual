@@ -1,16 +1,24 @@
 'use strict';
 
+const path = require('path');
+const { normalizeImageFact } = require('../publication/paths');
+
+/** 项目根相对的产物路径，规范化后比较；越出项目根的保留 ../ 前缀，必然不匹配发布根。 */
 function normalize(file) {
-  return String(file || '').replace(/\\/g, '/').replace(/^\.\//, '');
+  return path.posix.normalize(String(file || '').replace(/\\/g, '/'));
 }
 
+/**
+ * @param images 产物列表：项目根相对路径字符串，或 { artifactPath } 对象。
+ *   这里只看产物身份（artifactPath），Markdown href 由 publication/paths 按文档位置解析。
+ */
 function validatePublishedImages(images, config) {
   if (config.privacy?.audience !== 'public') return { ok: true, errors: [] };
   const allowed = normalize(config.artifacts.annotatedDir).replace(/\/$/, '') + '/';
   const errors = [];
   for (const image of images || []) {
-    const value = normalize(image);
-    if (value.includes('../') || !value.startsWith(allowed)) {
+    const value = normalize(normalizeImageFact(image).artifactPath);
+    if (value.startsWith('../') || path.posix.isAbsolute(value) || !value.startsWith(allowed)) {
       errors.push(`公开手册只能引用 annotated 图片: ${value}`);
     }
     if (/\.manual\/artifacts\/(raw|sanitized|diagnostics)\//i.test(value) || /auth-cache/i.test(value)) {
