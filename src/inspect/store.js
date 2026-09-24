@@ -115,6 +115,9 @@ function renderPageYaml(page) {
   // 显式给出键顺序：id/route 在最前，状态在最后
   const ordered = {
     id: page.id,
+    // active / missing（代码里找不到）/ excluded（被 inspect.exclude 排除）/ retired（显式退役）
+    lifecycle: page.lifecycle || 'active',
+    ...(Array.isArray(page.routeBindings) ? { routeBindings: page.routeBindings } : {}),
     route: page.route,
     dynamic: page.dynamic,
     params: page.params || [],
@@ -147,6 +150,7 @@ function renderPageYaml(page) {
       published: browser.published ?? null,
     },
     states: page.states || {},
+    ...(Array.isArray(page.identityAssertions) ? { identityAssertions: page.identityAssertions } : {}),
     status: {
       router: page.status?.router ?? null,
       sourceAnalysis: page.status?.sourceAnalysis,

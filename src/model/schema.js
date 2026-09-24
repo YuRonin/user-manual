@@ -37,7 +37,7 @@ const KNOWN_FIELDS = {
     'browser', 'status', 'analysis', 'latestCaptureId'],
   userTask: ['schemaVersion', 'id', 'revision', 'title', 'goal', 'entryPage', 'priority', 'preconditions', 'risk', 'status',
     'approval', 'environment', 'fixtures', 'steps', 'branches', 'relatedTasks', 'completion', 'evidence', 'evidenceManifest',
-    'capturePlan', 'captureIds',
+    'capturePlan', 'captureIds', 'lastCapture', 'stale', 'lastVerification', 'params', 'authProfile',
     'source', 'discovery', 'generatedAt', 'updatedAt', 'notes', 'history'],
 };
 
@@ -266,7 +266,7 @@ function validateUserTask(task, context = {}) {
     if (!nonEmpty(task[field])) c.error(field, 'required', `${field} 需要是非空字符串。`);
   }
   if (task.risk !== undefined && !RISKS.includes(task.risk)) c.error('risk', 'invalid-risk', `risk 需要是 ${RISKS.join(' / ')} 之一。`);
-  if (task.approval !== undefined) {
+  if (task.approval !== undefined && task.approval !== null) {
     if (!isObject(task.approval) || !APPROVAL_STATUSES.includes(task.approval.status)) {
       c.error('approval.status', 'invalid-approval', `approval.status 需要是 ${APPROVAL_STATUSES.join(' / ')} 之一。`);
     }

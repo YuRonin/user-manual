@@ -21,7 +21,7 @@ const { CONFIDENCE, ANALYSIS, isBrowserVerified } = require('../inspect/model');
 const store = require('../inspect/store');
 const { displayPath } = require('../util/fsx');
 
-const KNOWN_FLAGS = new Set(['projectRoot', 'input', 'id', 'title', 'purpose', 'actions', 'source', 'includeInManual', 'json', 'help']);
+const KNOWN_FLAGS = new Set(['projectRoot', 'input', 'id', 'title', 'purpose', 'actions', 'source', 'includeInManual', 'lifecycle', 'json', 'help']);
 
 const HELP = `
 manual describe —— 把页面的源码分析结果写回页面模型
@@ -49,8 +49,10 @@ manual describe —— 把页面的源码分析结果写回页面模型
   }
 
   id 必填且必须已存在于 .manual/pages/。
-  title / purpose / detectedActions / source / includeInManual 都可选，
+  title / purpose / detectedActions / source / includeInManual / lifecycle 都可选，
   只写给出的字段，没给的保持原样。
+  lifecycle 只接受 retired（显式退役：保留定义与历史，不再采集，--prune 也不会删除）
+  或 active（恢复）；missing / excluded 由 inspect 根据扫描结果维护。
 
 选项:
   --project-root <路径>       项目根目录，默认当前工作目录
@@ -61,6 +63,7 @@ manual describe —— 把页面的源码分析结果写回页面模型
   --actions <a;b;c>           单页模式，用分号分隔
   --source <a;b>              单页模式，用分号分隔，覆盖 source
   --include-in-manual <bool>  单页模式，true/false
+  --lifecycle <值>            单页模式，retired 或 active
   --json                      以 JSON 输出结果
   --help                      显示本帮助
 
@@ -98,6 +101,7 @@ function fromFlags(values) {
   if (values.includeInManual !== undefined) {
     entry.includeInManual = String(values.includeInManual).toLowerCase() !== 'false';
   }
+  if (values.lifecycle !== undefined) entry.lifecycle = String(values.lifecycle);
   return { pages: [entry] };
 }
 
@@ -195,6 +199,15 @@ function validateEntry(entry, index, knownIds, errors) {
     }
   }
 
+  if (entry.lifecycle !== undefined) {
+    if (!['retired', 'active'].includes(entry.lifecycle)) {
+      errors.push(`${where}.lifecycle 只能是 retired 或 active（missing / excluded 由 inspect 维护）。`);
+    } else {
+      patch.lifecycle = entry.lifecycle;
+      touched = true;
+    }
+  }
+
   if (!touched) {
     errors.push(`${where} 没有给出任何可写入的字段。`);
     return null;
@@ -211,6 +224,7 @@ function applyPatch(page, patch) {
     purpose: patch.purpose !== undefined ? patch.purpose : page.purpose,
     detectedActions: patch.detectedActions !== undefined ? patch.detectedActions : (page.detectedActions || []),
     includeInManual: patch.includeInManual !== undefined ? patch.includeInManual : page.includeInManual !== false,
+    lifecycle: patch.lifecycle !== undefined ? patch.lifecycle : (page.lifecycle || 'active'),
   };
 
   if (patch.source !== undefined) {

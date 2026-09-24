@@ -139,7 +139,7 @@ test('人工拒绝只删除 candidate，不允许拒绝已批准任务', (root) 
     decisions: [{ id: 'edit-profile', decision: 'reject' }],
   });
   assert.strictEqual(invalid.status, 1);
-  assert.match(invalid.stdout, /只有 candidate/);
+  assert.match(invalid.stdout, /只有候选任务可以拒绝/);
   assert.strictEqual(store.readTask(stateDir, 'edit-profile').status, 'approved');
 });
 

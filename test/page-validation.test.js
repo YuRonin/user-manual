@@ -188,10 +188,13 @@ async function main() {
     const { buildCapturePlan } = require('../src/tasks/capture-plan');
     const page = { id: 'p', route: '/p', states: { default: { assertions: [{ type: 'visible', target: { role: 'heading', name: 'P' } }] }, empty: { description: '空', assertions: [] } } };
     const task = { id: 't', title: 'T', entryPage: 'p', risk: 'read', status: 'approved', steps: [{ id: 's', page: 'p', stateBefore: 'default', stateAfter: 'empty', action: { type: 'click', target: { role: 'button', name: 'x' } } }] };
+    const { approve } = require('../src/model/approval');
+    task.approval = approve(task, [page]);
     let built = buildCapturePlan(task, [page]);
     assert.strictEqual(built.ok, false);
     assert.match(built.errors.join('\n'), /没有任何断言/);
     task.steps[0].stateAfter = 'default';
+    task.approval = approve(task, [page]);
     built = buildCapturePlan(task, [page]);
     assert.strictEqual(built.ok, true, built.errors?.join('\n'));
     assert.strictEqual(built.plan.steps[0].beforeState.assertions[0].target.name, 'P');

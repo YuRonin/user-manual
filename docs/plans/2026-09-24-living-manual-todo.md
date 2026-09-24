@@ -71,11 +71,11 @@
   - [x] 唯一 Capture ID、内容寻址图片、不可变冲突检测。
   - [x] page.browser/legacy manifest 只作兼容投影。
   - [x] 连续采集、半写入、图片替换测试通过。
-- [ ] **P1-03 Page / Scenario / UserTask 拆分**（依赖 P1-01/02）
-  - [ ] approval、新鲜度、执行状态独立。
-  - [ ] 稳定 Page ID、route binding、missing/retired。
-  - [ ] Scenario 身份/数据/参数/检查点校验。
-  - [ ] 可重复 capture/generate/verify，scope 变化重确认。
+- [x] **P1-03 Page / Scenario / UserTask 拆分**（依赖 P1-01/02）
+  - [x] approval、新鲜度、执行状态独立。
+  - [x] 稳定 Page ID、route binding、missing/retired。
+  - [x] Scenario 身份/数据/参数/检查点校验。
+  - [x] 可重复 capture/generate/verify，scope 变化重确认。
 - [ ] **P1-05 源码指纹与隐式依赖**（依赖 P1-01/03）
   - [ ] 同路径内容 hash，Next layout/_app 等约定依赖。
   - [ ] 显式 source/glob、样式/资源/翻译纳入图。
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 完成 8 / 32，Gate 0 已通过（2026-09-24）。Phase 1 进行中：已完成 P1-01、P1-02。下一项：P1-03。
+- 工程实施：Phase 0 完成 8 / 32，Gate 0 已通过（2026-09-24）。Phase 1 进行中：已完成 P1-01、P1-02、P1-03。下一项：P1-05。
 
 ### 执行记录
 
@@ -455,4 +455,30 @@ Task ID: P1-02
 产物 / commit 引用: 见 git log（P1-02 提交）
 剩余风险: capture 仍通过 writeModel 重写全部页面文件（P1-06 改为只提交观察引用）；latest.json 的读改写尚无锁（P1-06）；无主内容寻址文件暂不清理。
 下一项可执行任务: P1-03
+```
+
+```text
+Task ID: P1-03
+状态: completed
+开始时基线 commit / dirty files: 0bbba79（P1-02）；工作区干净
+实际修改文件: src/model/approval.js（新）、src/scenarios/model.js（新）、src/scenarios/store.js（新）、src/commands/{approve-tasks,capture-task,capture,describe,discover-tasks,generate-task,generate,inspect,verify}.js、src/inspect/{model,store}.js、src/model/schema.js、src/tasks/{capture-plan,executor,staleness,store}.js、test/scenario-model.test.js（新）、test/task-rerun.test.js（新）、test/{capture-plan,capture-task,finalize-safety,inspect,page-validation,staleness,task-store}.test.js、test/run.js
+契约变更: 无（实现 C03 approval.scopeHash、Page.lifecycle、Scenario）。scopeHash 覆盖：步骤顺序 / 页面 / 动作与目标 / valueRef / 有效风险 / replay / 前后状态及其页面断言 / 入口断言 / environment / fixtures / 前置条件 / 完成声明；不含标题、目标描述、步骤说明文字、优先级。
+执行命令与结果:
+  - 先红：新 capture-plan 与 finalize-safety 用例在接线前失败（status=approved 即可执行、已 generated/verified 无法重新定稿）。
+  - node test/scenario-model.test.js：9 passed（路由参数编码与 catch-all、匿名显式、默认 Scenario 通过 schema 且 revision 稳定、显式 Scenario 覆盖与拒绝、入口唯一对应 / routeBindings 改名、相似路由只给候选、共享入口不合并、missing / excluded / retired、missing 恢复 active）。
+  - node test/task-rerun.test.js：8 passed（真浏览器：候选自带审批被忽略；capture 两次旧记录旧图不变；generate/finalize/verify 重复执行；draft-stale 与 document-stale；stale 标记被重新采集清除；标题润色不需重审；claim 变化 approval-scope-changed 与 evidence-stale，重新确认后恢复；已批准任务不能被拒绝）。
+  - capture-plan 10、finalize-safety 10、inspect 31、staleness 2 passed；npm test：38 个测试文件全部通过。
+行为变更（有意）:
+  - 能否执行由 approval 决定：approve-tasks 写入 { status, scopeHash, approvedAt, actor, decisionRef }；旧文件只有 status 时为 approval-scope-unknown，需 approve-tasks 重新确认一次；范围变化返回 approval-scope-changed。
+  - task.status 仅为兼容投影；capture-task / generate-task / finalize / verify 均可重复执行，门槛为审批 + 证据新鲜度（lastCapture 的 scopeHash 与页面可观察 revision 对比、inspect 的 stale 标记）；transitionTask 保留为兼容函数，新路径不再调用。
+  - capture-task 记录 lastCapture（captureIds、scopeHash、pageRevisions、scenarioId/revision）并清除 stale 标记；草稿 facts 绑定 evidence.captureIds，过期草稿 finalize 报 draft-stale，旧文档 verify 报 document-stale。
+  - inspect 不再把任务 status 改为 stale，而是写 stale: { reasons, detectedAt }；只对新变化（stale 页面、首次 missing）打标。
+  - 页面 lifecycle：扫不到 → missing，被 exclude → excluded，定义与历史保留；capture / 任务计划 / generate 拒绝非 active 页面（page-not-active）。改名只在入口文件唯一对应或 routeBindings 显式声明时保留 id，其余只输出 renameCandidates。describe --lifecycle retired|active；--prune 不删除 retired。
+  - Scenario：页面与任务默认 Scenario 派生（authProfile 认证关闭时为 anonymous），.manual/scenarios/<id>.yaml 可覆盖；Capture 记录写 scenarioId，inputHash 含 scenario revision 与审批范围。
+  - 计划：入口路由按参数解析（catch-all string[] 逐段编码、普通参数编码 /），标记 crossPage、replay；未显式声明风险却指向"保存/删除/提交/支付…"的动作停在动作前（riskReason=unclassified-high-risk）。
+  - discover-tasks 忽略候选输入自带的 approval / lastCapture。
+失败或跳过的验收及原因: 页面 Scenario 目前只用于记录 scenarioId；页面采集的 --params 仍由 CLI 输入，未从显式 Scenario 读取（Phase 2 Runtime 统一）。
+产物 / commit 引用: 见 git log（P1-03 提交）
+剩余风险: 风险关键词启发式可能误判（只会更保守：停在动作前）；lastCapture 缺少源码指纹，源码内容变化仍依赖 inspect 的 stale 标记（P1-05 引入内容指纹）。
+下一项可执行任务: P1-05
 ```

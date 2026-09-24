@@ -81,16 +81,39 @@ function prepared(root) {
 
 process.stdout.write('\nfinalize safety\n');
 
-for (const status of ['candidate', 'approved', 'stale', 'verified', 'generated']) {
-  test(`任务状态为 ${status} 时 finalize 失败，正式文档字节不变`, (root) => {
+// 能否定稿取决于审批与证据新鲜度，不取决于 status 的先后：未批准、没有证据、证据过期都不行。
+for (const [status, code] of [['candidate', /approval-required/], ['approved', /evidence-missing/], ['stale', /evidence-stale/]]) {
+  test(`任务为 ${status} 时 finalize 失败（${code.source}），正式文档字节不变`, (root) => {
     const { state, draft } = prepared(root);
     taskStore.writeTask(state, { ...taskStore.readTask(state, 't'), status });
     const before = sha(MANUAL(root));
     const result = cli(root, ['generate-task', 't', '--finalize', draft]);
     assert.strictEqual(result.status, 1, result.stdout + result.stderr);
-    assert.match(result.stdout, /不能从|captured/);
+    assert.match(result.stdout + result.stderr, code);
     assert.strictEqual(sha(MANUAL(root)), before, '非法状态下不能改写正式文档');
     assert.strictEqual(taskStore.readTask(state, 't').status, status);
+  });
+}
+
+test('inspect 标记证据过期后 finalize 失败；标记不改写 status', (root) => {
+  const { state, draft } = prepared(root);
+  taskStore.writeTask(state, { ...taskStore.readTask(state, 't'), stale: { reasons: ['page-changed:home'], detectedAt: new Date().toISOString() } });
+  const before = sha(MANUAL(root));
+  const result = cli(root, ['generate-task', 't', '--finalize', draft]);
+  assert.strictEqual(result.status, 1);
+  assert.match(result.stdout + result.stderr, /evidence-stale.*page-changed:home/);
+  assert.strictEqual(sha(MANUAL(root)), before);
+  assert.strictEqual(taskStore.readTask(state, 't').status, 'captured');
+});
+
+for (const status of ['generated', 'verified']) {
+  test(`已 ${status} 的任务可以再次定稿（重新生成是合法操作）`, (root) => {
+    const { state, draft } = prepared(root);
+    taskStore.writeTask(state, { ...taskStore.readTask(state, 't'), status });
+    const result = cli(root, ['generate-task', 't', '--finalize', draft]);
+    assert.strictEqual(result.status, 0, result.stdout + result.stderr);
+    assert.notStrictEqual(fs.readFileSync(MANUAL(root), 'utf8'), 'OLD PUBLISHED DOC\n');
+    assert.strictEqual(taskStore.readTask(state, 't').status, 'generated');
   });
 }
 
@@ -126,7 +149,7 @@ test('文档已写入但任务状态写入失败：明确报告 partial-commit',
   assert.ok(out.committed.includes(path.relative(root, MANUAL(root)).replace(/\\/g, '/')));
 });
 
-test('verify 非 generated 状态：失败且不改任务文件', (root) => {
+test('verify 文档与事实不符（尚未定稿）：失败且不改任务文件', (root) => {
   const { state } = prepared(root);
   const file = taskStore.taskFileFor(state, 't');
   const before = sha(file);

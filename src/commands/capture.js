@@ -17,7 +17,8 @@ const { loadConfig } = require('../config/load');
 const { createProvider } = require('../browser');
 const { CaptureError, REASON } = require('../browser/errors');
 const { DEFAULT_READY_OPTIONS } = require('../browser/provider');
-const { CONFIDENCE, ANALYSIS, normalizePage } = require('../inspect/model');
+const { CONFIDENCE, ANALYSIS, normalizePage, isActivePage } = require('../inspect/model');
+const { resolveRouteTemplate, derivePageScenario } = require('../scenarios/model');
 const store = require('../inspect/store');
 const { readIndexes, findForwardPage } = require('../inspect/index-store');
 const { displayPath } = require('../util/fsx');
@@ -123,30 +124,12 @@ function parseParams(raw) {
 }
 
 /**
- * 把 `/artifact/:id` 这类模板换成具体路径。
+ * 把 `/artifact/:id` 这类模板换成具体路径（catch-all 参数按 / 拆段后逐段编码）。
  * @returns {{ ok: true, route } | { ok: false, missing: string[] }}
  */
 function resolveRoute(route, params) {
-  const missing = [];
-  const resolved = route
-    .split('/')
-    .map((segment) => {
-      if (!segment.startsWith(':')) return segment;
-      const name = segment.slice(1).replace(/[*?]$/, '');
-      const optional = segment.endsWith('?');
-      const value = params[name];
-      if (value === undefined || value === '') {
-        if (optional) return null; // 可选 catch-all 缺省就整段去掉
-        missing.push(name);
-        return segment;
-      }
-      return encodeURIComponent(value);
-    })
-    .filter((segment) => segment !== null)
-    .join('/');
-
-  if (missing.length > 0) return { ok: false, missing };
-  return { ok: true, route: resolved === '' ? '/' : resolved };
+  const resolved = resolveRouteTemplate(route, params);
+  return resolved.ok ? resolved : { ok: false, missing: [...resolved.missing, ...resolved.invalid] };
 }
 
 function joinUrl(baseUrl, route) {
@@ -234,6 +217,12 @@ async function run(argv) {
   if (!page) {
     const ids = existing.pages.map((p) => p.id).join(', ');
     return fail([`找不到页面 "${pageId}"。已有: ${ids}`], { json });
+  }
+  if (!isActivePage(page)) {
+    return fail([
+      `page-not-active: 页面 "${pageId}" 当前是 ${page.lifecycle}，不能采集（定义与历史证据仍保留）。`,
+      page.lifecycle === 'missing' ? '如果只是改了路由，在页面文件里声明 routeBindings 后重跑 `manual inspect`。' : '需要恢复时把 lifecycle 改回 active。',
+    ], { json });
   }
   const indexes = readIndexes(stateDirAbs);
   const indexedPage = indexes.ok
@@ -377,6 +366,7 @@ async function run(argv) {
   };
   const finalUrl = sanitizeUrl(shot.meta.url);
   const modelRevision = definitionRevision('page', page);
+  const scenario = derivePageScenario(page, config, { params: parseParams(values.params) });
   let record;
   try {
     const artifacts = [
@@ -389,9 +379,9 @@ async function run(argv) {
         kind: 'page',
         subject: { pageId },
         runId: null,
-        scenarioId: null,
+        scenarioId: scenario.id,
         checkpointId: 'default',
-        inputHash: revisionOf({ pageId, modelRevision, url: sanitizeUrl(url), spec }),
+        inputHash: revisionOf({ pageId, modelRevision, scenarioRevision: scenario.revision, url: sanitizeUrl(url), spec }),
         modelRevision,
         sourceFingerprint: null,
         observedAt: capturedAt,

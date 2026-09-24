@@ -20,7 +20,7 @@ try {
   });
   result = spawnSync(process.execPath, [CLI, 'capture-task', 'edit-profile', '--project-root', root, '--json'], { encoding: 'utf8' });
   assert.strictEqual(result.status, 1);
-  assert.match(result.stdout, /approved/);
+  assert.match(result.stdout, /approval-required/);
   process.stdout.write('\ncapture task\n  ✓ candidate 在启动浏览器前被阻止\n\n1 passed, 0 failed\n');
 } finally {
   fs.rmSync(root, { recursive: true, force: true });

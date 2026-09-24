@@ -28,7 +28,9 @@ function renderTaskYaml(input) {
     priority: task.priority,
     preconditions: task.preconditions,
     risk: task.risk,
+    // 兼容投影：最近完成的操作。能否执行看 approval，证据是否过期由 lastCapture 与当前定义比较得出。
     status: task.status,
+    approval: task.approval ?? null,
     steps: task.steps,
     completion: task.completion,
     branches: task.branches,
@@ -37,6 +39,9 @@ function renderTaskYaml(input) {
     capturePlan: task.capturePlan ?? null,
     // 权威证据引用：本任务最近一次采集提交的 Capture 记录 id（.manual/evidence/captures/<id>.json）
     captureIds: Array.isArray(task.captureIds) ? task.captureIds : [],
+    lastCapture: task.lastCapture ?? null,
+    stale: task.stale ?? null,
+    lastVerification: task.lastVerification ?? null,
     // 兼容视图：旧 evidence manifest 路径，内容由上面的 Capture 记录派生
     evidenceManifest: task.evidenceManifest ?? null,
   };

@@ -6,8 +6,10 @@ const { loadConfig } = require('../config/load');
 const { createProvider } = require('../browser');
 const pageStore = require('../inspect/store');
 const taskStore = require('../tasks/store');
-const { transitionTask } = require('../tasks/model');
 const { definitionRevision } = require('../model/revision');
+const { scopeHash, pageRevisionsFor } = require('../model/approval');
+const { deriveTaskScenario } = require('../scenarios/model');
+const { resolveScenario } = require('../scenarios/store');
 const { buildCapturePlan, writeCapturePlan } = require('../tasks/capture-plan');
 const { executeCapturePlan } = require('../tasks/executor');
 const { prepareAuth, assertAuthenticated, classifyAuthFailure, refreshAuth } = require('../auth/runtime');
@@ -36,7 +38,10 @@ async function run(argv) {
   if (!task) return fail(`找不到任务: ${positional[0]}`, json);
   const pages = pageStore.readExistingPages(stateDir);
   if (pages.errors.length) return fail(pages.errors, json);
-  const built = buildCapturePlan(task, pages.pages);
+  const derived = deriveTaskScenario(task, pages.pages, config);
+  const scenario = resolveScenario(stateDir, derived, { stepIds: (task.steps || []).map((step) => step.id) });
+  if (!scenario.ok) return fail(scenario.errors, json);
+  const built = buildCapturePlan(task, pages.pages, { scenario: scenario.scenario });
   if (!built.ok) return fail(built.errors, json);
   // 截图记录绑定本次执行所依据的任务定义 revision
   built.plan.modelRevision = definitionRevision('userTask', task);
@@ -68,8 +73,19 @@ async function run(argv) {
         refresh: (actualProvider) => refreshAuth(actualProvider, auth),
       },
     });
-    const captured = transitionTask(task, 'captured');
-    taskStore.writeTask(stateDir, { ...captured, captureIds: evidence.canonicalCaptureRefs, evidenceManifest: path.relative(projectRoot, evidence.manifestFile).replace(/\\/g, '/') });
+    // 采集可以重复执行：记录这次观察所依据的输入，新鲜度之后由它与当前定义比较得出。
+    // status 只是兼容投影，不再参与"能否执行"的判断；旧的 stale 标记被新观察清除。
+    const { stale: _cleared, ...rest } = task;
+    const lastCapture = {
+      capturedAt: evidence.capturedAt,
+      captureIds: evidence.canonicalCaptureRefs,
+      scopeHash: scopeHash(task, pages.pages),
+      modelRevision: built.plan.modelRevision,
+      pageRevisions: pageRevisionsFor(task, pages.pages),
+      scenarioId: scenario.scenario.id,
+      scenarioRevision: scenario.scenario.revision,
+    };
+    taskStore.writeTask(stateDir, { ...rest, status: 'captured', lastCapture, captureIds: evidence.canonicalCaptureRefs, evidenceManifest: path.relative(projectRoot, evidence.manifestFile).replace(/\\/g, '/') });
     const tasks = taskStore.readTasks(stateDir).tasks;
     pageStore.writeIndexes(stateDir, pages.pages, { docsOutputDir: config.docs.outputDir, tasks });
     const output = { ok: true, taskId: task.id, status: 'captured', planFile, evidence };

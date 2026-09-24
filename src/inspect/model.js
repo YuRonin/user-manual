@@ -107,6 +107,11 @@ function normalizePage(page) {
   return { ...page, browser, states };
 }
 
+/** 当前可采集 / 可生成的页面：lifecycle 缺省视为 active（旧文件）。 */
+function isActivePage(page) {
+  return (page?.lifecycle || 'active') === 'active';
+}
+
 /** 页面是否已被真实浏览器验证过。读这一个地方，别再去看 status。 */
 function isBrowserVerified(page) {
   if (page?.browser && typeof page.browser === 'object') return !!page.browser.verified;
@@ -124,6 +129,7 @@ function normalizeDependencies(dependencies) {
 function createPage(scanned, id) {
   return {
     id,
+    lifecycle: 'active',
     route: scanned.route,
     dynamic: scanned.dynamic,
     params: scanned.params || [],
@@ -173,6 +179,10 @@ function mergePage(existing, scanned) {
 
   return {
     id: existing.id,
+    // 重新扫到即恢复为 active；用户显式 retire 的页面保持 retired
+    lifecycle: existing.lifecycle === 'retired' ? 'retired' : 'active',
+    ...(Array.isArray(existing.routeBindings) ? { routeBindings: existing.routeBindings } : {}),
+    ...(Array.isArray(existing.identityAssertions) ? { identityAssertions: existing.identityAssertions } : {}),
     route: scanned.route,
     dynamic: scanned.dynamic,
     params: scanned.params || [],
@@ -194,53 +204,105 @@ function mergePage(existing, scanned) {
   };
 }
 
+/** 路由里最后一个非参数段；只用于提示可能的改名，不用于自动合并。 */
+function lastStaticSegment(route) {
+  const segments = String(route).split('/').filter((seg) => seg && !seg.startsWith(':'));
+  return segments[segments.length - 1] || null;
+}
+
+/** 用户在页面文件里显式声明的路由绑定（routeBindings[].template）。 */
+function declaredTemplates(page) {
+  return (Array.isArray(page?.routeBindings) ? page.routeBindings : []).map((b) => b?.template).filter(Boolean);
+}
+
 /**
  * 把扫描结果与已有页面文件对齐。
- * @param {object[]} scannedPages  scanNextjs() 的产出
- * @param {object[]} existingPages 已有的 pages/*.yaml 内容
- * @param {string[]} excludePatterns
- * @returns {{ pages, added, updated, removed, excluded, stale }}
+ *
+ * 页面身份是固定的 id，不由路由重算：
+ *   1. 路由相同 → 同一页面；
+ *   2. 路由变了，但入口文件唯一对应、或页面文件里显式声明了 routeBindings 指向新路由 → 同一页面（改名）；
+ *   3. 只有"看起来像"（末段相同）时不自动合并，输出 renameCandidates 等用户在 routeBindings 里确认；
+ *   4. 找不到的旧页面不删除：lifecycle 标为 missing（被 exclude 的标为 excluded），历史与定义保留。
+ * 用户显式 retire 的页面保持 retired。
+ *
+ * @returns {{ pages, added, updated, removed, excluded, stale, renamed, renameCandidates, newlyMissing }}
+ *   removed = 本次不再活跃的已有页面（missing / excluded），仍会写回文件，--prune 才删除。
  */
 function reconcile(scannedPages, existingPages, excludePatterns) {
   const kept = scannedPages.filter((p) => !isExcluded(p.route, excludePatterns));
   const excluded = scannedPages.filter((p) => isExcluded(p.route, excludePatterns));
+  const existing = existingPages.filter((p) => p && typeof p.route === 'string');
 
-  // 页面的身份是路由
-  const existingByRoute = new Map();
-  for (const page of existingPages) {
-    if (page && typeof page.route === 'string') existingByRoute.set(page.route, page);
+  const byRoute = new Map(existing.map((page) => [page.route, page]));
+  const matched = new Map(); // scanned → existing
+  const used = new Set();
+  for (const scanned of kept) {
+    const page = byRoute.get(scanned.route);
+    if (page && !used.has(page)) { matched.set(scanned, page); used.add(page); }
   }
 
-  const takenIds = new Set(existingPages.map((p) => p && p.id).filter(Boolean));
+  // 显式声明的绑定优先，其次是唯一对应的入口文件。
+  const renamed = [];
+  const renameCandidates = [];
+  const unmatchedScanned = () => kept.filter((s) => !matched.has(s));
+  const unmatchedExisting = () => existing.filter((p) => !used.has(p));
+  for (const scanned of unmatchedScanned()) {
+    const bound = unmatchedExisting().filter((page) => declaredTemplates(page).includes(scanned.route));
+    const sameEntry = unmatchedExisting().filter((page) => page.entry && page.entry === scanned.entry);
+    const scannedWithEntry = unmatchedScanned().filter((s) => s.entry === scanned.entry);
+    const candidates = bound.length ? bound : (sameEntry.length === 1 && scannedWithEntry.length === 1 ? sameEntry : []);
+    if (candidates.length === 1) {
+      matched.set(scanned, candidates[0]);
+      used.add(candidates[0]);
+      renamed.push({ id: candidates[0].id, from: candidates[0].route, to: scanned.route, by: bound.length ? 'route-binding' : 'entry' });
+    } else if (bound.length > 1 || sameEntry.length > 1) {
+      for (const page of bound.length ? bound : sameEntry) renameCandidates.push({ pageId: page.id, fromRoute: page.route, toRoute: scanned.route, reason: 'ambiguous' });
+    }
+  }
+  for (const scanned of unmatchedScanned()) {
+    const tail = lastStaticSegment(scanned.route);
+    for (const page of unmatchedExisting()) {
+      if (tail && lastStaticSegment(page.route) === tail) renameCandidates.push({ pageId: page.id, fromRoute: page.route, toRoute: scanned.route, reason: 'similar-route' });
+    }
+  }
+
+  const takenIds = new Set(existing.map((p) => p.id).filter(Boolean));
   const pages = [];
   const added = [];
   const updated = [];
   const stale = [];
 
   for (const scanned of kept) {
-    const existing = existingByRoute.get(scanned.route);
-    if (existing) {
-      const merged = mergePage(existing, scanned);
+    const page = matched.get(scanned);
+    if (page) {
+      const merged = mergePage(page, scanned);
       const changed = merged._changed;
       delete merged._changed;
       pages.push(merged);
-      if (changed.entryChanged) updated.push(merged);
-      if (changed.wentStale) stale.push(merged);
+      if (changed.entryChanged || changed.routeChanged) updated.push(merged);
+      if (changed.wentStale || (changed.routeChanged && !changed.wentStale && page.lifecycle !== 'retired')) stale.push(merged);
     } else {
       const id = uniqueId(routeToId(scanned.route), takenIds);
       takenIds.add(id);
-      const page = createPage(scanned, id);
-      pages.push(page);
-      added.push(page);
+      const created = createPage(scanned, id);
+      pages.push(created);
+      added.push(created);
     }
   }
 
-  // 已有文件里、这次扫不到的路由：可能是被删了，也可能是被 exclude 了
-  const scannedRoutes = new Set(kept.map((p) => p.route));
-  const removed = existingPages.filter((p) => p && p.route && !scannedRoutes.has(p.route));
+  // 这次没有扫到的已有页面：保留定义与历史，只改生命周期。
+  const removed = [];
+  const newlyMissing = [];
+  for (const page of unmatchedExisting()) {
+    const lifecycle = page.lifecycle === 'retired'
+      ? 'retired'
+      : (isExcluded(page.route, excludePatterns) ? 'excluded' : 'missing');
+    if (lifecycle !== (page.lifecycle || 'active')) newlyMissing.push(page);
+    removed.push({ ...page, lifecycle });
+  }
 
   pages.sort((a, b) => a.route.localeCompare(b.route));
-  return { pages, added, updated, removed, excluded, stale };
+  return { pages, added, updated, removed, excluded, stale, renamed, renameCandidates, newlyMissing };
 }
 
 module.exports = {
@@ -249,6 +311,7 @@ module.exports = {
   emptyBrowserState,
   normalizePage,
   isBrowserVerified,
+  isActivePage,
   normalizeDependencies,
   routeToId,
   uniqueId,

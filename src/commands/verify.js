@@ -4,7 +4,8 @@ const path = require('path');
 const { parseArgs } = require('../cli/args');
 const { loadConfig } = require('../config/load');
 const store = require('../tasks/store');
-const { transitionTask } = require('../tasks/model');
+const pageStore = require('../inspect/store');
+const { checkEvidenceUsable } = require('../model/approval');
 const { validateTaskFinal } = require('../generate/task-facts');
 const { validatePublication, formatIssues } = require('../publication/validate');
 
@@ -16,17 +17,20 @@ function loadVerify(root, config, taskId) {
   const manual = path.join(root, config.docs.outputDir, 'tasks', `${task.id}.md`);
   const factsFile = path.join(state, 'drafts', 'tasks', `${task.id}.facts.json`);
   if (!fs.existsSync(manual) || !fs.existsSync(factsFile)) return { ok: false, errors: ['正式文档或事实文件不存在。'] };
-  return { ok: true, state, task, manual, markdown: fs.readFileSync(manual, 'utf8'), facts: JSON.parse(fs.readFileSync(factsFile, 'utf8')) };
+  const pages = pageStore.readExistingPages(state);
+  if (pages.errors.length) return { ok: false, errors: pages.errors };
+  return { ok: true, state, task, pages: pages.pages, manual, markdown: fs.readFileSync(manual, 'utf8'), facts: JSON.parse(fs.readFileSync(factsFile, 'utf8')) };
 }
 
-/** 只读检查（可重复执行，不改变任何文件）：状态、结构事实、发布门槛。 */
-function prepareVerify({ root, config, task, manual, markdown, facts }) {
-  let nextTask;
-  try {
-    nextTask = transitionTask(task, 'verified');
-  } catch (_) {
-    return { ok: false, errors: [`任务必须是 generated，当前是 ${task.status}。`] };
+/** 只读检查（可重复执行，不改变任何文件）：审批与证据新鲜度、结构事实、发布门槛。 */
+function prepareVerify({ root, config, task, pages = [], manual, markdown, facts }) {
+  const usable = checkEvidenceUsable(task, pages);
+  if (!usable.ok) return { ok: false, errors: usable.errors };
+  if (task.lastCapture && JSON.stringify(facts.evidence?.captureIds || null) !== JSON.stringify(task.lastCapture.captureIds || [])) {
+    return { ok: false, errors: [`document-stale: 正式文档基于较早的采集，重新生成并定稿后再验证。`] };
   }
+  // 验证可以重复执行；status 与 lastVerification 只记录最近一次结果。
+  const nextTask = { ...task, status: 'verified', lastVerification: { at: new Date().toISOString(), result: 'passed' } };
   const checked = validateTaskFinal(markdown, facts);
   if (!checked.ok) return { ok: false, errors: checked.errors };
   // 图片按正式文档所在目录解析，核对产物位置、hash 与隐私记录（与 finalize 同一门槛）。

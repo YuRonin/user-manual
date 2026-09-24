@@ -82,7 +82,7 @@ function buildWorklist(pages) {
 }
 
 function renderSummary(ctx) {
-  const { meta, pages, added, updated, removed, excluded, stale, worklist, projectRoot, projectFile, pruned } = ctx;
+  const { meta, pages, added, updated, removed, excluded, stale, worklist, projectRoot, projectFile, pruned, renamed = [], renameCandidates = [] } = ctx;
   const L = [];
 
   L.push('');
@@ -125,15 +125,25 @@ function renderSummary(ctx) {
     for (const p of stale) L.push(`    - ${p.route}  (${p.entry})`);
   }
 
+  if (renamed.length > 0) {
+    L.push('');
+    L.push(`  路由改名（页面身份保留）${renamed.length} 个:`);
+    for (const r of renamed) L.push(`    - ${r.id}: ${r.from} → ${r.to}（依据 ${r.by}）`);
+  }
+  if (renameCandidates.length > 0) {
+    L.push('');
+    L.push(`  ? ${renameCandidates.length} 个可能的改名无法自动确认（未合并）:`);
+    for (const c of renameCandidates) L.push(`    - ${c.pageId}: ${c.fromRoute} → ${c.toRoute}`);
+  }
   if (removed.length > 0) {
     L.push('');
     if (pruned.length > 0) {
       L.push(`  已删除 ${pruned.length} 个页面文件（代码里已无对应路由）:`);
       for (const f of pruned) L.push(`    - ${displayPath(f, projectRoot)}`);
     } else {
-      L.push(`  ⚠ ${removed.length} 个已有页面在代码里找不到对应路由了（可能被删除或被 exclude）:`);
-      for (const p of removed) L.push(`    - ${p.route}  (.manual/pages/${p.id}.yaml)`);
-      L.push('    确认要清理的话加 --prune。');
+      L.push(`  ⚠ ${removed.length} 个已有页面在代码里找不到对应路由了，已标为 missing / excluded（定义与历史保留，不能再采集）:`);
+      for (const p of removed) L.push(`    - ${p.route}  [${p.lifecycle}]  (.manual/pages/${p.id}.yaml)`);
+      L.push('    如果只是改了路由：在旧页面文件里加 routeBindings: [{ id: main, template: <新路由> }] 后重跑 inspect；确认要删除定义的话加 --prune。');
     }
   }
 
@@ -207,7 +217,8 @@ function run(argv) {
   // 这些文件里可能有 AI 或人写的分析结果，静默删掉代价太大。
   let pruned = [];
   if (values.prune && result.removed.length > 0) {
-    pruned = store.removePageFiles(stateDirAbs, result.removed.map((p) => p.id));
+    // 显式 retired 的页面是有意保留的历史，prune 只清理 missing / excluded
+    pruned = store.removePageFiles(stateDirAbs, result.removed.filter((p) => p.lifecycle !== 'retired').map((p) => p.id));
   }
 
   const meta = {
@@ -221,14 +232,14 @@ function run(argv) {
   };
 
   // 没有 --prune 时，保留下来的页面文件也要重写进索引，否则索引会漏掉它们
-  const indexPages = values.prune
-    ? result.pages
-    : [...result.pages, ...result.removed].sort((a, b) => String(a.route).localeCompare(String(b.route)));
+  const keptRemoved = values.prune ? result.removed.filter((p) => p.lifecycle === 'retired') : result.removed;
+  const indexPages = [...result.pages, ...keptRemoved].sort((a, b) => String(a.route).localeCompare(String(b.route)));
 
   const existingTasks = taskStore.readTasks(stateDirAbs);
   if (existingTasks.errors.length > 0) return fail(existingTasks.errors, { json });
   const staleTasks = markAffectedTasks(existingTasks.tasks, {
-    pageIds: [...result.stale, ...result.removed].map((page) => page.id),
+    // 只有这次新变化的页面才标记；已经是 missing 的页面不会每次 inspect 都重复打标
+    pageIds: [...result.stale, ...result.newlyMissing].map((page) => page.id),
   });
   for (const task of staleTasks.tasks) taskStore.writeTask(stateDirAbs, task);
 
@@ -269,7 +280,10 @@ function run(argv) {
             screenshot: p.browser?.screenshot ?? null,
           })),
           excluded: result.excluded.map((p) => ({ route: p.route, entry: p.entry })),
-          missing: result.removed.map((p) => ({ id: p.id, route: p.route })),
+          missing: result.removed.map((p) => ({ id: p.id, route: p.route, lifecycle: p.lifecycle })),
+          renamed: result.renamed,
+          // 无法证明是同一页面的改名：不自动合并，在旧页面文件的 routeBindings 里声明新路由后重跑 inspect 确认
+          renameCandidates: result.renameCandidates,
           skipped: scan.skipped,
           conflicts: scan.conflicts,
           worklist,
@@ -294,6 +308,7 @@ function run(argv) {
       renderSummary({
         meta, pages: result.pages, added: result.added, updated: result.updated,
         removed: result.removed, excluded: result.excluded, stale: result.stale,
+        renamed: result.renamed, renameCandidates: result.renameCandidates,
         worklist, projectRoot, projectFile, pruned,
       }) + '\n'
     );

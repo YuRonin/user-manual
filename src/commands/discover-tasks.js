@@ -106,12 +106,14 @@ function run(argv) {
       errors.push(`${where}.entryPage "${input.entryPage}" 不在本次发现范围。`);
     }
     const existing = existingById.get(input.id);
-    if (existing && existing.status !== 'candidate') {
+    if (existing && (existing.status !== 'candidate' || existing.approval?.status === 'approved')) {
       errors.push(`${where}: 不能覆盖 ${existing.status} 任务 ${input.id}。`);
     }
     if (seen.has(input.id)) errors.push(`${where}.id 重复: ${input.id}`);
     seen.add(input.id);
-    const task = { ...input, status: 'candidate' };
+    // 候选输入不能自带审批：审批只能由 approve-tasks 写入。
+    const { approval: _ignored, lastCapture: _noCapture, ...rest } = input;
+    const task = { ...rest, status: 'candidate', approval: { status: 'pending', scopeHash: null } };
     if (Array.isArray(task.steps)) {
       task.steps.forEach((step, stepIndex) => {
         if (step?.page && !knownPageIds.has(step.page)) {

@@ -18,7 +18,7 @@ const path = require('path');
 
 const { parseArgs } = require('../cli/args');
 const { loadConfig } = require('../config/load');
-const { ANALYSIS, normalizePage } = require('../inspect/model');
+const { ANALYSIS, normalizePage, isActivePage } = require('../inspect/model');
 const store = require('../inspect/store');
 const { readIndexes, findForwardPage } = require('../inspect/index-store');
 const { buildDraft } = require('../generate/draft');
@@ -151,6 +151,9 @@ function runDraft({ projectRoot, config, page, stateDirAbs, skillRoot, indexCont
       `"${page.id}" 还没完成源码分析（当前 ${page.status?.sourceAnalysis || '未知'}），缺少标题或用途。`,
       `先用 \`manual describe --id ${page.id} --title ... --purpose ...\` 补上。`
     );
+  }
+  if (!isActivePage(page)) {
+    errors.push(`page-not-active: "${page.id}" 当前是 ${page.lifecycle}，不能生成当前手册（历史发布仍保留）。`);
   }
   if (page.includeInManual === false) {
     errors.push(`"${page.id}" 标记为 includeInManual: false，不在手册范围内。`);

@@ -379,6 +379,34 @@ test('代码里删掉的路由默认只报告不删，--prune 才清理', () => 
   });
 });
 
+test('路由消失：页面标为 missing 并保留定义，capture 拒绝；显式 retired 的页面 --prune 也不删除', () => {
+  withFixture(fx.nextAppFixture, (root) => {
+    initProject(root);
+    run('inspect', root);
+    assert.strictEqual(pageYaml(root, 'profile').lifecycle, 'active');
+    let r = run('describe', root, ['--id', 'profile', '--title', '个人中心', '--purpose', '管理资料。']);
+    assert.strictEqual(r.status, 0, r.stderr);
+
+    fs.rmSync(path.join(root, 'app', 'profile'), { recursive: true });
+    r = run('inspect', root, ['--json']);
+    assert.strictEqual(r.status, 0, r.stderr);
+    assert.deepStrictEqual(JSON.parse(r.stdout).missing.find((p) => p.id === 'profile').lifecycle, 'missing');
+    assert.strictEqual(pageYaml(root, 'profile').lifecycle, 'missing');
+    assert.strictEqual(pageYaml(root, 'profile').title, '个人中心', '分析结果保留');
+    r = run('capture', root, ['profile']);
+    assert.strictEqual(r.status, 1);
+    assert.match(r.stderr, /page-not-active/);
+
+    r = run('describe', root, ['--id', 'profile', '--lifecycle', 'retired']);
+    assert.strictEqual(r.status, 0, r.stderr);
+    r = run('describe', root, ['--id', 'profile', '--lifecycle', 'missing']);
+    assert.strictEqual(r.status, 1, 'missing 由 inspect 维护，不能手工设置');
+    r = run('inspect', root, ['--prune']);
+    assert.strictEqual(r.status, 0, r.stderr);
+    assert.strictEqual(pageYaml(root, 'profile').lifecycle, 'retired', 'retire 与 prune 分离');
+  });
+});
+
 // ---------------------------------------------------------------- 错误路径
 test('未 init 就 inspect：提示先跑 init', () => {
   withFixture(fx.nextAppFixture, (root) => {

@@ -6,7 +6,8 @@ const path = require('path');
 const { parseArgs } = require('../cli/args');
 const { loadConfig } = require('../config/load');
 const pageStore = require('../inspect/store');
-const { transitionTask, validateTask } = require('../tasks/model');
+const { validateTask } = require('../tasks/model');
+const { approve, approvalState, APPROVAL_STATES } = require('../model/approval');
 const store = require('../tasks/store');
 
 const KNOWN_FLAGS = new Set(['projectRoot', 'input', 'json', 'help']);
@@ -22,7 +23,10 @@ manual approve-tasks —— 人工确认、调整或拒绝候选任务
     { "id": "unused-task", "decision": "reject" }
   ] }
 
-只有 candidate 可以被批准或拒绝；全部决策校验通过后才会一次性落盘。
+candidate 可以被批准或拒绝。已批准任务的动作、断言或风险变化后（或来自旧版本、没有审批范围时），
+用 approve 重新确认一次；只改标题、目标描述、优先级不需要重新确认。
+可选 "actor" / "decisionRef" 作为审计信息写入审批记录（不是认证）。
+全部决策校验通过后才会一次性落盘。
 `.trim();
 
 function fail(errors, json) {
@@ -93,16 +97,18 @@ function run(argv) {
       errors.push(`${where} 的任务不存在: ${decision.id}`);
       return;
     }
-    if (task.status !== 'candidate') {
-      errors.push(`${where}: 只有 candidate 可以批准或拒绝，${decision.id} 当前是 ${task.status}。`);
-      return;
-    }
     if (!['approve', 'reject'].includes(decision.decision)) {
       errors.push(`${where}.decision 需要是 approve 或 reject。`);
       return;
     }
+    const state = approvalState(task, pages.pages);
     if (decision.decision === 'reject') {
-      operations.push({ type: 'reject', task });
+      if (state !== APPROVAL_STATES.PENDING) errors.push(`${where}: 只有候选任务可以拒绝，${decision.id} 当前审批状态是 ${state}。`);
+      else operations.push({ type: 'reject', task });
+      return;
+    }
+    if (state === APPROVAL_STATES.REJECTED) {
+      errors.push(`${where}: ${decision.id} 已被拒绝，不能直接批准。`);
       return;
     }
 
@@ -110,7 +116,16 @@ function run(argv) {
     for (const field of ['title', 'goal', 'priority']) {
       if (decision[field] !== undefined) editable[field] = decision[field];
     }
-    const next = transitionTask({ ...task, ...editable }, 'approved', { humanConfirmed: true });
+    const edited = { ...task, ...editable };
+    // 审批范围按确认时刻的定义计算；status 只作兼容投影（候选 → approved，其余保持）。
+    const next = {
+      ...edited,
+      status: task.status === 'candidate' ? 'approved' : task.status,
+      approval: approve(edited, pages.pages, {
+        actor: typeof decision.actor === 'string' ? decision.actor : null,
+        decisionRef: typeof decision.decisionRef === 'string' ? decision.decisionRef : null,
+      }),
+    };
     const checked = validateTask(next);
     if (!checked.ok) errors.push(...checked.errors.map((error) => `${where}: ${error}`));
     else operations.push({ type: 'approve', task: checked.task });
