@@ -13,12 +13,12 @@
 
 const fs = require('fs');
 const path = require('path');
-const yaml = require('js-yaml');
 
 const { parseArgs } = require('../cli/args');
 const { loadConfig } = require('../config/load');
 const { CONFIDENCE, ANALYSIS, isBrowserVerified } = require('../inspect/model');
 const store = require('../inspect/store');
+const { createProjectStore } = require('../store/project');
 const { displayPath } = require('../util/fsx');
 
 const KNOWN_FLAGS = new Set(['projectRoot', 'input', 'id', 'title', 'purpose', 'actions', 'source', 'includeInManual', 'lifecycle', 'json', 'help']);
@@ -276,10 +276,14 @@ function run(argv) {
   const { config } = loaded;
 
   const stateDirAbs = path.join(projectRoot, config.artifacts.stateDir);
-  const existing = store.readExistingPages(stateDirAbs);
-  if (existing.errors.length > 0) {
-    return fail(['已有的页面文件解析失败：', ...existing.errors.map((e) => `  ${e}`)], { json });
+  const projectStore = createProjectStore({ stateDirAbs, docsOutputDir: config.docs.outputDir });
+  let base;
+  try {
+    base = projectStore.load();
+  } catch (e) {
+    return fail(['已有的页面文件解析失败：', ...(e.errors || [e.message]).map((x) => `  ${x}`)], { json });
   }
+  const existing = { pages: base.model.pages };
   if (existing.pages.length === 0) {
     return fail(['.manual/pages/ 里还没有页面。先运行 `manual inspect` 扫描项目。'], { json });
   }
@@ -321,30 +325,14 @@ function run(argv) {
     updated.push(next);
   }
 
-  // 项目元信息沿用现有 project.yaml（describe 不重新探测框架），读不到就退化成 config 里的信息
-  const projectFilePath = store.projectFileFor(stateDirAbs);
-  let meta = {
-    name: config.project.name,
-    framework: null,
-    frameworkVersion: null,
-    router: null,
-    appDir: null,
-    pagesDir: null,
-  };
-  if (fs.existsSync(projectFilePath)) {
-    try {
-      const prev = yaml.load(fs.readFileSync(projectFilePath, 'utf8'));
-      if (prev?.project) meta = { ...meta, ...prev.project };
-    } catch (_) {
-      // 索引坏了不影响写页面，下面会用当前信息重建
-    }
+  // 定义提交：基于本次读取的 revision 做 CAS，读取之后别人改过模型就拒绝，而不是覆盖
+  try {
+    projectStore.commit({ base, kind: 'definition', changes: { pages: updated } });
+  } catch (e) {
+    return fail([`${e.code || 'model-commit-failed'}: ${e.message}`], { json });
   }
-  meta.generatedAt = new Date().toISOString();
-
+  const projectFile = store.projectFileFor(stateDirAbs);
   const allPages = [...byId.values()].sort((a, b) => String(a.route).localeCompare(String(b.route)));
-  const { projectFile } = store.writeModel(stateDirAbs, meta, allPages, {
-    docsOutputDir: config.docs.outputDir,
-  });
 
   const remaining = allPages.filter(
     (p) => p.includeInManual !== false && p.status?.sourceAnalysis !== ANALYSIS.COMPLETED

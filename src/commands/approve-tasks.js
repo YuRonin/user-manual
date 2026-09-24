@@ -5,10 +5,9 @@ const path = require('path');
 
 const { parseArgs } = require('../cli/args');
 const { loadConfig } = require('../config/load');
-const pageStore = require('../inspect/store');
 const { validateTask } = require('../tasks/model');
 const { approve, approvalState, APPROVAL_STATES } = require('../model/approval');
-const store = require('../tasks/store');
+const { createProjectStore } = require('../store/project');
 
 const KNOWN_FLAGS = new Set(['projectRoot', 'input', 'json', 'help']);
 const HELP = `
@@ -64,10 +63,11 @@ function run(argv) {
   const loaded = loadConfig(projectRoot);
   if (!loaded.ok) return fail(loaded.errors, json);
   const stateDir = path.join(projectRoot, loaded.config.artifacts.stateDir);
-  const existing = store.readTasks(stateDir);
-  if (existing.errors.length > 0) return fail(existing.errors, json);
-  const pages = pageStore.readExistingPages(stateDir);
-  if (pages.errors.length > 0) return fail(pages.errors, json);
+  const projectStore = createProjectStore({ stateDirAbs: stateDir, docsOutputDir: loaded.config.docs.outputDir });
+  let base;
+  try { base = projectStore.load(); } catch (error) { return fail(error.errors || [error.message], json); }
+  const existing = { tasks: base.model.tasks };
+  const pages = { pages: base.model.pages };
 
   const inputErrors = [];
   const payload = readJson(values.input, inputErrors);
@@ -133,24 +133,16 @@ function run(argv) {
 
   if (errors.length > 0) return fail(errors, json);
 
-  const approved = [];
-  const rejected = [];
-  for (const operation of operations) {
-    if (operation.type === 'approve') {
-      store.writeTask(stateDir, operation.task);
-      approved.push(operation.task.id);
-    } else {
-      store.removeTask(stateDir, operation.task.id);
-      rejected.push(operation.task.id);
-    }
+  const approved = operations.filter((op) => op.type === 'approve').map((op) => op.task);
+  const rejected = operations.filter((op) => op.type === 'reject').map((op) => op.task.id);
+  // 审批是决策：基于读取时的 revision 做 CAS，全部决策一次提交
+  try {
+    projectStore.commit({ base, kind: 'definition', changes: { tasks: approved, removeTasks: rejected } });
+  } catch (error) {
+    return fail(`${error.code || 'model-commit-failed'}: ${error.message}`, json);
   }
-  const updatedTasks = store.readTasks(stateDir);
-  pageStore.writeIndexes(stateDir, pages.pages, {
-    docsOutputDir: loaded.config.docs.outputDir,
-    tasks: updatedTasks.tasks,
-  });
 
-  const output = { ok: true, approved, rejected };
+  const output = { ok: true, approved: approved.map((task) => task.id), rejected };
   if (json) process.stdout.write(JSON.stringify(output, null, 2) + '\n');
   else process.stdout.write(`[manual approve-tasks] 已批准 ${approved.length} 个，拒绝 ${rejected.length} 个候选任务。\n`);
   return 0;

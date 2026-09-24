@@ -203,11 +203,14 @@ function renderConfigYaml(config, meta = {}) {
 function renderStateGitignore() {
   return [
     '# 由 manual init 生成。',
-    '# config.yaml / project.yaml / pages/ 应当入库；下面这些是本机中间产物。',
+    '# config.yaml / project.yaml / pages/ / tasks/ / snapshots/ / current.json 应当入库；',
+    '# 下面这些是本机中间产物（锁、采集中的临时目录、原始截图等）。',
     'session/',
     'cache/',
     'screenshots/',
     'artifacts/',
+    'locks/',
+    'evidence/staging/',
     '*.bak',
     '',
   ].join('\n');

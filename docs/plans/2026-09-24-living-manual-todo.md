@@ -81,11 +81,11 @@
   - [x] 显式 source/glob、样式/资源/翻译纳入图。
   - [x] 未解析动态依赖标 partial/broad impact。
   - [x] 保存旧新图并输出失效原因。
-- [ ] **P1-06 Project Store 和索引 revision**（依赖 P1-01/03/05）
-  - [ ] snapshot/current 提交、工作副本导入和回填。
-  - [ ] owner lock、CAS、独立进程并发冲突检查。
-  - [ ] 过期索引重建，capture 不全量重写页面定义。
-  - [ ] 指针切换前后故障恢复测试通过。
+- [x] **P1-06 Project Store 和索引 revision**（依赖 P1-01/03/05）
+  - [x] snapshot/current 提交、工作副本导入和回填。
+  - [x] owner lock、CAS、独立进程并发冲突检查。
+  - [x] 过期索引重建，capture 不全量重写页面定义。
+  - [x] 指针切换前后故障恢复测试通过。
 - [ ] **P1-04 旧项目迁移**（依赖 P1-01/02/03/06）
   - [ ] dry-run 清单、固定 ID 映射、输入 hash。
   - [ ] 备份、apply journal、重复执行、故障恢复。
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 完成 8 / 32，Gate 0 已通过（2026-09-24）。Phase 1 进行中：已完成 P1-01、P1-02、P1-03、P1-05。下一项：P1-06。
+- 工程实施：Phase 0 完成 8 / 32，Gate 0 已通过（2026-09-24）。Phase 1 进行中：已完成 P1-01、P1-02、P1-03、P1-05、P1-06。下一项：P1-04。
 
 ### 执行记录
 
@@ -504,4 +504,26 @@ Task ID: P1-05
 产物 / commit 引用: 见 git log（P1-05 提交）
 剩余风险: 首次升级后所有已完成分析的页面会获得指纹但不会立即标 stale（没有旧指纹可比）；任务 lastCapture 的 pageRevisions 因加入指纹会在升级后判为一次过期（保守）。CSS 内部 @import 不跟随。
 下一项可执行任务: P1-06
+```
+
+```text
+Task ID: P1-06
+状态: completed
+开始时基线 commit / dirty files: 8c9ec4b（P1-05）；工作区干净
+实际修改文件: src/store/project.js（新）、src/store/lock.js（新）、src/store/snapshot.js（新）、src/inspect/index-store.js、src/commands/{inspect,describe,capture,capture-task,generate-task,verify,approve-tasks,discover-tasks}.js、src/config/render.js、test/project-store.test.js（新）、test/project-lock.test.js（新）、test/index-store.test.js、test/capture.test.js、test/run.js
+契约变更: 无（实现 C02）。补充约定：snapshot 名为完整内容 revision；CAS 使用只含定义与决策（页面定义 / lifecycle / 分析状态 / 源码指纹、任务定义与审批、项目元信息）的 modelRevision，观察投影不参与。src/inspect/store.js、src/tasks/store.js、src/scenarios/store.js 保留为工作副本读写器，由 Project Store 调用，未另改。
+执行命令与结果:
+  - node test/project-lock.test.js：5 passed（排他与 token 释放、跨进程等待、同机死进程 / 租约过期自动清理、存活锁不抢占、他机锁 lock-held-remote 不清理）。
+  - node test/project-store.test.js：11 passed（首次导入与不重复导入、手改导入且保留旧快照、旧 base 定义提交 model-conflict、两个独立进程 lost update 被拒、观察提交不覆盖 describe 且不改定义 revision、观察提交不能改定义、只写变更文件、快照后 / 指针后故障、物化中途故障修复、索引信封过期检测与重建、Runtime 固定读已提交快照）。
+  - index-store 4、capture 34 passed；npm test：41 个测试文件全部通过。
+行为变更（有意）:
+  - 所有改模型的命令（inspect / describe / capture / approve-tasks / discover-tasks / capture-task / generate-task 定稿 / verify）改为 load → 锁外工作 → commit。定义提交做 CAS，冲突返回 model-conflict；观察提交（capture、采集结果、定稿 / 验证状态）只合并本次改动的字段，不重写其它页面、不覆盖并发的定义修改。
+  - 提交顺序：.manual/snapshots/<hex>.json（不可变）→ current.json（materialized=false）→ 工作副本与索引 → materialized=true。读取时发现 materialized=false 先按快照修复工作副本；工作副本被手改则校验后导入为新快照（parent 指向旧快照）并重建索引。
+  - 索引写 .manual/index/meta.json 信封（schemaVersion / revision / modelRevision / generatedBy / 各索引文件 hash）；readIndexes 只接受与当前提交一致且未被改动的索引，否则回退页面模型；ensureIndexes 可按当前提交重建。
+  - 行为反转：旧版“forward 索引优先于页面 YAML”（capture 用例）改为“手改 YAML 先导入为新提交，索引随之重建，旧索引不能覆盖已提交事实”。
+  - 锁文件 .manual/locks/project.lock（exclusive create，owner token / pid / host / createdAt / leaseUntil）；.manual/.gitignore 增加 locks/ 与 evidence/staging/。
+失败或跳过的验收及原因: 跨主机锁只做提示不自动恢复（按计划）；锁租约不续期，提交阶段需在 30s 内完成（当前提交均为毫秒级）。
+产物 / commit 引用: 见 git log（P1-06 提交）
+剩余风险: 快照为全量副本，长期项目会累积（后续可加 GC，须保留 release 引用的快照）；Capture 记录 latest.json 的读改写仍未加锁（观察引用，最后写入者生效）。
+下一项可执行任务: P1-04
 ```

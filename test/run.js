@@ -20,6 +20,8 @@ const FILES = [
   'index-store.test.js',
   'task-model.test.js',
   'task-store.test.js',
+  'project-lock.test.js',
+  'project-store.test.js',
   'discover-tasks.test.js',
   'capture-plan.test.js',
   'task-executor.test.js',

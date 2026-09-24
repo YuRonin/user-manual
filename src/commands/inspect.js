@@ -22,8 +22,8 @@ const { frameworkDependencies } = require('../inspect/framework-dependencies');
 const { applyFingerprints, impactReport } = require('../inspect/fingerprint');
 const { reconcile, ANALYSIS } = require('../inspect/model');
 const store = require('../inspect/store');
+const { createProjectStore } = require('../store/project');
 const { displayPath, writeText } = require('../util/fsx');
-const taskStore = require('../tasks/store');
 const { markAffectedTasks } = require('../tasks/staleness');
 
 const KNOWN_FLAGS = new Set(['projectRoot', 'prune', 'json', 'help']);
@@ -206,13 +206,17 @@ function run(argv) {
   });
 
   const stateDirAbs = path.join(projectRoot, config.artifacts.stateDir);
-  const existing = store.readExistingPages(stateDirAbs);
-  if (existing.errors.length > 0) {
+  const projectStore = createProjectStore({ stateDirAbs, docsOutputDir: config.docs.outputDir });
+  let base;
+  try {
+    base = projectStore.load();
+  } catch (e) {
     return fail(
-      ['已有的页面文件解析失败，先修好它们再重扫：', ...existing.errors.map((e) => `  ${e}`)],
+      ['已有的页面文件解析失败，先修好它们再重扫：', ...(e.errors || [e.message]).map((x) => `  ${x}`)],
       { json }
     );
   }
+  const existing = { pages: base.model.pages };
 
   const result = reconcile(scan.pages, existing.pages, config.inspect.exclude);
 
@@ -231,11 +235,9 @@ function run(argv) {
 
   // 代码里已不存在的路由：默认只报告，加 --prune 才删。
   // 这些文件里可能有 AI 或人写的分析结果，静默删掉代价太大。
-  let pruned = [];
-  if (values.prune && result.removed.length > 0) {
-    // 显式 retired 的页面是有意保留的历史，prune 只清理 missing / excluded
-    pruned = store.removePageFiles(stateDirAbs, result.removed.filter((p) => p.lifecycle !== 'retired').map((p) => p.id));
-  }
+  // 显式 retired 的页面是有意保留的历史，prune 只清理 missing / excluded
+  const prunedIds = values.prune ? result.removed.filter((p) => p.lifecycle !== 'retired').map((p) => p.id) : [];
+  const pruned = prunedIds.map((id) => store.pageFileFor(stateDirAbs, id));
 
   const meta = {
     name: config.project.name,
@@ -251,17 +253,34 @@ function run(argv) {
   const keptRemoved = values.prune ? result.removed.filter((p) => p.lifecycle === 'retired') : result.removed;
   const indexPages = [...result.pages, ...keptRemoved].sort((a, b) => String(a.route).localeCompare(String(b.route)));
 
-  const existingTasks = taskStore.readTasks(stateDirAbs);
-  if (existingTasks.errors.length > 0) return fail(existingTasks.errors, { json });
-  const staleTasks = markAffectedTasks(existingTasks.tasks, {
+  const staleTasks = markAffectedTasks(base.model.tasks, {
     // 只有这次新变化的页面才标记；已经是 missing 的页面不会每次 inspect 都重复打标
     pageIds: [...result.stale, ...result.newlyMissing].map((page) => page.id),
   });
-  for (const task of staleTasks.tasks) taskStore.writeTask(stateDirAbs, task);
 
-  const { written, projectFile } = store.writeModel(stateDirAbs, meta, indexPages, {
-    docsOutputDir: config.docs.outputDir,
-  });
+  // 一次定义提交：页面、被 prune 的页面、受影响任务的 stale 标记、项目元信息。
+  // 扫描期间有别的命令改过模型 → model-conflict，重新 inspect 即可。
+  try {
+    projectStore.commit({
+      base,
+      kind: 'definition',
+      changes: {
+        pages: indexPages,
+        removePages: prunedIds,
+        tasks: staleTasks.tasks.filter((task) => staleTasks.staleIds.includes(task.id)),
+        meta,
+      },
+    });
+  } catch (e) {
+    return fail([`${e.code || 'model-commit-failed'}: ${e.message}`], { json });
+  }
+  const projectFile = store.projectFileFor(stateDirAbs);
+  const written = [
+    ...indexPages.map((p) => store.pageFileFor(stateDirAbs, p.id)),
+    projectFile,
+    store.forwardIndexFileFor(stateDirAbs), store.reverseIndexFileFor(stateDirAbs),
+    store.taskForwardIndexFileFor(stateDirAbs), store.taskReverseIndexFileFor(stateDirAbs),
+  ];
   if (previousGraph) writeText(path.join(store.indexDirFor(stateDirAbs), 'graph.previous.json'), JSON.stringify(previousGraph, null, 2) + '\n');
   writeText(graphFile, JSON.stringify(fingerprinted.graph, null, 2) + '\n');
   const worklist = buildWorklist(result.pages);

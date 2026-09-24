@@ -25,6 +25,7 @@ const { displayPath } = require('../util/fsx');
 const { prepareAuth, classifyAuthFailure, refreshAuth } = require('../auth/runtime');
 const { validateNavigation, runAssertions } = require('../evidence/validate-page');
 const { captureStable, derivePublished } = require('../evidence/capture-safe');
+const { createProjectStore } = require('../store/project');
 const { createCaptureStore, sanitizeUrl } = require('../evidence/store');
 const { definitionRevision } = require('../model/revision');
 const { revisionOf } = require('../util/hash');
@@ -205,10 +206,15 @@ async function run(argv) {
   const { config } = loaded;
 
   const stateDirAbs = path.join(projectRoot, config.artifacts.stateDir);
-  const existing = store.readExistingPages(stateDirAbs);
-  if (existing.errors.length > 0) {
-    return fail(['已有的页面文件解析失败：', ...existing.errors.map((e) => `  ${e}`)], { json });
+  // 读取已提交模型（必要时导入手工修改 / 修复半写入）；浏览器工作在锁外进行，最后只提交这一页的观察投影
+  const projectStore = createProjectStore({ stateDirAbs, docsOutputDir: config.docs.outputDir });
+  let base;
+  try {
+    base = projectStore.load();
+  } catch (e) {
+    return fail(['已有的页面文件解析失败：', ...(e.errors || [e.message]).map((x) => `  ${x}`)], { json });
   }
+  const existing = { pages: base.model.pages };
   if (existing.pages.length === 0) {
     return fail(['.manual/pages/ 里还没有页面。先运行 `manual inspect` 扫描项目。'], { json });
   }
@@ -446,24 +452,12 @@ async function run(argv) {
     updatedPage.confidence = CONFIDENCE.VERIFIED;
   }
 
-  const allPages = existing.pages
-    .map((p) => (p.id === pageId ? updatedPage : p))
-    .sort((a, b) => String(a.route).localeCompare(String(b.route)));
-
-  let meta = { name: config.project.name, framework: null, frameworkVersion: null, router: null, appDir: null, pagesDir: null };
-  const projectFilePath = store.projectFileFor(stateDirAbs);
-  if (fs.existsSync(projectFilePath)) {
-    try {
-      const yaml = require('js-yaml');
-      const prev = yaml.load(fs.readFileSync(projectFilePath, 'utf8'));
-      if (prev?.project) meta = { ...meta, ...prev.project };
-    } catch (_) { /* 索引坏了不影响写页面 */ }
+  // 观察提交：只改这一页的 browser 投影与可信度，不重写其它页面、不覆盖同时发生的定义修改
+  try {
+    projectStore.commit({ base, kind: 'observation', changes: { pages: [updatedPage] } });
+  } catch (e) {
+    return fail([`${e.code || 'model-commit-failed'}: ${e.message}（Capture ${record.id} 已提交，可重新运行以更新页面投影）`], { json });
   }
-  meta.generatedAt = capturedAt;
-
-  store.writeModel(stateDirAbs, meta, allPages, {
-    docsOutputDir: config.docs.outputDir,
-  });
 
   if (json) {
     process.stdout.write(

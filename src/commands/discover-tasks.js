@@ -5,9 +5,8 @@ const path = require('path');
 
 const { parseArgs } = require('../cli/args');
 const { loadConfig } = require('../config/load');
-const pageStore = require('../inspect/store');
 const { validateTask } = require('../tasks/model');
-const taskStore = require('../tasks/store');
+const { createProjectStore } = require('../store/project');
 const { buildDiscoveryWorklist } = require('../tasks/discovery');
 
 const KNOWN_FLAGS = new Set(['projectRoot', 'input', 'all', 'json', 'help']);
@@ -63,8 +62,10 @@ function run(argv) {
   const loaded = loadConfig(projectRoot);
   if (!loaded.ok) return fail(loaded.errors, json);
   const stateDir = path.join(projectRoot, loaded.config.artifacts.stateDir);
-  const existingPages = pageStore.readExistingPages(stateDir);
-  if (existingPages.errors.length > 0) return fail(existingPages.errors, json);
+  const projectStore = createProjectStore({ stateDirAbs: stateDir, docsOutputDir: loaded.config.docs.outputDir });
+  let base;
+  try { base = projectStore.load(); } catch (error) { return fail(error.errors || [error.message], json); }
+  const existingPages = { pages: base.model.pages };
   if (existingPages.pages.length === 0) return fail('还没有页面模型，请先运行 manual inspect。', json);
 
   const selected = values.all
@@ -87,8 +88,7 @@ function run(argv) {
     return fail('输入需要形如 { "tasks": [ ... ] }，且不能为空。', json);
   }
 
-  const current = taskStore.readTasks(stateDir);
-  if (current.errors.length > 0) return fail(current.errors, json);
+  const current = { tasks: base.model.tasks };
   const existingById = new Map(current.tasks.map((task) => [task.id, task]));
   const selectedIds = new Set(selected.map((page) => page.id));
   const knownPageIds = new Set(existingPages.pages.map((page) => page.id));
@@ -127,14 +127,11 @@ function run(argv) {
   });
 
   if (errors.length > 0) return fail(errors, json);
-  for (const task of candidates) taskStore.writeTask(stateDir, task);
-
-  const merged = new Map(current.tasks.map((task) => [task.id, task]));
-  for (const task of candidates) merged.set(task.id, task);
-  pageStore.writeIndexes(stateDir, existingPages.pages, {
-    docsOutputDir: loaded.config.docs.outputDir,
-    tasks: [...merged.values()],
-  });
+  try {
+    projectStore.commit({ base, kind: 'definition', changes: { tasks: candidates } });
+  } catch (error) {
+    return fail(`${error.code || 'model-commit-failed'}: ${error.message}`, json);
+  }
 
   const output = { ok: true, phase: 'candidates', created: candidates.map((task) => task.id), status: 'candidate' };
   if (json) process.stdout.write(JSON.stringify(output, null, 2) + '\n');

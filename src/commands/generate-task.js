@@ -3,8 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { parseArgs } = require('../cli/args');
 const { loadConfig } = require('../config/load');
-const store = require('../tasks/store');
-const pageStore = require('../inspect/store');
+const { createProjectStore } = require('../store/project');
 const { checkEvidenceUsable } = require('../model/approval');
 const { buildTaskDraft, publishAtomic } = require('../generate/task-draft');
 const { validateTaskFinal } = require('../generate/task-facts');
@@ -56,14 +55,14 @@ function validateFinalize({ root, config, task, pages, final, facts }) {
  * 提交：先原子替换正式文档，再写任务状态。两者不是一个事务——
  * 文档已替换而状态写入失败时明确报告 partial-commit，交给后续对账（P1-07），不伪称成功。
  */
-function commitFinalize({ root, state, manualFile, final, nextTask }) {
+function commitFinalize({ root, projectStore, base, manualFile, final, nextTask }) {
   try {
     publishAtomic(manualFile, final);
   } catch (error) {
     return { ok: false, code: error.code || 'write-failed', errors: [`${error.code || 'write-failed'}: 正式文档未改变。${error.message}`] };
   }
   try {
-    store.writeTask(state, nextTask);
+    projectStore.commit({ base, kind: 'observation', changes: { tasks: [nextTask] } });
   } catch (error) {
     return {
       ok: false,
@@ -75,12 +74,12 @@ function commitFinalize({ root, state, manualFile, final, nextTask }) {
   return { ok: true };
 }
 
-function runFinalize({ root, config, state, task, pages, factsFile, finalizeInput, json }) {
+function runFinalize({ root, config, projectStore, base, task, pages, factsFile, finalizeInput, json }) {
   const loaded = loadFinalize({ factsFile, finalizeInput });
   if (!loaded.ok) return fail(loaded.errors, json);
   const checked = validateFinalize({ root, config, task, pages, final: loaded.final, facts: loaded.facts });
   if (!checked.ok) return fail(checked.errors, json);
-  const committed = commitFinalize({ root, state, manualFile: checked.manualFile, final: loaded.final, nextTask: checked.nextTask });
+  const committed = commitFinalize({ root, projectStore, base, manualFile: checked.manualFile, final: loaded.final, nextTask: checked.nextTask });
   if (!committed.ok) {
     if (json) process.stdout.write(JSON.stringify({ ok: false, code: committed.code, committed: committed.committed || [], errors: committed.errors }, null, 2) + '\n');
     else committed.errors.forEach((x) => process.stderr.write(`[manual generate-task] ${x}\n`));
@@ -125,15 +124,16 @@ function run(argv) {
   if (!loaded.ok) return fail(loaded.errors, json);
   const config = loaded.config;
   const state = path.join(root, config.artifacts.stateDir);
-  const task = store.readTask(state, positional[0]);
+  const projectStore = createProjectStore({ stateDirAbs: state, docsOutputDir: config.docs.outputDir });
+  let base;
+  try { base = projectStore.load(); } catch (error) { return fail(error.errors || [error.message], json); }
+  const task = base.model.tasks.find((t) => t.id === positional[0]);
   if (!task) return fail(`找不到任务: ${positional[0]}`, json);
-  const pageRead = pageStore.readExistingPages(state);
-  if (pageRead.errors.length) return fail(pageRead.errors, json);
-  const pages = pageRead.pages;
+  const pages = base.model.pages;
   const draftDir = path.join(state, 'drafts', 'tasks');
   const draftFile = path.join(draftDir, `${task.id}.md`);
   const factsFile = path.join(draftDir, `${task.id}.facts.json`);
-  if (values.finalize) return runFinalize({ root, config, state, task, pages, factsFile, finalizeInput: values.finalize, json });
+  if (values.finalize) return runFinalize({ root, config, projectStore, base, task, pages, factsFile, finalizeInput: values.finalize, json });
   return runDraft({ root, config, task, pages, draftDir, draftFile, factsFile, json });
 }
 

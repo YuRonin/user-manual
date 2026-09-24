@@ -31,18 +31,33 @@ function writeJson(root, name, value) {
 
 process.stdout.write('\nindex store\n');
 
-test('读取有效索引并优先按 route 查找页面', (root) => {
-  const login = { id: 'login', route: '/login', files: ['src/login.tsx'] };
-  writeJson(root, 'forward.json', { '/login': login });
-  writeJson(root, 'reverse.json', { 'src/login.tsx': ['/login'] });
+test('读取由当前提交派生的索引并优先按 route 查找页面', (root) => {
+  const pageStore = require('../src/inspect/store');
+  const { createProjectStore } = require('../src/store/project');
+  pageStore.writeModel(root, { name: 'x' }, [{
+    id: 'login', route: '/login', dynamic: false, params: [], entry: 'src/login.tsx', source: ['src/login.tsx'],
+    dependencies: { files: [], unresolved: [] }, states: {}, status: { sourceAnalysis: 'pending' },
+  }]);
+  createProjectStore({ stateDirAbs: root, docsOutputDir: 'docs/manual' }).load();
 
   const { readIndexes, findForwardPage } = require('../src/inspect/index-store');
   const result = readIndexes(root);
 
-  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.ok, true, result.warning);
+  const login = result.forward['/login'];
+  assert.strictEqual(login.id, 'login');
   assert.deepStrictEqual(findForwardPage(result.forward, { id: 'wrong', route: '/login' }), login);
   assert.deepStrictEqual(findForwardPage(result.forward, { id: 'login', route: '/missing' }), login);
   assert.strictEqual(findForwardPage(result.forward, { id: 'missing', route: '/missing' }), null);
+});
+
+test('手写或过期的索引（没有对应提交）即使能解析也不可用', (root) => {
+  writeJson(root, 'forward.json', { '/login': { id: 'login', route: '/login' } });
+  writeJson(root, 'reverse.json', {});
+  const { readIndexes } = require('../src/inspect/index-store');
+  const result = readIndexes(root);
+  assert.strictEqual(result.ok, false);
+  assert.match(result.warning, /no-committed-model/);
 });
 
 test('索引缺失时返回 warning 而不是抛错', (root) => {

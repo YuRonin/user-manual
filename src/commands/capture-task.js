@@ -4,8 +4,7 @@ const path = require('path');
 const { parseArgs } = require('../cli/args');
 const { loadConfig } = require('../config/load');
 const { createProvider } = require('../browser');
-const pageStore = require('../inspect/store');
-const taskStore = require('../tasks/store');
+const { createProjectStore } = require('../store/project');
 const { definitionRevision } = require('../model/revision');
 const { scopeHash, pageRevisionsFor } = require('../model/approval');
 const { deriveTaskScenario } = require('../scenarios/model');
@@ -34,10 +33,12 @@ async function run(argv) {
   if (!loaded.ok) return fail(loaded.errors, json);
   const { config } = loaded;
   const stateDir = path.join(projectRoot, config.artifacts.stateDir);
-  const task = taskStore.readTask(stateDir, positional[0]);
+  const projectStore = createProjectStore({ stateDirAbs: stateDir, docsOutputDir: config.docs.outputDir });
+  let base;
+  try { base = projectStore.load(); } catch (error) { return fail(error.errors || [error.message], json); }
+  const task = base.model.tasks.find((t) => t.id === positional[0]);
   if (!task) return fail(`找不到任务: ${positional[0]}`, json);
-  const pages = pageStore.readExistingPages(stateDir);
-  if (pages.errors.length) return fail(pages.errors, json);
+  const pages = { pages: base.model.pages };
   const derived = deriveTaskScenario(task, pages.pages, config);
   const scenario = resolveScenario(stateDir, derived, { stepIds: (task.steps || []).map((step) => step.id) });
   if (!scenario.ok) return fail(scenario.errors, json);
@@ -85,9 +86,8 @@ async function run(argv) {
       scenarioId: scenario.scenario.id,
       scenarioRevision: scenario.scenario.revision,
     };
-    taskStore.writeTask(stateDir, { ...rest, status: 'captured', lastCapture, captureIds: evidence.canonicalCaptureRefs, evidenceManifest: path.relative(projectRoot, evidence.manifestFile).replace(/\\/g, '/') });
-    const tasks = taskStore.readTasks(stateDir).tasks;
-    pageStore.writeIndexes(stateDir, pages.pages, { docsOutputDir: config.docs.outputDir, tasks });
+    // 观察提交：浏览器执行期间不持有项目锁；只写本任务的采集投影，不覆盖同时发生的定义修改
+    projectStore.commit({ base, kind: 'observation', changes: { tasks: [{ ...rest, status: 'captured', lastCapture, captureIds: evidence.canonicalCaptureRefs, evidenceManifest: path.relative(projectRoot, evidence.manifestFile).replace(/\\/g, '/') }] } });
     const output = { ok: true, taskId: task.id, status: 'captured', planFile, evidence };
     if (json) process.stdout.write(JSON.stringify(output, null, 2) + '\n');
     else process.stdout.write(`[manual capture-task] ${task.title} 已完成安全采集。\n`);

@@ -137,7 +137,7 @@ async function main() {
     }
   });
 
-  await test('capture 优先使用 forward index 中的当前路由', async () => {
+  await test('手改页面 YAML 先导入为新提交并重建索引；旧索引不能覆盖已提交的事实', async () => {
     const root = await prepareProject(server.baseUrl);
     try {
       const pageFile = path.join(root, '.manual', 'pages', 'chat.yaml');
@@ -148,8 +148,12 @@ async function main() {
       );
 
       const r = await run('capture', root, ['chat', '--json']);
-      assert.strictEqual(r.status, 0, r.stderr);
-      assert.strictEqual(JSON.parse(r.stdout).url, `${server.baseUrl}/chat`);
+      assert.strictEqual(r.status, 1, '按导入后的路由打开（该路由不存在）');
+      assert.match(r.stdout, /stale-chat/);
+      const forward = JSON.parse(fs.readFileSync(path.join(root, '.manual', 'index', 'forward.json'), 'utf8'));
+      assert.ok(forward['/stale-chat'] && !forward['/chat'], '索引按导入后的提交重建');
+      const pointer = JSON.parse(fs.readFileSync(path.join(root, '.manual', 'current.json'), 'utf8'));
+      assert.strictEqual(pointer.source, 'working-copy-import');
     } finally {
       fx.cleanup(root);
     }

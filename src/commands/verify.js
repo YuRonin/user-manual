@@ -3,8 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { parseArgs } = require('../cli/args');
 const { loadConfig } = require('../config/load');
-const store = require('../tasks/store');
-const pageStore = require('../inspect/store');
+const { createProjectStore } = require('../store/project');
 const { checkEvidenceUsable } = require('../model/approval');
 const { validateTaskFinal } = require('../generate/task-facts');
 const { validatePublication, formatIssues } = require('../publication/validate');
@@ -12,14 +11,15 @@ const { validatePublication, formatIssues } = require('../publication/validate')
 /** 读取任务、正式文档与事实文件。 */
 function loadVerify(root, config, taskId) {
   const state = path.join(root, config.artifacts.stateDir);
-  const task = store.readTask(state, taskId);
+  const projectStore = createProjectStore({ stateDirAbs: state, docsOutputDir: config.docs.outputDir });
+  let base;
+  try { base = projectStore.load(); } catch (error) { return { ok: false, errors: error.errors || [error.message] }; }
+  const task = base.model.tasks.find((t) => t.id === taskId);
   if (!task) return { ok: false, errors: ['找不到任务。'] };
   const manual = path.join(root, config.docs.outputDir, 'tasks', `${task.id}.md`);
   const factsFile = path.join(state, 'drafts', 'tasks', `${task.id}.facts.json`);
   if (!fs.existsSync(manual) || !fs.existsSync(factsFile)) return { ok: false, errors: ['正式文档或事实文件不存在。'] };
-  const pages = pageStore.readExistingPages(state);
-  if (pages.errors.length) return { ok: false, errors: pages.errors };
-  return { ok: true, state, task, pages: pages.pages, manual, markdown: fs.readFileSync(manual, 'utf8'), facts: JSON.parse(fs.readFileSync(factsFile, 'utf8')) };
+  return { ok: true, state, projectStore, base, task, pages: base.model.pages, manual, markdown: fs.readFileSync(manual, 'utf8'), facts: JSON.parse(fs.readFileSync(factsFile, 'utf8')) };
 }
 
 /** 只读检查（可重复执行，不改变任何文件）：审批与证据新鲜度、结构事实、发布门槛。 */
@@ -59,7 +59,7 @@ async function run(argv) {
   const prepared = prepareVerify({ root, config, ...input });
   if (!prepared.ok) return fail(prepared.errors);
   try {
-    store.writeTask(input.state, prepared.nextTask);
+    input.projectStore.commit({ base: input.base, kind: 'observation', changes: { tasks: [prepared.nextTask] } });
   } catch (error) {
     return fail(`${error.code || 'write-failed'}: 验证通过，但任务状态写入失败。${error.message}`);
   }
