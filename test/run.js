@@ -23,6 +23,7 @@ const FILES = [
   'completion-claims.test.js',
   'capture-task.test.js',
   'artifacts.test.js',
+  'image-pipeline.test.js',
   'publication-paths.test.js',
   'publication-gates.test.js',
   'atomic-write.test.js',

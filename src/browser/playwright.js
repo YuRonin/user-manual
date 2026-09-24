@@ -14,7 +14,6 @@ const path = require('path');
 const { BrowserProvider, DEFAULT_READY_OPTIONS } = require('./provider');
 const { CaptureError, REASON, classifyNavigationError } = require('./errors');
 const { clipRect } = require('../privacy/geometry');
-const { neutralMosaicStyle } = require('../privacy/renderer');
 
 /** 过渡期的旧搜索路径（~/gstack、npx 缓存）；仅在 MANUAL_PLAYWRIGHT_LEGACY_SEARCH=1 时启用。 */
 function legacyPlaywrightCandidates(home = os.homedir()) {
@@ -464,7 +463,7 @@ class PlaywrightBrowserProvider extends BrowserProvider {
     return { ok: true };
   }
 
-  async collectSensitiveElements() {
+  async collectSensitiveElements({ fullPage = false } = {}) {
     if (!this.page) return [];
     const candidates = await this.page.evaluate(() => {
       const out = [];
@@ -530,30 +529,40 @@ class PlaywrightBrowserProvider extends BrowserProvider {
       }
       return out;
     });
-    const viewport = this.page.viewportSize() || this.profile.viewport;
-    return candidates.map((candidate) => ({ ...candidate, rect: clipRect(candidate.rect, viewport) })).filter((candidate) => candidate.rect);
+    // 视口截图用 client 坐标并裁剪到视口；整页截图换算到文档坐标并裁剪到文档尺寸。
+    // 完全落在图像外的元素不会出现在像素里，可以跳过。
+    const geometry = await this.collectGeometry({ fullPage });
+    const canvas = fullPage ? geometry.documentSize : geometry.viewport;
+    const offset = fullPage ? geometry.scroll : { x: 0, y: 0 };
+    return candidates
+      .map((candidate) => ({ ...candidate, rect: clipRect({ ...candidate.rect, x: candidate.rect.x + offset.x, y: candidate.rect.y + offset.y }, canvas) }))
+      .filter((candidate) => candidate.rect);
   }
 
-  async renderEvidence({ sanitizedPath, annotatedPath, redactions, annotations, theme }) {
-    if (!this.page) throw new Error('renderEvidence 之前必须先 open()。');
-    fs.mkdirSync(path.dirname(sanitizedPath), { recursive: true });
-    fs.mkdirSync(path.dirname(annotatedPath), { recursive: true });
-    const overlayId = '__manual_evidence_overlay__';
-    const renderedRedactions = redactions.map((item) => ({ ...item, cssText: neutralMosaicStyle(item.rect) }));
-    await this.page.evaluate(({ overlayId, redactions }) => {
-      document.getElementById(overlayId)?.remove();
-      const root = document.createElement('div'); root.id = overlayId; root.style.cssText = 'position:fixed;inset:0;z-index:2147483647;pointer-events:none';
-      for (const item of redactions) { const el=document.createElement('div'); el.style.cssText=item.cssText; root.appendChild(el); }
-      document.documentElement.appendChild(root);
-    }, { overlayId, redactions: renderedRedactions });
-    await this.page.screenshot({ path: sanitizedPath, type: 'png' });
-    await this.page.evaluate(({ overlayId, annotations, theme }) => {
-      const root=document.getElementById(overlayId);
-      for(const item of annotations){const box=document.createElement('div'),r=item.target;box.style.cssText=`position:absolute;left:${r.x}px;top:${r.y}px;width:${r.width}px;height:${r.height}px;border:${theme.outlineWidth}px solid ${theme.primary};border-radius:${theme.targetRadius}px;box-shadow:0 0 0 5px ${theme.halo}`;root.appendChild(box);const marker=document.createElement('div'),m=item.marker;marker.textContent=String(item.label);marker.style.cssText=`position:absolute;left:${m.x}px;top:${m.y}px;width:${m.size}px;height:${m.size}px;border-radius:50%;background:${theme.primary};color:white;border:2px solid white;display:flex;align-items:center;justify-content:center;font:700 16px sans-serif;box-sizing:border-box`;root.appendChild(marker)}
-    }, { overlayId, annotations, theme });
-    await this.page.screenshot({ path: annotatedPath, type: 'png' });
-    await this.page.evaluate((id) => document.getElementById(id)?.remove(), overlayId);
-    return { sanitizedPath, annotatedPath };
+  /**
+   * 截图前后的几何快照。首次调用时安装 MutationObserver 计数器；
+   * 截图前后 generation / 滚动 / 尺寸不一致，说明像素与矩形可能不属于同一时刻。
+   */
+  async collectGeometry({ fullPage = false } = {}) {
+    if (!this.page) throw new Error('collectGeometry 之前必须先 open()。');
+    const geometry = await this.page.evaluate(() => {
+      if (!window.__manualMutation) {
+        window.__manualMutation = { generation: 0 };
+        // 截图工具为隐藏光标会临时改写表单控件的 style，这不是页面内容变化，不计入。
+        const caretOnly = (r) => r.type === 'attributes' && r.attributeName === 'style' && /^(INPUT|TEXTAREA|SELECT)$/.test(r.target.nodeName);
+        new MutationObserver((records) => { if (records.some((r) => !caretOnly(r))) window.__manualMutation.generation++; })
+          .observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+      }
+      const doc = document.documentElement;
+      return {
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        scroll: { x: window.scrollX, y: window.scrollY },
+        dpr: window.devicePixelRatio,
+        documentSize: { width: Math.max(doc.scrollWidth, window.innerWidth), height: Math.max(doc.scrollHeight, window.innerHeight) },
+        mutationGeneration: window.__manualMutation.generation,
+      };
+    });
+    return { ...geometry, fullPage };
   }
 
   /**

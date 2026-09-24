@@ -93,6 +93,13 @@ const PAGES = {
   <button type="submit">登 录</button>
 </form>`),
 
+  // 隐私像素测试：视口内有手机号，页面很长、底部（视口外）还有邮箱
+  '/privacy-page': html(`
+<h1>通讯录</h1>
+<p id="phone" style="background:#ff0000;color:#ff0000;display:inline-block">13812345678</p>
+<div style="height:1600px"></div>
+<p id="email" style="background:#ff0000;color:#ff0000;display:inline-block">teacher@example.com</p>`),
+
   // 状态码 200，但内容是「页面不存在」：软 404
   '/soft-404': html('<h1>页面不存在</h1><p>你访问的页面已被移除。</p><a href="/">返回首页</a>'),
 

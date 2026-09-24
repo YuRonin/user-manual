@@ -4,6 +4,8 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+// 截图必须是真实 PNG：发布图由离线图像管线从 raw 字节派生。
+const { TINY_PNG } = require('./server');
 
 let passed = 0;
 const failures = [];
@@ -18,9 +20,8 @@ class FakeProvider {
   async waitUntilReady() { this.calls.push(['ready']); return { steps: {}, warnings: [] }; }
   async performAction(action) { this.calls.push(['action', action.type]); return { target: action.target, rect: { x: 1, y: 2, width: 3, height: 4 } }; }
   async assertCondition(assertion) { this.calls.push(['assert', assertion.type]); if (this.failAssertion) throw new Error('not visible'); return { ok: true }; }
-  async screenshot({ path: file }) { this.calls.push(['shot', file]); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, 'png'); return { path: file, bytes: 3, meta: { viewport: { width: 100, height: 100 }, deviceScaleFactor: 2 } }; }
+  async screenshot({ path: file }) { this.calls.push(['shot', file]); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, TINY_PNG); return { path: file, bytes: TINY_PNG.length, meta: { viewport: { width: 100, height: 100 }, deviceScaleFactor: 2 } }; }
   async collectSensitiveElements() { return []; }
-  async renderEvidence({ sanitizedPath, annotatedPath }) { fs.mkdirSync(path.dirname(sanitizedPath), { recursive: true }); fs.mkdirSync(path.dirname(annotatedPath), { recursive: true }); fs.writeFileSync(sanitizedPath, 'safe'); fs.writeFileSync(annotatedPath, 'marked'); return { sanitizedPath, annotatedPath }; }
   async close() { this.calls.push(['close']); }
 }
 

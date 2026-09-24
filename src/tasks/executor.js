@@ -2,9 +2,7 @@
 
 const path = require('path');
 const { writeText } = require('../util/fsx');
-const { planRedactions } = require('../artifacts/redaction');
-const { layoutAnnotations } = require('../artifacts/annotation');
-const { buildPrivacyRecord } = require('../publication/validate');
+const { captureStable, derivePublished } = require('../evidence/capture-safe');
 const { validateNavigation, runAssertions, isUrlOnly, DEFAULT_ASSERTION_TIMEOUT_MS } = require('../evidence/validate-page');
 
 class TaskExecutionError extends Error {
@@ -20,33 +18,58 @@ function joinUrl(baseUrl, route) {
   return `${String(baseUrl).replace(/\/$/, '')}/${String(route || '/').replace(/^\//, '')}`;
 }
 
-async function takeScreenshot(provider, stateDir, plan, step, timing, kind = 'raw', options = {}, resolvedTarget = null) {
-  const dir = kind === 'diagnostic'
-    ? path.join(stateDir, 'artifacts', 'diagnostics')
-    : path.join(stateDir, 'artifacts', 'raw');
-  const suffix = kind === 'diagnostic' ? 'failure' : timing;
-  const file = path.join(dir, `${plan.taskId}--${step.id}--${suffix}.png`);
-  const shot = await provider.screenshot({ path: file, format: 'png' });
-  const output = { raw: file, timing, bytes: shot.bytes, meta: shot.meta };
-  if (kind === 'raw' && provider.collectSensitiveElements && provider.renderEvidence && options.projectRoot && options.annotatedDir) {
-    const privacy = planRedactions(await provider.collectSensitiveElements(), options.redactionRules || {});
-    if (!privacy.ok) throw Object.assign(new Error(privacy.errors.join('；')), { code: 'privacy-uncertain' });
-    const requested = (step.capture?.annotations || []).map((annotation) => ({
-      label: annotation.label,
-      rect: annotation.target === 'action.target' ? resolvedTarget?.rect : annotation.rect,
-    })).filter((item) => item.rect);
-    const layout = layoutAnnotations(requested, shot.meta.viewport, options.theme);
-    if (!layout.ok) throw Object.assign(new Error(layout.errors.join('；')), { code: 'annotation-layout-failed' });
-    const sanitizedPath = path.join(stateDir, 'artifacts', 'sanitized', `${plan.taskId}--${step.id}--${timing}.png`);
-    const annotatedRelative = path.posix.join(String(options.annotatedDir).replace(/\\/g, '/'), `${plan.taskId}--${step.id}--${timing}.png`);
-    const annotatedPath = path.join(options.projectRoot, annotatedRelative);
-    await provider.renderEvidence({ sanitizedPath, annotatedPath, redactions: privacy.redactions, annotations: layout.annotations, theme: options.theme });
+async function diagnosticScreenshot(provider, stateDir, plan, step) {
+  const file = path.join(stateDir, 'artifacts', 'diagnostics', `${plan.taskId}--${step.id}--failure.png`);
+  await provider.screenshot({ path: file, format: 'png' });
+  return file;
+}
+
+/**
+ * 截图时刻解析标注目标：after 截图必须重新定位，不能沿用动作前的旧矩形。
+ * 目标找不到时返回 annotation-target-missing（需要在 capture.annotations 里另指定目标）。
+ */
+function annotationResolver(provider, step) {
+  return async () => {
+    const out = [];
+    for (const annotation of step.capture?.annotations || []) {
+      if (annotation.rect) { out.push({ label: annotation.label, rect: annotation.rect }); continue; }
+      const target = annotation.target === 'action.target' ? step.action?.target : annotation.target;
+      if (!target) continue;
+      try {
+        const located = await provider.performAction({ type: 'inspect', target });
+        if (!located?.rect) throw new Error('目标没有可用几何。');
+        out.push({ label: annotation.label, rect: located.rect });
+      } catch (error) {
+        throw Object.assign(new Error(`步骤 ${step.id} 的标注目标在截图时不可见：${error.message}`), { code: 'annotation-target-missing' });
+      }
+    }
+    return out;
+  };
+}
+
+async function takeScreenshot(provider, stateDir, plan, step, timing, options = {}) {
+  const name = `${plan.taskId}--${step.id}--${timing}.png`;
+  const file = path.join(stateDir, 'artifacts', 'raw', name);
+  const publish = provider.collectSensitiveElements && options.projectRoot && options.annotatedDir;
+  const captured = await captureStable(provider, { rawPath: file, resolveTargets: publish ? annotationResolver(provider, step) : async () => [] });
+  const output = { raw: file, timing, bytes: captured.shot.bytes, meta: captured.shot.meta };
+  if (publish) {
+    const sanitizedPath = path.join(stateDir, 'artifacts', 'sanitized', name);
+    const annotatedRelative = path.posix.join(String(options.annotatedDir).replace(/\\/g, '/'), name);
+    const safe = await derivePublished({
+      captured, rawPath: file, sanitizedPath, publishedPath: path.join(options.projectRoot, annotatedRelative),
+      theme: options.theme, redactionRules: options.redactionRules || {},
+    });
     output.sanitized = sanitizedPath;
-    output.annotated = annotatedRelative;
-    output.redactions = privacy.redactions;
+    output.annotated = safe.published ? annotatedRelative : null;
+    output.redactions = safe.redactions;
     // 实际执行过检测的记录；缺这条记录的截图在发布时按 privacy unknown 处理。
-    output.privacy = buildPrivacyRecord({ redactions: privacy.redactions, config: { privacy: options.redactionRules || {} } });
-    output.annotations = layout.annotations;
+    output.privacy = safe.privacy;
+    output.annotations = safe.annotations;
+    output.derivedFromRawHash = safe.derived.rawHash;
+    output.geometryHash = safe.derived.geometryHash;
+    output.rendererVersion = safe.derived.rendererVersion;
+    output.sha256 = safe.published ? safe.derived.publishedSha256 : null;
   }
   return output;
 }
@@ -101,10 +124,8 @@ async function executeCapturePlan(plan, provider, options) {
       record.validations.push(...await runAssertions(provider, step.beforeState?.assertions || [], {
         scope: 'scenario-state', phase: 'before', stepId: step.id, idPrefix: `${step.page}:${step.stateBefore}`, timeoutMs,
       }));
-      let inspected = null;
       if (step.capture?.timing === 'before') {
-        if (step.action?.target) inspected = await provider.performAction({ type: 'inspect', target: step.action.target });
-        record.screenshots.push(await takeScreenshot(provider, stateDir, plan, step, 'before', 'raw', options, inspected));
+        record.screenshots.push(await takeScreenshot(provider, stateDir, plan, step, 'before', options));
       }
       record.target = await provider.performAction(step.action);
       await provider.waitUntilReady();
@@ -116,7 +137,7 @@ async function executeCapturePlan(plan, provider, options) {
       record.status = afterAssertions.length > 0 && !isUrlOnly(afterAssertions) ? 'verified' : 'observed';
       record.pageState = step.expectedState?.id || step.stateBefore;
       if (step.capture?.timing === 'after') {
-        record.screenshots.push(await takeScreenshot(provider, stateDir, plan, step, 'after', 'raw', options, record.target));
+        record.screenshots.push(await takeScreenshot(provider, stateDir, plan, step, 'after', options));
       }
     }
     const manifestFile = path.join(stateDir, 'artifacts', 'manifests', `${plan.taskId}--evidence.json`);
@@ -130,7 +151,7 @@ async function executeCapturePlan(plan, provider, options) {
   } catch (cause) {
     let diagnostic = null;
     if (activeStep) {
-      try { diagnostic = (await takeScreenshot(provider, stateDir, plan, activeStep, 'failure', 'diagnostic')).raw; } catch (_) { /* best effort */ }
+      try { diagnostic = await diagnosticScreenshot(provider, stateDir, plan, activeStep); } catch (_) { /* best effort */ }
     }
     throw new TaskExecutionError(
       cause.code || cause.reason || 'state-assertion-failed',

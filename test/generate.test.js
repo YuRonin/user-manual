@@ -110,9 +110,77 @@ async function main() {
     }
   });
 
-  await test('页面只有原始截图：不生成带图草稿，提示原图不能进入手册', async () => {
+  await test('草稿引用经过隐私处理的发布图，路径相对最终文档位置', async () => {
     const root = await prepareProject(server.baseUrl);
     try {
+      const r = await run('generate', root, ['chat', '--json']);
+      assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+      const draft = readDraft(root, 'chat');
+      // 正式文档在 docs/manual/chat.md，发布图在 docs/manual/images/annotated/page--chat.png
+      assert.match(draft, /!\[工作台\]\(images\/annotated\/page--chat\.png\)/, `图片路径不对:\n${draft}`);
+      assert.ok(!/images\/raw|artifacts\/raw/.test(draft.replace(/<!--[\s\S]*?-->/g, '')), '草稿不能引用原图');
+      const facts = JSON.parse(fs.readFileSync(path.join(root, '.manual', 'drafts', 'chat.facts.json'), 'utf8'));
+      assert.strictEqual(facts.images[0].privacy.status, 'passed');
+      assert.ok(facts.images[0].sha256);
+    } finally {
+      fx.cleanup(root);
+    }
+  });
+
+  await test('带图定稿：发布门槛通过并输出正式文档', async () => {
+    const root = await prepareProject(server.baseUrl);
+    try {
+      await run('generate', root, ['chat']);
+      const r = await run('generate', root, ['chat', '--finalize', writePolished(root, 'chat', readDraft(root, 'chat'))]);
+      assert.strictEqual(r.status, 0, r.stderr);
+      const final = fs.readFileSync(finalPath(root, 'chat'), 'utf8');
+      assert.ok(fs.existsSync(path.resolve(path.dirname(finalPath(root, 'chat')), 'images/annotated/page--chat.png')));
+      assert.match(final, /images\/annotated\/page--chat\.png/);
+    } finally {
+      fx.cleanup(root);
+    }
+  });
+
+  for (const [name, mutate] of [
+    ['改了截图路径', (d) => d.replace('](images/annotated/page--chat.png)', '](images/chat.png)')],
+    ['删掉了截图', (d) => d.replace(/!\[[^\]]*\]\([^)]*\)\n/, '')],
+  ]) {
+    await test(`拦截（带图草稿）：${name}`, async () => {
+      const root = await prepareProject(server.baseUrl);
+      try {
+        await run('generate', root, ['chat']);
+        const r = await run('generate', root, ['chat', '--finalize', writePolished(root, 'chat', mutate(readDraft(root, 'chat')))]);
+        assert.strictEqual(r.status, 1);
+        assert.match(r.stderr, /截图引用被改动/);
+        assert.ok(!fs.existsSync(finalPath(root, 'chat')));
+      } finally {
+        fx.cleanup(root);
+      }
+    });
+  }
+
+  await test('草稿后发布图被替换：hash 不符，定稿被阻止', async () => {
+    const root = await prepareProject(server.baseUrl);
+    try {
+      await run('generate', root, ['chat']);
+      fs.writeFileSync(path.join(root, 'docs', 'manual', 'images', 'annotated', 'page--chat.png'), fs.readFileSync(path.join(root, '.manual', 'artifacts', 'raw', 'pages', 'chat.png')));
+      const r = await run('generate', root, ['chat', '--finalize', writePolished(root, 'chat', readDraft(root, 'chat')), '--json']);
+      assert.strictEqual(r.status, 1);
+      assert.match(r.stdout, /hash-mismatch/);
+      assert.ok(!fs.existsSync(finalPath(root, 'chat')));
+    } finally {
+      fx.cleanup(root);
+    }
+  });
+
+  await test('旧页面模型只有原始截图（没有发布图）：不生成带图草稿，提示原图不能进入手册', async () => {
+    const root = await prepareProject(server.baseUrl);
+    try {
+      const pageFile = path.join(root, '.manual', 'pages', 'chat.yaml');
+      const yaml = require('js-yaml');
+      const model = yaml.load(fs.readFileSync(pageFile, 'utf8'));
+      model.browser.published = null;
+      fs.writeFileSync(pageFile, yaml.dump(model));
       const r = await run('generate', root, ['chat', '--json']);
       assert.strictEqual(r.status, 1, r.stdout);
       const out = JSON.parse(r.stdout);
@@ -434,9 +502,11 @@ async function main() {
   await test('截图文件被删了：报错而不是生成坏链接', async () => {
     const root = await prepareProject(server.baseUrl);
     try {
-      fs.rmSync(path.join(root, '.manual', 'artifacts', 'raw', 'pages', 'chat.png'));
+      fs.rmSync(path.join(root, 'docs', 'manual', 'images', 'annotated', 'page--chat.png'));
       const r = await run('generate', root, ['chat']);
       assert.strictEqual(r.status, 1);
+      assert.match(r.stderr, /截图不存在/);
+      assert.match(r.stderr, /manual capture chat/);
       assert.ok(!fs.existsSync(draftPath(root, 'chat')), '不能生成带坏链接的草稿');
     } finally {
       fx.cleanup(root);

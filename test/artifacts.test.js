@@ -56,6 +56,17 @@ test('公开模式遮盖模糊个人字段但跳过已脱敏内容', () => {
   assert.ok(!JSON.stringify(result).includes('secret-token'));
 });
 
+test('含省略号的文字仍检测其中完整的手机号/邮箱，已整段脱敏的值才跳过', () => {
+  const { detectRedactions } = require('../src/privacy/detector');
+  const rect = { x: 0, y: 0, width: 50, height: 20 };
+  const result = detectRedactions([
+    { text: '联系人…请拨 13812345678', label: '', rect, source: 'text-pattern' },
+    { text: '更多…写信到 a.b@example.com', label: '', rect, source: 'text-pattern' },
+    { text: '134****1255', label: '联系电话', rect, source: 'form-control' },
+  ], { audience: 'public', rules: { redact: [], preserve: [] } });
+  assert.deepStrictEqual(result.redactions.map((item) => item.kind), ['phone', 'email']);
+});
+
 test('高风险规则、显式规则和账号标签按优先级处理', () => {
   const { detectRedactions } = require('../src/privacy/detector');
   const rect = { x: 1, y: 2, width: 30, height: 10 };

@@ -23,6 +23,9 @@ const { readIndexes, findForwardPage } = require('../inspect/index-store');
 const { displayPath } = require('../util/fsx');
 const { prepareAuth, classifyAuthFailure, refreshAuth } = require('../auth/runtime');
 const { validateNavigation, runAssertions } = require('../evidence/validate-page');
+const { captureStable, derivePublished } = require('../evidence/capture-safe');
+
+const REASON_CODES = new Set(Object.values(REASON));
 
 const KNOWN_FLAGS = new Set([
   'projectRoot', 'params', 'url', 'waitFor', 'timeout', 'quietMs', 'settleMs',
@@ -298,6 +301,8 @@ async function run(argv) {
 
   let shot;
   let ready;
+  let safe = null;
+  let published = null;
   let navigation;
   let identity = 'url-only';
   const identityAssertions = (page.states?.default?.assertions || []).filter((a) => a && a.type !== 'url');
@@ -326,16 +331,38 @@ async function run(argv) {
       }
     }
 
-    shot = await provider.screenshot({
-      path: outPath,
+    // 稳定截图 + 离线派生：原图只留在 rawDir，发布图由同一份原图遮罩后写入 annotatedDir。
+    const captured = await captureStable(provider, {
+      rawPath: outPath,
       fullPage: values.fullPage === true,
       format: config.artifacts.format || 'png',
     });
+    shot = captured.shot;
+    const publishedRelative = path.posix.join(String(config.artifacts.annotatedDir).replace(/\\/g, '/'), `page--${pageId}.png`);
+    safe = await derivePublished({
+      captured,
+      rawPath: outPath,
+      sanitizedPath: path.join(projectRoot, config.artifacts.sanitizedDir, 'pages', `${pageId}.png`),
+      publishedPath: path.join(projectRoot, publishedRelative),
+      theme: config.annotation.themes[config.annotation.activeTheme],
+      redactionRules: config.privacy || {},
+    });
+    published = safe.published ? {
+      artifactPath: publishedRelative,
+      sha256: safe.derived.publishedSha256,
+      privacy: safe.privacy,
+      derivedFromRawHash: safe.derived.rawHash,
+      geometryHash: safe.derived.geometryHash,
+      rendererVersion: safe.derived.rendererVersion,
+    } : null;
+    if (!safe.published) ready.warnings.push(`页面隐私检测未通过（${safe.privacy.unresolved.length} 项无法定位），未生成发布图；手册只能出文字版。`);
     const refreshed = await refreshAuth(provider, auth);
     if (refreshed.warning) ready.warnings.push(refreshed.warning);
   } catch (e) {
     await provider.close();
-    const normalized = e instanceof CaptureError ? e : new CaptureError(REASON.NAVIGATION_FAILED, String(e.message || e), { url });
+    const normalized = e instanceof CaptureError
+      ? e
+      : new CaptureError(e.code && REASON_CODES.has(e.code) ? e.code : REASON.NAVIGATION_FAILED, String(e.message || e), { url });
     return fail(classifyAuthFailure(normalized, auth), { json });
   } finally {
     await provider.close();
@@ -357,6 +384,7 @@ async function run(argv) {
       viewport: `${shot.meta.viewport.width}x${shot.meta.viewport.height}`,
       deviceScaleFactor: shot.meta.deviceScaleFactor,
       provider: providerId,
+      published,
     },
   };
   // 源码分析也做完了的话，这一页就从「推断」升级成「验证过」
@@ -403,6 +431,9 @@ async function run(argv) {
           readySteps: ready.steps,
           identity,
           actualRoute: navigation.actualRoute,
+          published,
+          // 只含类型与区域，不含敏感原文
+          redactions: safe ? safe.redactions.map(({ kind, rect, result }) => ({ kind, rect, result })) : [],
           validations: navigation.validations,
           warnings: ready.warnings,
           confidence: updatedPage.confidence,

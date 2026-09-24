@@ -36,12 +36,14 @@ function isAlreadyObscured(value) {
 function classifyCandidate(candidate, policy) {
   const text = String(candidate.text || '');
   const label = String(candidate.label || '');
-  if (isAlreadyObscured(text)) return null;
   if (candidate.inputType === 'password' || CREDENTIAL_LABEL.test(label)) {
     return { kind: 'credential', confidence: 'high', forced: true };
   }
+  // 按命中的敏感片段判断：一段文字里有省略号，不代表其中其他完整手机号/邮箱也已脱敏。
   if (PHONE.test(text)) return { kind: 'phone', confidence: 'high', forced: true };
   if (EMAIL.test(text)) return { kind: 'email', confidence: 'high', forced: true };
+  // 只有整段本身已是脱敏形态时，才跳过基于标签/语义的判断。
+  if (isAlreadyObscured(text)) return null;
   if (ACCOUNT_LABEL.test(label)) return { kind: 'account', confidence: 'high', forced: true };
   if (candidate.source === 'explicit') return { kind: 'explicit', confidence: 'high', forced: true };
 
