@@ -114,6 +114,8 @@ function renderPageYaml(page) {
 
   // 显式给出键顺序：id/route 在最前，状态在最后
   const ordered = {
+    // 只有迁移到 v2 的页面写版本号；没有这个字段的旧文件按 v1 读取（内存兼容，不自动写回）
+    ...(page.schemaVersion ? { schemaVersion: page.schemaVersion } : {}),
     id: page.id,
     // active / missing（代码里找不到）/ excluded（被 inspect.exclude 排除）/ retired（显式退役）
     lifecycle: page.lifecycle || 'active',

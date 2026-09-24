@@ -21,6 +21,7 @@ function renderTaskYaml(input) {
   if (!result.ok) throw new Error(`任务无效：${result.errors.join('；')}`);
   const task = result.task;
   const ordered = {
+    ...(task.schemaVersion ? { schemaVersion: task.schemaVersion } : {}),
     id: task.id,
     title: task.title,
     goal: task.goal,

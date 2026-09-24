@@ -86,11 +86,11 @@
   - [x] owner lock、CAS、独立进程并发冲突检查。
   - [x] 过期索引重建，capture 不全量重写页面定义。
   - [x] 指针切换前后故障恢复测试通过。
-- [ ] **P1-04 旧项目迁移**（依赖 P1-01/02/03/06）
-  - [ ] dry-run 清单、固定 ID 映射、输入 hash。
-  - [ ] 备份、apply journal、重复执行、故障恢复。
-  - [ ] legacy verified→明确 unknown，不伪造验证。
-  - [ ] 路径/sidecar 冲突和认证 alias 迁移验证。
+- [x] **P1-04 旧项目迁移**（依赖 P1-01/02/03/06）
+  - [x] dry-run 清单、固定 ID 映射、输入 hash。
+  - [x] 备份、apply journal、重复执行、故障恢复。
+  - [x] legacy verified→明确 unknown，不伪造验证。
+  - [x] 路径/sidecar 冲突和认证 alias 迁移验证。
 - [ ] **P1-08 FactPack 与结构化渲染**（依赖 P1-02/03/06）
   - [ ] 统一步骤、claim、artifact 和 factsHash。
   - [ ] 模型只能修改允许文案块，业务动作确定性渲染。
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 完成 8 / 32，Gate 0 已通过（2026-09-24）。Phase 1 进行中：已完成 P1-01、P1-02、P1-03、P1-05、P1-06。下一项：P1-04。
+- 工程实施：Phase 0 完成 8 / 32，Gate 0 已通过（2026-09-24）。Phase 1 进行中：已完成 P1-01～P1-06。下一项：P1-08。
 
 ### 执行记录
 
@@ -526,4 +526,25 @@ Task ID: P1-06
 产物 / commit 引用: 见 git log（P1-06 提交）
 剩余风险: 快照为全量副本，长期项目会累积（后续可加 GC，须保留 release 引用的快照）；Capture 记录 latest.json 的读改写仍未加锁（观察引用，最后写入者生效）。
 下一项可执行任务: P1-04
+```
+
+```text
+Task ID: P1-04
+状态: completed
+开始时基线 commit / dirty files: 31f5efb（P1-06）；工作区干净
+实际修改文件: src/store/migrate.js（新）、src/commands/migrate.js（新）、src/cli/commands.js、src/commands/migrate-artifacts.js、src/commands/init.js、src/evidence/store.js、src/inspect/{model,store}.js、src/tasks/store.js、test/model-migration.test.js（新）、test/run.js
+契约变更: 无（实现 C01 版本策略、C02 快照提交、C04 legacy Capture）。bin/manual.js 通过命令注册表分发，未改；src/config/load.js 已在 P1-01 支持 v2，未再改。
+执行命令与结果:
+  - node test/model-migration.test.js：13 passed（dry-run 零写入与完整清单；仅页面项目按计划 ID apply、verified 降为 legacy-unknown、legacy 记录 inconclusive 且不能作为 cache candidate；任务项目审批转 legacy-status、verified 投影为 generated、facts 转结构化且 hash/privacy 置空；重复 apply 零改动且 projectId 不变；输入变化 migration-input-changed 零写入；4 个阶段边界故障后按 journal 续跑；缺图与 facts/Markdown 冲突只报告不覆盖；rollback 恢复原字节；用 git 取出的旧版 loader 在迁移后拒绝配置；迁移后普通命令可用）。
+  - migrate-artifacts 3、init 37 passed；npm test：42 个测试文件全部通过。
+行为变更（有意）:
+  - 新命令 manual migrate：--dry-run [--manifest <file>]、--apply [--manifest <file>]、--rollback <id>。计划固定 projectId 与 legacy Capture id 映射、输入 hash（config / current / pages / tasks / evidence manifest / facts）。
+  - apply 阶段：备份（config、pages、tasks、current.json、将转换的 facts；不含认证缓存）→ 登记 legacy Capture（只对存在的文件记 hash；身份验证 inconclusive；provenance.mode=legacy）→ 经 Project Store 提交 v2 页面 / 任务（schemaVersion=2、lifecycle、审批 legacy-status、verified→generated + lastVerification legacy-unknown、页面 verified→false / identity legacy-unknown / confidence verified→inferred）→ 转换 facts（冲突的不改）→ 最后在原文上把 config.version 改为 2 并补 project.id。journal 位于 .manual/migrations/<id>/。
+  - 已迁移项目再次 apply 直接返回 alreadyMigrated；init --force 不会把 v2 配置降回 v1。
+  - 页面 / 任务 YAML 在有 schemaVersion 时写出该字段；inspect 合并保留它。
+  - migrate-artifacts 抽出 reportLegacyArtifacts 供 dry-run 报告公开原图引用。
+失败或跳过的验收及原因: 仓库内已无保留的真实业务快照（preserved-from-neoagent-worktree-2026-09-18），迁移用三种合成旧项目覆盖；旧版工具拒绝测试依赖 git 历史（非 git 检出时 skip）。
+产物 / commit 引用: 见 git log（P1-04 提交）
+剩余风险: 迁移只恢复自己备份的文件，rollback 后登记的 legacy Capture 记录保留（不可变，无害）；旧 facts 转换后 sha256/privacy 为空，必须重新生成草稿才能定稿 / 验证。
+下一项可执行任务: P1-08
 ```

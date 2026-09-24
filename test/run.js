@@ -39,6 +39,7 @@ const FILES = [
   'generate-task.test.js',
   'staleness.test.js',
   'migrate-artifacts.test.js',
+  'model-migration.test.js',
   'compat-aliases.test.js',
   'task-first-e2e.test.js',
   'task-rerun.test.js',

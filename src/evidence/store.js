@@ -194,7 +194,27 @@ function createCaptureStore({ projectRoot, stateDirAbs }) {
     return refs;
   }
 
-  return { begin, abort, commit, read, list, readLatest, setLatest, evidenceDir, stagingRoot };
+  /**
+   * 迁移专用：为旧版本已存在的产物登记一条记录（不经 staging、不复制文件）。
+   * 同 id 已存在且内容相同则复用（重复迁移幂等），不同则 immutable-conflict。
+   */
+  function importRecord(record) {
+    const full = { schemaVersion: CAPTURE_SCHEMA_VERSION, ...record };
+    const validation = validateCapture(full);
+    if (!validation.ok) {
+      throw new CaptureStoreError('invalid-capture-record', `Capture 记录不完整: ${validation.errors.map((e) => `${e.path} ${e.message}`).join('；')}`);
+    }
+    const file = recordFileFor(stateDirAbs, full.id);
+    if (fs.existsSync(file)) {
+      if (fs.readFileSync(file, 'utf8') === JSON.stringify(full, null, 2) + '\n') return { record: full, reused: true };
+      throw new CaptureStoreError('immutable-conflict', `Capture ${full.id} 已存在且内容不同。`);
+    }
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    writeFileAtomic(file, JSON.stringify(full, null, 2) + '\n');
+    return { record: full, reused: false };
+  }
+
+  return { begin, abort, commit, importRecord, read, list, readLatest, setLatest, evidenceDir, stagingRoot };
 }
 
 module.exports = { createCaptureStore, CaptureStoreError, sanitizeUrl, imageSize, evidenceDirFor, recordFileFor, CAPTURE_SCHEMA_VERSION };

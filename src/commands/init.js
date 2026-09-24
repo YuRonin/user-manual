@@ -106,15 +106,18 @@ function renderSummary(summary, files, projectRoot) {
 }
 
 
-/** 读取已有 config 中的 project.id；没有或不是 UUID 时返回 null（由 buildConfig 新建）。 */
-function existingProjectId(projectRoot) {
-  const file = path.join(projectRoot, schema.DEFAULTS.stateDir, 'config.yaml');
+function existingConfig(projectRoot) {
   try {
-    const id = yaml.load(fs.readFileSync(file, 'utf8'))?.project?.id;
-    return isUuid(id) ? id : null;
+    return yaml.load(fs.readFileSync(path.join(projectRoot, schema.DEFAULTS.stateDir, 'config.yaml'), 'utf8')) || null;
   } catch (_) {
     return null;
   }
+}
+
+/** 读取已有 config 中的 project.id；没有或不是 UUID 时返回 null（由 buildConfig 新建）。 */
+function existingProjectId(projectRoot) {
+  const id = existingConfig(projectRoot)?.project?.id;
+  return isUuid(id) ? id : null;
 }
 
 function run(argv) {
@@ -156,6 +159,11 @@ function run(argv) {
   });
 
   if (!built.ok) return fail(built.errors, { json });
+  // 已迁移到 v2 的项目重建配置时不能降回 v1（否则旧版工具会重新获得写权限）
+  const previousVersion = existingConfig(projectRoot)?.version;
+  if (Number.isInteger(previousVersion) && previousVersion > built.config.version && previousVersion <= schema.MAX_CONFIG_VERSION) {
+    built.config.version = previousVersion;
+  }
 
   const stateDir = path.join(projectRoot, built.config.artifacts.stateDir);
   const configPath = path.join(stateDir, 'config.yaml');

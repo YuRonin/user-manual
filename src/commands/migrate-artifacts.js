@@ -83,6 +83,19 @@ function pendingItems(projectRoot, config, found) {
   return pending;
 }
 
+/** 只读：旧原图位置、找到的文件与待处理事项（manual migrate 的 dry-run 也使用它）。 */
+function reportLegacyArtifacts(projectRoot, config) {
+  // 旧原图可能在旧默认位置（<docs>/images/raw），也可能在仍指向文档目录的 rawDir 下。
+  const sourceRoots = [...new Set(legacyRawPrefixes(config).map((prefix) => path.resolve(projectRoot, prefix)))];
+  const destinationRoot = path.resolve(projectRoot, config.artifacts.stateDir, 'artifacts', 'raw', 'legacy');
+  if (sourceRoots.some((root) => !inside(projectRoot, root)) || !inside(projectRoot, destinationRoot)) {
+    return { ok: false, errors: ['迁移路径必须位于项目根目录内。'] };
+  }
+  const entries = sourceRoots.flatMap((sourceRoot) => walkFiles(sourceRoot).map((relative) => ({ sourceRoot, relative })));
+  const found = entries.map(({ sourceRoot, relative }) => display(projectRoot, path.join(sourceRoot, relative)));
+  return { ok: true, entries, found, destinationRoot, pending: pendingItems(projectRoot, config, found) };
+}
+
 function run(argv) {
   const { values, positional, unknownFlags } = parseArgs(argv, {
     known: KNOWN_FLAGS,
@@ -97,15 +110,9 @@ function run(argv) {
   const loaded = loadConfig(projectRoot);
   if (!loaded.ok) return fail(loaded.errors, json);
   const { config } = loaded;
-  // 旧原图可能在旧默认位置（<docs>/images/raw），也可能在仍指向文档目录的 rawDir 下。
-  const sourceRoots = [...new Set(legacyRawPrefixes(config).map((prefix) => path.resolve(projectRoot, prefix)))];
-  const destinationRoot = path.resolve(projectRoot, config.artifacts.stateDir, 'artifacts', 'raw', 'legacy');
-  if (sourceRoots.some((root) => !inside(projectRoot, root)) || !inside(projectRoot, destinationRoot)) {
-    return fail('迁移路径必须位于项目根目录内。', json);
-  }
-
-  const entries = sourceRoots.flatMap((sourceRoot) => walkFiles(sourceRoot).map((relative) => ({ sourceRoot, relative })));
-  const found = entries.map(({ sourceRoot, relative }) => display(projectRoot, path.join(sourceRoot, relative)));
+  const report = reportLegacyArtifacts(projectRoot, config);
+  if (!report.ok) return fail(report.errors, json);
+  const { entries, found, destinationRoot } = report;
   const copied = [];
   const skipped = [];
   if (values.copy) {
@@ -120,7 +127,7 @@ function run(argv) {
     }
   }
 
-  const pending = pendingItems(projectRoot, config, found);
+  const { pending } = report;
   const output = {
     ok: true,
     mode: values.copy ? 'copy' : 'report',
@@ -140,4 +147,4 @@ function run(argv) {
   return 0;
 }
 
-module.exports = { run, HELP, KNOWN_FLAGS, walkFiles, inside };
+module.exports = { run, HELP, KNOWN_FLAGS, walkFiles, inside, reportLegacyArtifacts };

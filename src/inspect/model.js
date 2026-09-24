@@ -185,6 +185,7 @@ function mergePage(existing, scanned) {
   if (routeChanged && confidence === CONFIDENCE.VERIFIED) confidence = CONFIDENCE.INFERRED;
 
   return {
+    ...(existing.schemaVersion ? { schemaVersion: existing.schemaVersion } : {}),
     id: existing.id,
     // 重新扫到即恢复为 active；用户显式 retire 的页面保持 retired
     lifecycle: existing.lifecycle === 'retired' ? 'retired' : 'active',
