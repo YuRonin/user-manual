@@ -9,6 +9,7 @@
  *   open(url)            打开页面。返回 { status, finalUrl, redirected }
  *   waitUntilReady(opts) 等到可以截图：DOM、字体、图片、异步内容、动画
  *   screenshot(opts)     截图落盘。返回 { path, bytes, meta }
+ *   currentObservation() 等待后的当前 URL 与页面事实（可选）
  *   close()              释放资源。必须可以重复调用
  *
  * 约定：
@@ -25,7 +26,7 @@ const DEFAULT_READY_OPTIONS = {
   quietMs: 500,         // DOM 连续这么久没变动才算「稳定」
   settleMs: 300,        // 最后再静置一小会儿，等布局/字体回流落定
   freezeAnimations: true,
-  waitFor: null,        // 额外要等的选择器
+  waitFor: null,        // 必须出现的选择器；超时即 readiness-timeout
 };
 
 class BrowserProvider {
@@ -75,6 +76,15 @@ class BrowserProvider {
    * 无法内省页面的 provider 返回 null，上层会跳过相应检查。
    */
   async probe() {
+    return null;
+  }
+
+  /**
+   * 可选：等待结束后重新读取的页面事实 { url, title, hasPasswordField, bodyTextLength,
+   * elementCount, notFoundHint, busy, errorAlert, pageErrors }。页面身份判断以它为准，
+   * 而不是 open() 返回的旧 finalUrl。无法内省页面的 provider 返回 null。
+   */
+  async currentObservation() {
     return null;
   }
 

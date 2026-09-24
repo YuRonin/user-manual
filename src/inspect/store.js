@@ -134,6 +134,11 @@ function renderPageYaml(page) {
       viewport: browser.viewport ?? null,
       deviceScaleFactor: browser.deviceScaleFactor ?? null,
       provider: browser.provider ?? null,
+      // 截图时的真实路由（可能因跳转与 route 不同）与页面身份验证结果（verified / url-only）
+      actualRoute: browser.actualRoute ?? null,
+      identity: browser.identity ?? null,
+      // 经过发布门槛的页面发布图 { artifactPath, sha256, privacy }；没有则只能出文字版手册
+      published: browser.published ?? null,
     },
     states: page.states || {},
     status: {

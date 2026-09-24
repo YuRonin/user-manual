@@ -178,11 +178,24 @@ function freezeRunningAnimations() {
 /** 读一些页面事实，交给上层判断「是不是需要登录」「是不是白屏」。 */
 function probePage() {
   const body = document.body;
+  const heading = document.querySelector('h1');
+  const visible = (el) => {
+    const rect = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+  };
+  const identityText = `${document.title || ''} ${heading ? heading.innerText : ''}`;
   return {
     title: document.title || '',
+    heading: heading ? heading.innerText.trim().slice(0, 120) : null,
     hasPasswordField: !!document.querySelector('input[type="password"]'),
     bodyTextLength: body && body.innerText ? body.innerText.trim().length : 0,
     elementCount: body ? body.querySelectorAll('*').length : 0,
+    // 软 404：状态码 200，但标题/主标题说明这是「不存在」页
+    notFoundHint: /(^|\D)404(\D|$)|not found|页面不存在|找不到(该)?页面/i.test(identityText),
+    // 仍在加载：只认语义标记，不猜 spinner 类名
+    busy: [...document.querySelectorAll('[aria-busy="true"],[role="progressbar"]')].some(visible),
+    errorAlert: [...document.querySelectorAll('[role="alert"]')].some((el) => visible(el) && /错误|出错|失败|异常|error|failed/i.test(el.innerText || '')),
   };
 }
 
@@ -276,8 +289,8 @@ class PlaywrightBrowserProvider extends BrowserProvider {
 
   /**
    * 等到页面可以截图：网络空闲 → 指定元素 → 字体 → 图片 → DOM 稳定 → 冻结动画 → 静置。
-   * 每一步都有独立上限，任一步超时只记 warning 不中断——宁可截一张略早的图，
-   * 也好过因为某个永不空闲的轮询而整页失败。
+   * 每一步都有独立上限。网络空闲/字体/图片/DOM 静止这类"尽力而为"的信号超时只记 warning——
+   * 永不空闲的轮询不该让整页失败；但调用方指定的 waitFor 是必需条件，超时即失败。
    * @returns {{ steps: object, warnings: string[] }}
    */
   async waitUntilReady(options = {}) {
@@ -307,14 +320,16 @@ class PlaywrightBrowserProvider extends BrowserProvider {
       warnings.push(`网络未在 ${networkIdleTimeout}ms 内空闲（页面可能有轮询或长连接），继续。`);
     }
 
-    // 3. 调用方指定的元素——最可靠的「这页真的好了」信号
+    // 3. 调用方指定的元素——最可靠的「这页真的好了」信号。它是必需条件：
+    //    等不到就说明页面没到预期状态，不能截一张"差不多"的图冒充成功。
     if (opts.waitFor) {
       try {
         await page.waitForSelector(opts.waitFor, { state: 'visible', timeout: opts.timeout });
         steps.waitFor = 'ok';
       } catch (_) {
-        steps.waitFor = 'timeout';
-        warnings.push(`等待选择器超时: ${opts.waitFor}`);
+        throw new CaptureError(REASON.READINESS_TIMEOUT, `等待元素 ${opts.waitFor} 超时（${opts.timeout}ms）。`, {
+          waitFor: opts.waitFor, finalUrl: page.url(),
+        });
       }
     }
 
@@ -366,15 +381,25 @@ class PlaywrightBrowserProvider extends BrowserProvider {
     return { steps, warnings };
   }
 
-  /** 读页面事实（是否有密码框、body 是否为空等），供上层判断失败原因。 */
-  async probe() {
+  /**
+   * 等待之后重新读取的页面事实：当前 URL（SPA 跳转后的真实地址）、标题、
+   * 是否有密码框、是否仍在加载 / 显示错误等，供上层做页面身份与状态判断。
+   */
+  async currentObservation() {
     if (!this.page) return null;
+    const url = this.page.url();
     try {
       const result = await this.page.evaluate(probePage);
-      return { ...result, pageErrors: this.pageErrors.slice(0, 5) };
+      return { url, ...result, pageErrors: this.pageErrors.slice(0, 5) };
     } catch (_) {
-      return { pageErrors: this.pageErrors.slice(0, 5) };
+      // 页面正在跳转时执行上下文会被销毁；URL 仍是可靠事实。
+      return { url: this.page.url(), pageErrors: this.pageErrors.slice(0, 5) };
     }
+  }
+
+  /** 兼容旧调用：等同 currentObservation()。 */
+  async probe() {
+    return this.currentObservation();
   }
 
   locatorFor(target) {

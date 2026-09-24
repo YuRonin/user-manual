@@ -19,6 +19,7 @@ const FILES = [
   'discover-tasks.test.js',
   'capture-plan.test.js',
   'task-executor.test.js',
+  'page-validation.test.js',
   'capture-task.test.js',
   'artifacts.test.js',
   'publication-paths.test.js',

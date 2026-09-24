@@ -37,6 +37,10 @@ function buildCapturePlan(task, pages) {
     const after = step.stateAfter || before;
     if (!states[before]) errors.push(`steps[${index}].stateBefore 不存在: ${before}`);
     if (!states[after]) errors.push(`steps[${index}].stateAfter 不存在: ${after}`);
+    // 状态必须能被断言验证：空断言的状态无法区分"到达"与"没到达"。
+    for (const id of new Set([before, after])) {
+      if (states[id] && !(states[id].assertions || []).length) errors.push(`页面 ${page.id} 的状态 ${id} 没有任何断言。`);
+    }
     const risk = effectiveRisk(task, step);
     const execution = executionFor(risk);
     return {
@@ -45,6 +49,7 @@ function buildCapturePlan(task, pages) {
       page: step.page,
       route: page.route,
       stateBefore: before,
+      beforeState: states[before] ? { id: before, ...states[before] } : null,
       action: step.action,
       risk,
       execution,
@@ -62,7 +67,12 @@ function buildCapturePlan(task, pages) {
       taskId: task.id,
       taskTitle: task.title,
       createdAt: new Date().toISOString(),
-      entry: { page: entryPage.id, route: entryPage.route, state: 'default' },
+      entry: {
+        page: entryPage.id,
+        route: entryPage.route,
+        state: 'default',
+        assertions: ({ default: implicitDefaultState(entryPage), ...(entryPage.states || {}) }).default.assertions || [],
+      },
       steps,
     },
   };

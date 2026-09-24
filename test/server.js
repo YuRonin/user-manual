@@ -93,6 +93,21 @@ const PAGES = {
   <button type="submit">登 录</button>
 </form>`),
 
+  // 状态码 200，但内容是「页面不存在」：软 404
+  '/soft-404': html('<h1>页面不存在</h1><p>你访问的页面已被移除。</p><a href="/">返回首页</a>'),
+
+  // 先渲染正常内容，300ms 后前端跳去登录：goto 时的 URL 还是原地址
+  '/spa-redirect': html(`
+<h1>工作台</h1>
+<p>会话已过期，即将跳转。</p>
+<script>setTimeout(function () { location.href = '/login'; }, 300);</script>`),
+
+  // 加载永远不结束（语义标记 aria-busy）
+  '/loading-forever': html('<h1>报表</h1><div aria-busy="true">加载中…</div>'),
+
+  // 渲染的是错误提示而不是正常内容
+  '/error-state': html('<h1>报表</h1><div role="alert">加载失败，请稍后重试</div>'),
+
   '/public-with-password': html(`
 <h1>账号设置</h1>
 <p>这是一个已登录用户才能看到的设置页，内容很长，不该被误判成登录页。</p>
@@ -139,6 +154,21 @@ function startServer() {
     if (pathname === '/error500') {
       res.writeHead(500, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(html('<h1>服务器错误</h1>'));
+      return;
+    }
+
+    // 500，但页面上有正常的标题和按钮：不能因为"看起来正常"就放行
+    if (pathname === '/error500-with-button') {
+      res.writeHead(500, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(html('<h1>工作台</h1><button aria-label="发送">发送</button>'));
+      return;
+    }
+
+    // 跳到另一个 origin（localhost 与 127.0.0.1 不同源）
+    if (pathname === '/cross-origin') {
+      const port = String(req.headers.host || '').split(':')[1];
+      res.writeHead(302, { Location: `http://localhost:${port}/` });
+      res.end();
       return;
     }
 

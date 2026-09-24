@@ -22,6 +22,7 @@ const store = require('../inspect/store');
 const { readIndexes, findForwardPage } = require('../inspect/index-store');
 const { displayPath } = require('../util/fsx');
 const { prepareAuth, classifyAuthFailure, refreshAuth } = require('../auth/runtime');
+const { validateNavigation, runAssertions } = require('../evidence/validate-page');
 
 const KNOWN_FLAGS = new Set([
   'projectRoot', 'params', 'url', 'waitFor', 'timeout', 'quietMs', 'settleMs',
@@ -50,7 +51,7 @@ manual capture —— 用真实浏览器打开页面并截图
   --project-root <路径>    项目根目录，默认当前工作目录
   --params <k=v;k=v>       动态路由的参数值，例如 --params "id=123"
   --url <完整URL>          直接指定要打开的地址，绕过 route 拼接（调试用）
-  --wait-for <选择器>      额外等待这个元素出现，最可靠的「页面好了」信号
+  --wait-for <选择器>      必须出现的元素（超时即失败，不截图），最可靠的「页面好了」信号
   --timeout <毫秒>         单步等待上限，默认 ${DEFAULT_READY_OPTIONS.timeout}
   --quiet-ms <毫秒>        DOM 静止多久算稳定，默认 ${DEFAULT_READY_OPTIONS.quietMs}
   --settle-ms <毫秒>       截图前静置时长，默认 ${DEFAULT_READY_OPTIONS.settleMs}
@@ -148,54 +149,12 @@ function joinUrl(baseUrl, route) {
   return base + suffix;
 }
 
-/** 看起来像登录页的路径。 */
-const LOGIN_PATH_RE = /\/(login|signin|sign-in|sign_in|auth|sso|account\/login)(\/|$|\?)/i;
-
 /**
- * 根据 HTTP 状态与页面事实判断这次打开是否真的成功。
- * 只在证据明确时下结论——拿不准就放行，让截图产出，而不是误报失败。
+ * 兼容旧接口：根据 HTTP 状态与页面事实判断这次打开是否真的成功。
+ * 实际规则在 evidence/validate-page，与任务入口共用。
  */
 function assessOutcome({ requestedUrl, openResult, probe }) {
-  const { status, finalUrl } = openResult;
-
-  if (status === 404) {
-    throw new CaptureError(REASON.HTTP_NOT_FOUND, `页面返回 404: ${requestedUrl}`, {
-      url: requestedUrl, status, finalUrl,
-    });
-  }
-
-  // 被重定向到登录页，或页面上有密码框——两者都说明这页当前访问不到真实内容
-  const requestedIsLogin = LOGIN_PATH_RE.test(requestedUrl);
-  if (!requestedIsLogin) {
-    if (LOGIN_PATH_RE.test(finalUrl)) {
-      throw new CaptureError(REASON.LOGIN_REQUIRED, `访问 ${requestedUrl} 被重定向到了登录页。`, {
-        url: requestedUrl, finalUrl, status,
-      });
-    }
-    // 有密码框只是弱信号——账号设置页也有。只有当整页内容少到「除了登录表单没别的」
-    // 时才下结论。宁可漏判（截到一张登录页，用户一眼看得出来），也不要误判
-    // （把正常页面挡在外面，用户还以为是权限问题）。
-    const looksLikeOnlyALoginForm =
-      probe && probe.hasPasswordField && probe.bodyTextLength < 200 && probe.elementCount < 80;
-    if (looksLikeOnlyALoginForm) {
-      throw new CaptureError(REASON.LOGIN_REQUIRED, `${requestedUrl} 渲染出的是登录表单，说明需要登录。`, {
-        url: requestedUrl, finalUrl, status,
-      });
-    }
-  }
-
-  if (status !== null && status >= 400) {
-    throw new CaptureError(REASON.HTTP_ERROR, `页面返回 HTTP ${status}: ${requestedUrl}`, {
-      url: requestedUrl, status, finalUrl,
-    });
-  }
-
-  // body 里一个元素都没有：基本可以断定前端崩了，截出来会是纯白图
-  if (probe && probe.elementCount === 0 && probe.bodyTextLength === 0) {
-    throw new CaptureError(REASON.BLANK_PAGE, `${requestedUrl} 加载完成但页面是空的。`, {
-      url: requestedUrl, status, finalUrl, pageErrors: probe.pageErrors || [],
-    });
-  }
+  return validateNavigation({ requestedUrl, openResult, observation: probe });
 }
 
 function renderSummary({ page, url, outPath, shot, ready, projectRoot, provider, profileId, profile }) {
@@ -339,13 +298,33 @@ async function run(argv) {
 
   let shot;
   let ready;
+  let navigation;
+  let identity = 'url-only';
+  const identityAssertions = (page.states?.default?.assertions || []).filter((a) => a && a.type !== 'url');
   try {
     const openResult = await provider.open(url, { timeout: readyOptions.timeout });
     ready = await provider.waitUntilReady(readyOptions);
-    const probe = await provider.probe();
+    // 等待结束后重新读取 URL 与页面事实：SPA 延迟跳转以截图时的地址为准。
+    const observation = provider.currentObservation
+      ? await provider.currentObservation()
+      : await provider.probe();
 
     // 先判断这次打开到底算不算成功，再决定要不要落盘。顺序不能反。
-    assessOutcome({ requestedUrl: url, openResult, probe });
+    navigation = validateNavigation({ requestedUrl: url, openResult, observation });
+    ready.warnings.push(...navigation.warnings);
+    // 页面身份：只有非 URL 断言能证明"打开的是这一页"；只有 URL 的旧模型记为 url-only。
+    if (!values.url && identityAssertions.length > 0) {
+      try {
+        navigation.validations.push(...await runAssertions(provider, identityAssertions, {
+          scope: 'page-identity', idPrefix: 'default', timeoutMs: Math.min(readyOptions.timeout, 10000),
+        }));
+        identity = 'verified';
+      } catch (error) {
+        throw new CaptureError(REASON.PAGE_IDENTITY_FAILED, `${url} 的页面身份断言未通过: ${error.message}`, {
+          url, finalUrl: navigation.finalUrl, assertionId: error.validation?.assertionId || null,
+        });
+      }
+    }
 
     shot = await provider.screenshot({
       path: outPath,
@@ -373,6 +352,8 @@ async function run(argv) {
       lastCapture: capturedAt,
       screenshot: screenshotRelative,
       url: shot.meta.url,
+      actualRoute: navigation.actualRoute,
+      identity,
       viewport: `${shot.meta.viewport.width}x${shot.meta.viewport.height}`,
       deviceScaleFactor: shot.meta.deviceScaleFactor,
       provider: providerId,
@@ -420,6 +401,9 @@ async function run(argv) {
           provider: { id: providerId, type: shot.meta.providerType, headless: shot.meta.headless },
           fullPage: shot.meta.fullPage,
           readySteps: ready.steps,
+          identity,
+          actualRoute: navigation.actualRoute,
+          validations: navigation.validations,
           warnings: ready.warnings,
           confidence: updatedPage.confidence,
         },

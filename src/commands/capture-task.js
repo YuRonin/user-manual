@@ -9,7 +9,7 @@ const taskStore = require('../tasks/store');
 const { transitionTask } = require('../tasks/model');
 const { buildCapturePlan, writeCapturePlan } = require('../tasks/capture-plan');
 const { executeCapturePlan } = require('../tasks/executor');
-const { prepareAuth, assertAuthenticated, refreshAuth } = require('../auth/runtime');
+const { prepareAuth, assertAuthenticated, classifyAuthFailure, refreshAuth } = require('../auth/runtime');
 
 const KNOWN_FLAGS = new Set(['projectRoot', 'json', 'help']);
 const HELP = 'manual capture-task <task-id> [--project-root <路径>] [--json]';
@@ -61,6 +61,7 @@ async function run(argv) {
       redactionRules: config.privacy || {},
       authRuntime: {
         assertAuthenticated: (openResult) => assertAuthenticated(openResult, auth),
+        classify: (error) => classifyAuthFailure(error, auth),
         refresh: (actualProvider) => refreshAuth(actualProvider, auth),
       },
     });
