@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { toMarkdownHref, toPosix } = require('../publication/paths');
 const { fileSha256 } = require('../util/hash');
+const { writeFileAtomic } = require('../util/atomic-write');
 const { computeClaims, claimLabel } = require('../evidence/claims');
 
 function uiTexts(text) { return [...String(text || '').matchAll(/「([^」]+)」/g)].map((m) => m[1]); }
@@ -81,6 +82,7 @@ function buildTaskDraft(task, evidence, context = {}) {
   };
 }
 
-function publishAtomic(file, content) { fs.mkdirSync(path.dirname(file), { recursive: true }); const temp = file + '.tmp'; fs.writeFileSync(temp, content, 'utf8'); fs.renameSync(temp, file); return file; }
+/** 兼容旧调用：委托给共享的原子写入（唯一 temp、fsync、rename）。 */
+function publishAtomic(file, content) { return writeFileAtomic(file, content); }
 
 module.exports = { buildTaskDraft, publishAtomic };

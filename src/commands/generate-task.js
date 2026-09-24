@@ -22,18 +22,68 @@ function manualFileFor(root, config, taskId) {
   return path.join(root, config.docs.outputDir, 'tasks', `${taskId}.md`);
 }
 
-function runFinalize({ root, config, state, task, factsFile, finalizeInput, json }) {
-  if (!fs.existsSync(factsFile)) return fail('缺少任务事实文件，请先生成草稿。', json);
-  const final = fs.readFileSync(path.resolve(finalizeInput), 'utf8');
-  const facts = JSON.parse(fs.readFileSync(factsFile, 'utf8'));
+/** 读取定稿输入与草稿事实。 */
+function loadFinalize({ factsFile, finalizeInput }) {
+  if (!fs.existsSync(factsFile)) return { ok: false, errors: ['缺少任务事实文件，请先生成草稿。'] };
+  const inputFile = path.resolve(finalizeInput);
+  if (!fs.existsSync(inputFile)) return { ok: false, errors: [`--finalize 文件不存在: ${inputFile}`] };
+  return { ok: true, final: fs.readFileSync(inputFile, 'utf8'), facts: JSON.parse(fs.readFileSync(factsFile, 'utf8')) };
+}
+
+/**
+ * 写任何正式文件之前完成全部检查：状态流转、结构事实、发布门槛。
+ * 任一项不通过都不触碰正式文档。
+ */
+function validateFinalize({ root, config, task, final, facts }) {
+  let nextTask;
+  try {
+    nextTask = transitionTask(task, 'generated');
+  } catch (error) {
+    return { ok: false, errors: [`任务状态不允许定稿：${error.message}（需要 captured）`] };
+  }
   const checked = validateTaskFinal(final, facts);
+  if (!checked.ok) return { ok: false, errors: checked.errors };
+  const manualFile = manualFileFor(root, config, task.id);
+  const gate = validatePublication({ projectRoot: root, manualFile, markdown: final, images: facts.images, config });
+  if (!gate.ok) return { ok: false, errors: formatIssues(gate.errors) };
+  return { ok: true, nextTask, manualFile };
+}
+
+/**
+ * 提交：先原子替换正式文档，再写任务状态。两者不是一个事务——
+ * 文档已替换而状态写入失败时明确报告 partial-commit，交给后续对账（P1-07），不伪称成功。
+ */
+function commitFinalize({ root, state, manualFile, final, nextTask }) {
+  try {
+    publishAtomic(manualFile, final);
+  } catch (error) {
+    return { ok: false, code: error.code || 'write-failed', errors: [`${error.code || 'write-failed'}: 正式文档未改变。${error.message}`] };
+  }
+  try {
+    store.writeTask(state, nextTask);
+  } catch (error) {
+    return {
+      ok: false,
+      code: 'partial-commit',
+      committed: [path.relative(root, manualFile).replace(/\\/g, '/')],
+      errors: [`partial-commit: 正式文档已更新，但任务状态写入失败（${error.code || error.message}）。重新运行 finalize 前请确认文档内容。`],
+    };
+  }
+  return { ok: true };
+}
+
+function runFinalize({ root, config, state, task, factsFile, finalizeInput, json }) {
+  const loaded = loadFinalize({ factsFile, finalizeInput });
+  if (!loaded.ok) return fail(loaded.errors, json);
+  const checked = validateFinalize({ root, config, task, final: loaded.final, facts: loaded.facts });
   if (!checked.ok) return fail(checked.errors, json);
-  const out = manualFileFor(root, config, task.id);
-  const gate = validatePublication({ projectRoot: root, manualFile: out, markdown: final, images: facts.images, config });
-  if (!gate.ok) return fail(formatIssues(gate.errors), json);
-  publishAtomic(out, final);
-  store.writeTask(state, transitionTask(task, 'generated'));
-  if (json) process.stdout.write(JSON.stringify({ ok: true, status: 'generated', manual: out }, null, 2) + '\n');
+  const committed = commitFinalize({ root, state, manualFile: checked.manualFile, final: loaded.final, nextTask: checked.nextTask });
+  if (!committed.ok) {
+    if (json) process.stdout.write(JSON.stringify({ ok: false, code: committed.code, committed: committed.committed || [], errors: committed.errors }, null, 2) + '\n');
+    else committed.errors.forEach((x) => process.stderr.write(`[manual generate-task] ${x}\n`));
+    return 1;
+  }
+  if (json) process.stdout.write(JSON.stringify({ ok: true, status: 'generated', manual: checked.manualFile }, null, 2) + '\n');
   return 0;
 }
 

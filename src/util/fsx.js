@@ -2,15 +2,18 @@
 
 const fs = require('fs');
 const path = require('path');
+const { writeFileAtomic } = require('./atomic-write');
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
 
-/** 以 UTF-8 写文本，自动建目录。统一用 LF，避免跨平台 diff 噪音。 */
+/**
+ * 以 UTF-8 写文本，自动建目录。统一用 LF，避免跨平台 diff 噪音。
+ * 通过唯一 temp + fsync + rename 原子替换，失败时旧文件保持不变。
+ */
 function writeText(filePath, content) {
-  ensureDir(path.dirname(filePath));
-  fs.writeFileSync(filePath, content.replace(/\r\n/g, '\n'), 'utf8');
+  writeFileAtomic(filePath, content.replace(/\r\n/g, '\n'));
 }
 
 /**

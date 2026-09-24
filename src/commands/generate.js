@@ -316,7 +316,12 @@ function runFinalize({ projectRoot, config, page, stateDirAbs, finalizeInput, fa
   const draftImages = JSON.parse(fs.readFileSync(factsFile, 'utf8')).images || [];
   const gate = validatePublication({ projectRoot, manualFile: finalPath, markdown: body, images: draftImages, config });
   if (!gate.ok) return fail(formatIssues(gate.errors), { json });
-  writeText(finalPath, body);
+  // 所有检查都已在写入前完成；原子替换失败（如文件被占用）时旧文档保持不变。
+  try {
+    writeText(finalPath, body);
+  } catch (error) {
+    return fail([`${error.code || 'write-failed'}: 正式文档未改变。${error.message}`], { json });
+  }
 
   if (json) {
     process.stdout.write(

@@ -25,6 +25,8 @@ const FILES = [
   'artifacts.test.js',
   'publication-paths.test.js',
   'publication-gates.test.js',
+  'atomic-write.test.js',
+  'finalize-safety.test.js',
   'generate-task.test.js',
   'staleness.test.js',
   'migrate-artifacts.test.js',
