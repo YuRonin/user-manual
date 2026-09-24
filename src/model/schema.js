@@ -37,6 +37,7 @@ const KNOWN_FIELDS = {
     'browser', 'status', 'analysis', 'latestCaptureId'],
   userTask: ['schemaVersion', 'id', 'revision', 'title', 'goal', 'entryPage', 'priority', 'preconditions', 'risk', 'status',
     'approval', 'environment', 'fixtures', 'steps', 'branches', 'relatedTasks', 'completion', 'evidence', 'evidenceManifest',
+    'capturePlan', 'captureIds',
     'source', 'discovery', 'generatedAt', 'updatedAt', 'notes', 'history'],
 };
 

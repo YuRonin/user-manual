@@ -26,6 +26,8 @@ const { extractFacts, compareFacts, formatViolations } = require('../generate/fa
 const { writeText, displayPath } = require('../util/fsx');
 const { toMarkdownHref } = require('../publication/paths');
 const { validateArtifact, validatePublication, formatIssues } = require('../publication/validate');
+const { createCaptureStore } = require('../evidence/store');
+const { verifyCaptureRecord, describeProblems } = require('../evidence/integrity');
 
 function draftFactsPath(stateDirAbs, pageId) {
   return path.join(stateDirAbs, 'drafts', `${pageId}.facts.json`);
@@ -118,6 +120,22 @@ function loadPage(projectRoot, config, pageId) {
 
 // ---------------------------------------------------------------- 阶段一：草稿
 
+/** 从已提交的 Capture 记录取页面发布图；记录缺失、无发布图或产物被改动都拒绝。 */
+function publishedFromRecord({ projectRoot, stateDirAbs, captureId }) {
+  let record;
+  try {
+    record = createCaptureStore({ projectRoot, stateDirAbs }).read(captureId);
+  } catch (error) {
+    return { ok: false, errors: [`${error.code || 'invalid-capture-record'}: ${error.message}`] };
+  }
+  if (!record) return { ok: false, errors: [`capture-record-missing: 页面引用的 Capture ${captureId} 不存在。`] };
+  const artifact = (record.artifacts || []).find((a) => a.kind === 'published');
+  if (!artifact) return { ok: false, errors: [`unsafe-page-artifact: Capture ${captureId} 没有通过隐私检测的发布图。`] };
+  const integrity = verifyCaptureRecord(projectRoot, record, { kinds: ['published'] });
+  if (!integrity.ok) return { ok: false, errors: describeProblems(integrity.problems) };
+  return { ok: true, artifactPath: artifact.path, sha256: artifact.sha256, privacy: record.privacy, captureId: record.id };
+}
+
 function runDraft({ projectRoot, config, page, stateDirAbs, skillRoot, indexContext, noScreenshot, json }) {
   const errors = [];
 
@@ -154,16 +172,22 @@ function runDraft({ projectRoot, config, page, stateDirAbs, skillRoot, indexCont
         { json }
       );
     }
-    const artifactFile = path.resolve(projectRoot, published.artifactPath);
+    // 有 Capture 记录时以记录为准（页面 browser 块只是投影）；旧项目没有记录时沿用投影并由发布门槛核对 hash。
+    const source = page.browser?.latestCaptureId
+      ? publishedFromRecord({ projectRoot, stateDirAbs, captureId: page.browser.latestCaptureId })
+      : { ok: true, artifactPath: published.artifactPath, sha256: published.sha256 || null, privacy: published.privacy || null, captureId: null };
+    if (!source.ok) return fail([...source.errors, `重新截一张: \`manual capture ${page.id}\``], { json });
+    const artifactFile = path.resolve(projectRoot, source.artifactPath);
     // 截图记录在模型里但文件被删了——这属于事实缺失，必须说出来而不是生成一个坏链接
     if (!fs.existsSync(artifactFile)) {
-      return fail([`页面模型记录的截图不存在: ${published.artifactPath}`, `重新截一张: \`manual capture ${page.id}\``], { json });
+      return fail([`页面模型记录的截图不存在: ${source.artifactPath}`, `重新截一张: \`manual capture ${page.id}\``], { json });
     }
     image = {
-      artifactPath: published.artifactPath,
+      artifactPath: source.artifactPath,
       markdownHref: toMarkdownHref({ manualFile: finalPath, artifactFile }),
-      sha256: published.sha256 || null,
-      privacy: published.privacy || null,
+      sha256: source.sha256,
+      privacy: source.privacy,
+      ...(source.captureId ? { captureId: source.captureId } : {}),
     };
     const issues = validateArtifact(image, { projectRoot, config });
     if (issues.length > 0) return fail(formatIssues(issues), { json });

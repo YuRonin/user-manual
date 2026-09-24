@@ -24,6 +24,9 @@ const { displayPath } = require('../util/fsx');
 const { prepareAuth, classifyAuthFailure, refreshAuth } = require('../auth/runtime');
 const { validateNavigation, runAssertions } = require('../evidence/validate-page');
 const { captureStable, derivePublished } = require('../evidence/capture-safe');
+const { createCaptureStore, sanitizeUrl } = require('../evidence/store');
+const { definitionRevision } = require('../model/revision');
+const { revisionOf } = require('../util/hash');
 
 const REASON_CODES = new Set(Object.values(REASON));
 
@@ -271,10 +274,10 @@ async function run(argv) {
     url = joinUrl(config.project.baseUrl, resolved.route);
   }
 
-  // ---- 输出路径
-  const outPath = values.out
-    ? path.resolve(projectRoot, values.out)
-    : path.join(projectRoot, config.artifacts.rawDir, `${pageId}.${config.artifacts.format || 'png'}`);
+  // ---- 输出路径：先写本次 Capture 的私有 staging，提交后按内容寻址安装；--out 只额外导出一份原图副本
+  const captureStore = createCaptureStore({ projectRoot, stateDirAbs });
+  const format = config.artifacts.format || 'png';
+  const outPath = values.out ? path.resolve(projectRoot, values.out) : null;
 
   // ---- 真正干活
   const readyOptions = {
@@ -302,8 +305,11 @@ async function run(argv) {
   let shot;
   let ready;
   let safe = null;
-  let published = null;
   let navigation;
+  const staging = captureStore.begin();
+  const stagedRaw = staging.file(`raw.${format}`);
+  const stagedSanitized = staging.file('sanitized.png');
+  const stagedPublished = staging.file('published.png');
   let identity = 'url-only';
   const identityAssertions = (page.states?.default?.assertions || []).filter((a) => a && a.type !== 'url');
   try {
@@ -333,32 +339,24 @@ async function run(argv) {
 
     // 稳定截图 + 离线派生：原图只留在 rawDir，发布图由同一份原图遮罩后写入 annotatedDir。
     const captured = await captureStable(provider, {
-      rawPath: outPath,
+      rawPath: stagedRaw,
       fullPage: values.fullPage === true,
-      format: config.artifacts.format || 'png',
+      format,
     });
     shot = captured.shot;
-    const publishedRelative = path.posix.join(String(config.artifacts.annotatedDir).replace(/\\/g, '/'), `page--${pageId}.png`);
     safe = await derivePublished({
       captured,
-      rawPath: outPath,
-      sanitizedPath: path.join(projectRoot, config.artifacts.sanitizedDir, 'pages', `${pageId}.png`),
-      publishedPath: path.join(projectRoot, publishedRelative),
+      rawPath: stagedRaw,
+      sanitizedPath: stagedSanitized,
+      publishedPath: stagedPublished,
       theme: config.annotation.themes[config.annotation.activeTheme],
       redactionRules: config.privacy || {},
     });
-    published = safe.published ? {
-      artifactPath: publishedRelative,
-      sha256: safe.derived.publishedSha256,
-      privacy: safe.privacy,
-      derivedFromRawHash: safe.derived.rawHash,
-      geometryHash: safe.derived.geometryHash,
-      rendererVersion: safe.derived.rendererVersion,
-    } : null;
     if (!safe.published) ready.warnings.push(`页面隐私检测未通过（${safe.privacy.unresolved.length} 项无法定位），未生成发布图；手册只能出文字版。`);
     const refreshed = await refreshAuth(provider, auth);
     if (refreshed.warning) ready.warnings.push(refreshed.warning);
   } catch (e) {
+    captureStore.abort(staging);
     await provider.close();
     const normalized = e instanceof CaptureError
       ? e
@@ -368,14 +366,79 @@ async function run(argv) {
     await provider.close();
   }
 
-  // ---- 回写页面模型
+  // ---- 提交不可变 Capture：产物安装 → 记录可见 → latest 引用 → 页面投影
   const capturedAt = new Date().toISOString();
-  const screenshotRelative = path.relative(projectRoot, outPath).replace(/\\/g, '/');
+  const spec = {
+    viewport: shot.meta.viewport,
+    dpr: shot.meta.deviceScaleFactor,
+    fullPage: !!shot.meta.fullPage,
+    profile: profileId,
+    provider: providerId,
+  };
+  const finalUrl = sanitizeUrl(shot.meta.url);
+  const modelRevision = definitionRevision('page', page);
+  let record;
+  try {
+    const artifacts = [
+      { kind: 'raw', file: stagedRaw, dir: config.artifacts.rawDir, prefix: pageId },
+      { kind: 'sanitized', file: stagedSanitized, dir: `${config.artifacts.sanitizedDir}/pages`, prefix: pageId },
+    ];
+    if (safe.published) artifacts.push({ kind: 'published', file: stagedPublished, dir: config.artifacts.annotatedDir, prefix: `page--${pageId}` });
+    record = captureStore.commit(staging, {
+      record: {
+        kind: 'page',
+        subject: { pageId },
+        runId: null,
+        scenarioId: null,
+        checkpointId: 'default',
+        inputHash: revisionOf({ pageId, modelRevision, url: sanitizeUrl(url), spec }),
+        modelRevision,
+        sourceFingerprint: null,
+        observedAt: capturedAt,
+        finalUrl,
+        actualRoute: navigation.actualRoute,
+        identity,
+        spec,
+        validations: navigation.validations,
+        privacy: safe.privacy,
+        redactions: safe.redactions.map(({ kind, rect, result }) => ({ kind, rect, result })),
+        provenance: {
+          mode: 'live',
+          derivedFromRawHash: safe.derived.rawHash,
+          geometryHash: safe.derived.geometryHash,
+          rendererVersion: safe.derived.rendererVersion,
+        },
+      },
+      artifacts,
+    });
+    captureStore.setLatest({ [`page:${pageId}`]: record.id });
+  } catch (e) {
+    captureStore.abort(staging);
+    return fail([`${e.code || 'capture-commit-failed'}: ${e.message}`], { json });
+  }
+  const artifactOf = (kind) => record.artifacts.find((a) => a.kind === kind) || null;
+  const screenshotRelative = artifactOf('raw').path;
+  const publishedArtifact = artifactOf('published');
+  // 页面投影只是指向记录的便捷字段；可信度以 Capture 记录的 validations 为准。
+  const published = publishedArtifact ? {
+    captureId: record.id,
+    artifactPath: publishedArtifact.path,
+    sha256: publishedArtifact.sha256,
+    privacy: safe.privacy,
+    derivedFromRawHash: safe.derived.rawHash,
+    geometryHash: safe.derived.geometryHash,
+    rendererVersion: safe.derived.rendererVersion,
+  } : null;
+  if (outPath) {
+    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    fs.copyFileSync(path.join(projectRoot, screenshotRelative), outPath);
+  }
 
   const updatedPage = {
     ...page,
     browser: {
       verified: true,
+      latestCaptureId: record.id,
       lastCapture: capturedAt,
       screenshot: screenshotRelative,
       url: shot.meta.url,
@@ -419,8 +482,10 @@ async function run(argv) {
           pageId,
           route: effectiveRoute,
           url: shot.meta.url,
+          captureId: record.id,
           screenshot: screenshotRelative,
-          screenshotAbsolute: outPath,
+          screenshotAbsolute: path.join(projectRoot, screenshotRelative),
+          exported: outPath,
           bytes: shot.bytes,
           capturedAt,
           profile: profileId,
@@ -445,7 +510,7 @@ async function run(argv) {
   } else {
     process.stdout.write(
       renderSummary({
-        page, url, outPath, shot, ready, projectRoot, profileId, profile,
+        page, url, outPath: path.join(projectRoot, screenshotRelative), shot, ready, projectRoot, profileId, profile,
         provider: { id: providerId, type: shot.meta.providerType, headless: shot.meta.headless },
       }) + '\n'
     );

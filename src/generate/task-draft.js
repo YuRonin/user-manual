@@ -5,6 +5,23 @@ const { toMarkdownHref, toPosix } = require('../publication/paths');
 const { fileSha256 } = require('../util/hash');
 const { writeFileAtomic } = require('../util/atomic-write');
 const { computeClaims, claimLabel } = require('../evidence/claims');
+const { createCaptureStore } = require('../evidence/store');
+const { verifyCaptureRecord, describeProblems } = require('../evidence/integrity');
+
+function publishedFromCapture(projectRoot, stateDir, captureId, artifactPath) {
+  let captureRecord;
+  try {
+    captureRecord = createCaptureStore({ projectRoot, stateDirAbs: stateDir }).read(captureId);
+  } catch (error) {
+    return { ok: false, error: `${error.code || 'invalid-capture-record'}: ${error.message}` };
+  }
+  if (!captureRecord) return { ok: false, error: `capture-record-missing: ${captureId}` };
+  const artifact = (captureRecord.artifacts || []).find((a) => a.kind === 'published');
+  if (!artifact || artifact.path !== artifactPath) return { ok: false, error: `证据清单与 Capture ${captureId} 的发布图不一致。` };
+  const integrity = verifyCaptureRecord(projectRoot, captureRecord, { kinds: ['published'] });
+  if (!integrity.ok) return { ok: false, error: describeProblems(integrity.problems).join('；') };
+  return { ok: true, sha256: artifact.sha256, privacy: captureRecord.privacy };
+}
 
 function uiTexts(text) { return [...String(text || '').matchAll(/「([^」]+)」/g)].map((m) => m[1]); }
 
@@ -32,10 +49,19 @@ function buildTaskDraft(task, evidence, context = {}) {
         errors.push(`步骤 ${record.id} 的发布图不存在: ${artifactPath}`);
         continue;
       }
+      // 有 Capture 记录时 hash 与 privacy 以记录为准，且文件必须仍与记录一致；
+      // 旧 manifest（无 captureId）退回为按当前文件计算 hash。
+      let sha256 = fileSha256(artifactFile);
+      let privacy = shot.privacy || null;
+      if (shot.captureId && context.stateDir) {
+        const fromRecord = publishedFromCapture(projectRoot, context.stateDir, shot.captureId, artifactPath);
+        if (!fromRecord.ok) { errors.push(`步骤 ${record.id}: ${fromRecord.error}`); continue; }
+        ({ sha256, privacy } = fromRecord);
+      }
       const markdownHref = toMarkdownHref({ manualFile: finalPath, artifactFile });
       hrefByShot.set(shot, markdownHref);
       // sha256 固定草稿时的图片内容；privacy 只能来自采集时实际执行的检测记录，缺失即 unknown。
-      images.push({ artifactPath, markdownHref, sha256: fileSha256(artifactFile), privacy: shot.privacy || null });
+      images.push({ artifactPath, markdownHref, sha256, privacy, ...(shot.captureId ? { captureId: shot.captureId } : {}) });
     }
   }
   if (images.length === 0) errors.push('任务指南至少需要一张 annotated 关键状态截图。');

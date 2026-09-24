@@ -147,6 +147,39 @@ process.stdout.write('\nimage pipeline\n');
     assert.ok(!fs.existsSync(path.join(root, 'docs')));
   });
 
+  await test('执行器：失败时没有 Capture 记录也没有残留 staging', async (root) => {
+    await assert.rejects(() => executeCapturePlan(plan(), new Provider({ unstable: true }), opts(root)), (e) => e.code === 'geometry-unstable');
+    const evidence = path.join(root, '.manual', 'evidence');
+    const list = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir) : []);
+    assert.deepStrictEqual(list(path.join(evidence, 'captures')), []);
+    assert.deepStrictEqual(list(path.join(evidence, 'staging')), []);
+  });
+
+  await test('执行器：同一计划连续采集两次，得到新 captureId，旧记录与旧发布图字节不变', async (root) => {
+    const BLUE = await sharp({ create: { width: 100, height: 100, channels: 3, background: { r: 0, g: 0, b: 255 } } }).png().toBuffer();
+    const first = await executeCapturePlan(plan(), new Provider(), opts(root));
+    const firstShot = first.steps[0].screenshots[0];
+    const recordFile = path.join(root, '.manual', 'evidence', 'captures', `${firstShot.captureId}.json`);
+    const recordText = fs.readFileSync(recordFile, 'utf8');
+    const firstImage = fs.readFileSync(path.join(root, firstShot.annotated));
+
+    const second = new Provider();
+    second.screenshot = async ({ path: file }) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, BLUE); return { path: file, bytes: BLUE.length, meta: { viewport: { width: 100, height: 100 }, deviceScaleFactor: 1 } }; };
+    const again = await executeCapturePlan(plan(), second, opts(root));
+    const secondShot = again.steps[0].screenshots[0];
+    assert.notStrictEqual(secondShot.captureId, firstShot.captureId);
+    assert.notStrictEqual(secondShot.annotated, firstShot.annotated, '新内容写到新的内容寻址文件');
+    assert.strictEqual(fs.readFileSync(recordFile, 'utf8'), recordText, '旧记录不可变');
+    assert.ok(fs.readFileSync(path.join(root, firstShot.annotated)).equals(firstImage), '旧发布图字节不变');
+    assert.deepStrictEqual(again.canonicalCaptureRefs, [secondShot.captureId], 'manifest 引用由记录派生');
+    const latest = JSON.parse(fs.readFileSync(path.join(root, '.manual', 'evidence', 'latest.json'), 'utf8'));
+    assert.strictEqual(latest.refs['task:t:open:after'], secondShot.captureId);
+    const record = JSON.parse(fs.readFileSync(path.join(root, '.manual', 'evidence', 'captures', `${secondShot.captureId}.json`), 'utf8'));
+    assert.deepStrictEqual(record.subject, { taskId: 't', stepId: 'open', timing: 'after' });
+    assert.ok(record.validations.some((v) => v.scope === 'scenario-state' && v.phase === 'after' && v.outcome === 'passed'));
+    assert.strictEqual(record.artifacts.find((a) => a.kind === 'published').path, secondShot.annotated);
+  });
+
   await test('执行器：强制遮罩的高风险项没有几何时标 unresolved，发布门槛会拒绝', async (root) => {
     const provider = new Provider();
     provider.collectSensitiveElements = async () => [{ text: '13812345678', label: '手机号', source: 'form-control', rect: null }];
@@ -185,12 +218,12 @@ process.stdout.write('\nimage pipeline\n');
           r = await runCli(['capture', 'chat', '--project-root', project, '--url', `${server.baseUrl}/privacy-page`, '--json', ...(fullPage ? ['--full-page'] : [])]);
           assert.strictEqual(r.status, 0, r.stdout + r.stderr);
           const out = JSON.parse(r.stdout);
-          assert.strictEqual(out.published.artifactPath, 'docs/manual/images/annotated/page--chat.png');
+          assert.match(out.published.artifactPath, /^docs\/manual\/images\/annotated\/page--chat--[0-9a-f]{16}\.png$/);
           assert.strictEqual(out.published.privacy.status, 'passed');
           assert.deepStrictEqual(out.published.privacy.maskStyles, ['neutral-mosaic']);
           assert.ok(!r.stdout.includes('13812345678') && !r.stdout.includes('teacher@example.com'), '输出不能含敏感原文');
 
-          const rawFile = path.join(project, '.manual', 'artifacts', 'raw', 'pages', 'chat.png');
+          const rawFile = path.join(project, out.screenshot);
           const raw = await pixels(rawFile);
           const pub = await pixels(path.join(project, out.published.artifactPath));
           assert.strictEqual(pub.info.width, raw.info.width);

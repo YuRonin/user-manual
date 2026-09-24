@@ -93,7 +93,7 @@ function runDraft({ root, config, task, draftDir, draftFile, factsFile, json }) 
   const evidenceFile = path.join(root, task.evidenceManifest);
   if (!fs.existsSync(evidenceFile)) return fail(`证据清单不存在: ${evidenceFile}`, json);
   const evidence = JSON.parse(fs.readFileSync(evidenceFile, 'utf8'));
-  const built = buildTaskDraft(task, evidence, { projectRoot: root, finalPath: manualFileFor(root, config, task.id) });
+  const built = buildTaskDraft(task, evidence, { projectRoot: root, stateDir: path.join(root, config.artifacts.stateDir), finalPath: manualFileFor(root, config, task.id) });
   if (!built.ok) return fail(built.errors, json);
   // 草稿阶段就执行同一产物门槛：隐私未知或位置非法时不给出可定稿的草稿。
   const issues = built.facts.images.flatMap((image) => validateArtifact(image, { projectRoot: root, config }));

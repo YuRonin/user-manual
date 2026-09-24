@@ -35,8 +35,15 @@ function renderTaskYaml(input) {
     relatedTasks: task.relatedTasks,
     evidence: Array.isArray(task.evidence) ? task.evidence : [],
     capturePlan: task.capturePlan ?? null,
+    // 权威证据引用：本任务最近一次采集提交的 Capture 记录 id（.manual/evidence/captures/<id>.json）
+    captureIds: Array.isArray(task.captureIds) ? task.captureIds : [],
+    // 兼容视图：旧 evidence manifest 路径，内容由上面的 Capture 记录派生
     evidenceManifest: task.evidenceManifest ?? null,
   };
+  // 本版本不认识的字段原样保留在末尾，不因重写任务文件而丢失用户内容。
+  for (const [key, value] of Object.entries(input || {})) {
+    if (!(key in ordered) && value !== undefined) ordered[key] = value;
+  }
   const header = [
     `# .manual/tasks/${task.id}.yaml`,
     '# 候选任务必须经 manual approve-tasks 人工确认后才能进入采集与发布阶段。',

@@ -132,6 +132,8 @@ function renderPageYaml(page) {
     // 真实浏览器验证的结果，由 `manual capture` 写入
     browser: {
       verified: !!browser.verified,
+      // 以下是最近一次 Capture 记录（.manual/evidence/captures/<id>.json）的投影，权威数据在记录里
+      latestCaptureId: browser.latestCaptureId ?? null,
       lastCapture: browser.lastCapture ?? null,
       screenshot: browser.screenshot ?? null,
       url: browser.url ?? null,

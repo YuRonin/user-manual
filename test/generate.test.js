@@ -50,6 +50,13 @@ function run(cmd, root, args = []) {
 function draftPath(root, id) { return path.join(root, '.manual', 'drafts', `${id}.md`); }
 function finalPath(root, id) { return path.join(root, 'docs', 'manual', `${id}.md`); }
 function readDraft(root, id) { return fs.readFileSync(draftPath(root, id), 'utf8'); }
+// 采集产物按内容寻址（<prefix>--<hash>.png），路径以页面投影 / Capture 记录为准
+function pageBrowser(root, id) {
+  return require('js-yaml').load(fs.readFileSync(path.join(root, '.manual', 'pages', `${id}.yaml`), 'utf8')).browser;
+}
+function publishedFile(root, id) { return path.join(root, pageBrowser(root, id).published.artifactPath); }
+function publishedHref(root, id) { return path.posix.relative('docs/manual', pageBrowser(root, id).published.artifactPath); }
+function rawFile(root, id) { return path.join(root, pageBrowser(root, id).screenshot); }
 
 /** 把润色后的内容写到临时文件，返回路径。 */
 function writePolished(root, id, content) {
@@ -116,12 +123,14 @@ async function main() {
       const r = await run('generate', root, ['chat', '--json']);
       assert.strictEqual(r.status, 0, r.stdout + r.stderr);
       const draft = readDraft(root, 'chat');
-      // 正式文档在 docs/manual/chat.md，发布图在 docs/manual/images/annotated/page--chat.png
-      assert.match(draft, /!\[工作台\]\(images\/annotated\/page--chat\.png\)/, `图片路径不对:\n${draft}`);
+      // 正式文档在 docs/manual/chat.md，发布图在 docs/manual/images/annotated/page--chat--<hash>.png
+      assert.match(publishedHref(root, 'chat'), /^images\/annotated\/page--chat--[0-9a-f]{16}\.png$/);
+      assert.ok(draft.includes(`![工作台](${publishedHref(root, 'chat')})`), `图片路径不对:\n${draft}`);
       assert.ok(!/images\/raw|artifacts\/raw/.test(draft.replace(/<!--[\s\S]*?-->/g, '')), '草稿不能引用原图');
       const facts = JSON.parse(fs.readFileSync(path.join(root, '.manual', 'drafts', 'chat.facts.json'), 'utf8'));
       assert.strictEqual(facts.images[0].privacy.status, 'passed');
       assert.ok(facts.images[0].sha256);
+      assert.strictEqual(facts.images[0].captureId, pageBrowser(root, 'chat').latestCaptureId, 'facts 追溯到 Capture 记录');
     } finally {
       fx.cleanup(root);
     }
@@ -134,15 +143,15 @@ async function main() {
       const r = await run('generate', root, ['chat', '--finalize', writePolished(root, 'chat', readDraft(root, 'chat'))]);
       assert.strictEqual(r.status, 0, r.stderr);
       const final = fs.readFileSync(finalPath(root, 'chat'), 'utf8');
-      assert.ok(fs.existsSync(path.resolve(path.dirname(finalPath(root, 'chat')), 'images/annotated/page--chat.png')));
-      assert.match(final, /images\/annotated\/page--chat\.png/);
+      assert.ok(fs.existsSync(path.resolve(path.dirname(finalPath(root, 'chat')), publishedHref(root, 'chat'))));
+      assert.ok(final.includes(publishedHref(root, 'chat')));
     } finally {
       fx.cleanup(root);
     }
   });
 
   for (const [name, mutate] of [
-    ['改了截图路径', (d) => d.replace('](images/annotated/page--chat.png)', '](images/chat.png)')],
+    ['改了截图路径', (d) => d.replace(/\]\(images\/annotated\/page--chat--[0-9a-f]+\.png\)/, '](images/chat.png)')],
     ['删掉了截图', (d) => d.replace(/!\[[^\]]*\]\([^)]*\)\n/, '')],
   ]) {
     await test(`拦截（带图草稿）：${name}`, async () => {
@@ -163,7 +172,7 @@ async function main() {
     const root = await prepareProject(server.baseUrl);
     try {
       await run('generate', root, ['chat']);
-      fs.writeFileSync(path.join(root, 'docs', 'manual', 'images', 'annotated', 'page--chat.png'), fs.readFileSync(path.join(root, '.manual', 'artifacts', 'raw', 'pages', 'chat.png')));
+      fs.writeFileSync(publishedFile(root, 'chat'), fs.readFileSync(rawFile(root, 'chat')));
       const r = await run('generate', root, ['chat', '--finalize', writePolished(root, 'chat', readDraft(root, 'chat')), '--json']);
       assert.strictEqual(r.status, 1);
       assert.match(r.stdout, /hash-mismatch/);
@@ -188,7 +197,7 @@ async function main() {
       assert.match(out.errors.join('\n'), /--no-screenshot/);
       assert.ok(!fs.existsSync(draftPath(root, 'chat')), '被阻止时不应写出草稿');
       // 原图留在 .manual 下，文档目录里没有任何原图
-      assert.ok(fs.existsSync(path.join(root, '.manual', 'artifacts', 'raw', 'pages', 'chat.png')));
+      assert.ok(fs.existsSync(rawFile(root, 'chat')));
       assert.ok(!fs.existsSync(path.join(root, 'docs', 'manual', 'images', 'raw')));
     } finally {
       fx.cleanup(root);
@@ -502,12 +511,31 @@ async function main() {
   await test('截图文件被删了：报错而不是生成坏链接', async () => {
     const root = await prepareProject(server.baseUrl);
     try {
-      fs.rmSync(path.join(root, 'docs', 'manual', 'images', 'annotated', 'page--chat.png'));
+      fs.rmSync(publishedFile(root, 'chat'));
       const r = await run('generate', root, ['chat']);
       assert.strictEqual(r.status, 1);
-      assert.match(r.stderr, /截图不存在/);
+      assert.match(r.stderr, /artifact-missing: published/);
       assert.match(r.stderr, /manual capture chat/);
       assert.ok(!fs.existsSync(draftPath(root, 'chat')), '不能生成带坏链接的草稿');
+    } finally {
+      fx.cleanup(root);
+    }
+  });
+
+  await test('页面图以 Capture 记录为准：记录丢失或图片被原地替换都拒绝生成草稿', async () => {
+    const root = await prepareProject(server.baseUrl);
+    try {
+      fs.writeFileSync(publishedFile(root, 'chat'), fs.readFileSync(rawFile(root, 'chat')));
+      let r = await run('generate', root, ['chat']);
+      assert.strictEqual(r.status, 1);
+      assert.match(r.stderr, /(size|hash)-mismatch: published/);
+      assert.ok(!fs.existsSync(draftPath(root, 'chat')));
+
+      const captureId = pageBrowser(root, 'chat').latestCaptureId;
+      fs.rmSync(path.join(root, '.manual', 'evidence', 'captures', `${captureId}.json`));
+      r = await run('generate', root, ['chat']);
+      assert.strictEqual(r.status, 1);
+      assert.match(r.stderr, /capture-record-missing/);
     } finally {
       fx.cleanup(root);
     }

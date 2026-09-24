@@ -66,11 +66,11 @@
   - [x] canonical JSON/hash，定义字段与观察字段分离。
   - [x] action/assertion/ID/path 完整运行时校验。
   - [x] 旧版只读 normalize，更高版本明确拒绝。
-- [ ] **P1-02 不可变 Capture Store**（依赖 P1-01）
-  - [ ] staging→hash 校验→资源安装→record commit。
-  - [ ] 唯一 Capture ID、内容寻址图片、不可变冲突检测。
-  - [ ] page.browser/legacy manifest 只作兼容投影。
-  - [ ] 连续采集、半写入、图片替换测试通过。
+- [x] **P1-02 不可变 Capture Store**（依赖 P1-01）
+  - [x] staging→hash 校验→资源安装→record commit。
+  - [x] 唯一 Capture ID、内容寻址图片、不可变冲突检测。
+  - [x] page.browser/legacy manifest 只作兼容投影。
+  - [x] 连续采集、半写入、图片替换测试通过。
 - [ ] **P1-03 Page / Scenario / UserTask 拆分**（依赖 P1-01/02）
   - [ ] approval、新鲜度、执行状态独立。
   - [ ] 稳定 Page ID、route binding、missing/retired。
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 完成 8 / 32，Gate 0 已通过（2026-09-24）。Phase 1 进行中：已完成 P1-01。下一项：P1-02。
+- 工程实施：Phase 0 完成 8 / 32，Gate 0 已通过（2026-09-24）。Phase 1 进行中：已完成 P1-01、P1-02。下一项：P1-03。
 
 ### 执行记录
 
@@ -432,4 +432,27 @@ Task ID: P1-01
 产物 / commit 引用: 见 git log（P1-01 提交）
 剩余风险: 页面与任务文件尚未写入 schemaVersion（仍按 v1 读取，经 normalizeLegacy 只在内存兼容）；写 v2 由 P1-04 迁移与 P1-06 snapshot writer 负责。
 下一项可执行任务: P1-02
+```
+
+```text
+Task ID: P1-02
+状态: completed
+开始时基线 commit / dirty files: 79f6823（P1-01）；工作区干净
+实际修改文件: src/evidence/store.js（新）、src/evidence/integrity.js（新）、src/commands/capture.js、src/commands/capture-task.js、src/commands/generate.js、src/tasks/executor.js、src/tasks/store.js、src/generate/task-draft.js、src/inspect/store.js、src/model/schema.js、test/capture-store.test.js（新）、test/capture.test.js、test/generate.test.js、test/image-pipeline.test.js、test/gate0.test.js、test/run.js
+契约变更: 无（实现 C02 中 Capture 权威来源与 C04 记录形状）。记录额外带 kind/subject（page 或 task-step）；scenarioId/runId/sourceFingerprint 在 P1-03/P1-05/Phase 2 前为 null。
+执行命令与结果:
+  - node test/capture-store.test.js：8 passed（连续提交不同 ID、旧记录/图片字节不变、相同内容复用与 immutable-conflict、缺文件/空文件/坏 PNG 不产生记录、staging 外文件与越界目录被拒、latest 只能引用已提交记录、原地替换图片 → hash/size-mismatch、cache candidate 字段、URL 去敏）。
+  - node test/capture.test.js：34 passed；generate：36 passed（新增“图片原地替换 / 记录丢失均拒绝生成草稿”）；image-pipeline：13 passed（新增执行器失败无记录无 staging、连续两次采集旧记录与旧发布图不变、manifest 引用由记录派生）；gate0：6 passed。
+  - npm test：35 个测试文件全部通过。
+行为变更（有意）:
+  - 采集先写 .manual/evidence/staging/<captureId>/，提交时按内容寻址安装：原图 <rawDir>/<id>--<hash16>.png、私有 sanitized、发布图 <annotatedDir>/page--<id>--<hash16>.png（任务为 <task>--<step>--<timing>--<hash16>.png）；不再覆盖同名 PNG。
+  - 提交顺序：产物校验与安装 → .manual/evidence/captures/<id>.json 原子可见 → latest.json 引用 → 页面/任务投影。
+  - page.browser 增加 latestCaptureId，仅作投影；generate 以 Capture 记录中的发布图、hash、privacy 为准并做完整性校验，facts.images 带 captureId。
+  - 任务写入 captureIds（权威引用）；evidence manifest 保留为兼容视图并含 canonicalCaptureRefs，其 screenshot 条目由记录生成；generate-task 草稿按记录校验发布图。
+  - --out 只额外导出原图副本，不影响证据。
+  - 任务文件重写时保留本版本不认识的字段。
+失败或跳过的验收及原因: 旧项目（无 latestCaptureId / 无 captureId 的 manifest）仍走投影路径并由原发布门槛核对 hash；legacy Capture 记录的生成属于 P1-04 迁移。
+产物 / commit 引用: 见 git log（P1-02 提交）
+剩余风险: capture 仍通过 writeModel 重写全部页面文件（P1-06 改为只提交观察引用）；latest.json 的读改写尚无锁（P1-06）；无主内容寻址文件暂不清理。
+下一项可执行任务: P1-03
 ```

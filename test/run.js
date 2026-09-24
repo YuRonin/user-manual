@@ -24,6 +24,7 @@ const FILES = [
   'task-executor.test.js',
   'page-validation.test.js',
   'completion-claims.test.js',
+  'capture-store.test.js',
   'capture-task.test.js',
   'artifacts.test.js',
   'image-pipeline.test.js',

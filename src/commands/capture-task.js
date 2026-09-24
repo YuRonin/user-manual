@@ -7,6 +7,7 @@ const { createProvider } = require('../browser');
 const pageStore = require('../inspect/store');
 const taskStore = require('../tasks/store');
 const { transitionTask } = require('../tasks/model');
+const { definitionRevision } = require('../model/revision');
 const { buildCapturePlan, writeCapturePlan } = require('../tasks/capture-plan');
 const { executeCapturePlan } = require('../tasks/executor');
 const { prepareAuth, assertAuthenticated, classifyAuthFailure, refreshAuth } = require('../auth/runtime');
@@ -37,6 +38,8 @@ async function run(argv) {
   if (pages.errors.length) return fail(pages.errors, json);
   const built = buildCapturePlan(task, pages.pages);
   if (!built.ok) return fail(built.errors, json);
+  // 截图记录绑定本次执行所依据的任务定义 revision
+  built.plan.modelRevision = definitionRevision('userTask', task);
   const planFile = writeCapturePlan(stateDir, built.plan);
 
   const profileId = config.capture.activeProfile;
@@ -66,7 +69,7 @@ async function run(argv) {
       },
     });
     const captured = transitionTask(task, 'captured');
-    taskStore.writeTask(stateDir, { ...captured, evidenceManifest: path.relative(projectRoot, evidence.manifestFile).replace(/\\/g, '/') });
+    taskStore.writeTask(stateDir, { ...captured, captureIds: evidence.canonicalCaptureRefs, evidenceManifest: path.relative(projectRoot, evidence.manifestFile).replace(/\\/g, '/') });
     const tasks = taskStore.readTasks(stateDir).tasks;
     pageStore.writeIndexes(stateDir, pages.pages, { docsOutputDir: config.docs.outputDir, tasks });
     const output = { ok: true, taskId: task.id, status: 'captured', planFile, evidence };

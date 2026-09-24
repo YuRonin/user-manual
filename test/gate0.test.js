@@ -137,7 +137,7 @@ async function step(name, fn) {
     await step('文档目录中没有任何原图；原图只在 .manual/artifacts 下', async () => {
       const files = walk(docs).map((f) => path.relative(root, f).replace(/\\/g, '/'));
       assert.ok(files.every((f) => !/\/raw\/|sanitized|diagnostic/.test(f)), files.join('\n'));
-      assert.ok(fs.existsSync(path.join(state, 'artifacts', 'raw', 'pages', 'chat.png')));
+      assert.ok(fs.readdirSync(path.join(state, 'artifacts', 'raw', 'pages')).some((f) => /^chat--[0-9a-f]{16}\.png$/.test(f)));
     });
 
     await step('篡改检测：删除隐私记录、替换发布图、修改完成声明都会让 verify 失败', async () => {
@@ -149,7 +149,7 @@ async function step(name, fn) {
 
       const cases = [
         ['privacy-unknown', () => { const f = JSON.parse(originalFacts); delete f.images[0].privacy; fs.writeFileSync(factsFile, JSON.stringify(f)); }],
-        ['hash-mismatch', () => { const img = path.join(root, JSON.parse(originalFacts).images[0].artifactPath); fs.writeFileSync(`${img}.orig`, fs.readFileSync(img)); fs.copyFileSync(path.join(state, 'artifacts', 'raw', 'pages', 'chat.png'), img); }],
+        ['hash-mismatch', () => { const img = path.join(root, JSON.parse(originalFacts).images[0].artifactPath); fs.writeFileSync(`${img}.orig`, fs.readFileSync(img)); fs.copyFileSync(path.join(root, require('js-yaml').load(fs.readFileSync(path.join(state, 'pages', 'chat.yaml'), 'utf8')).browser.screenshot), img); }],
         ['验证等级被改动', () => { fs.writeFileSync(manual, originalDoc.replace('预期业务结果：资料已保存。', '已验证界面结果：资料已保存。')); }],
       ];
       for (const [expected, tamper] of cases) {
