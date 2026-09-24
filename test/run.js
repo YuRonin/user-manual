@@ -15,6 +15,7 @@ const FILES = [
   'auth-command.test.js',
   'auth-identity.test.js',
   'import-graph.test.js',
+  'source-fingerprint.test.js',
   'index-builder.test.js',
   'index-store.test.js',
   'task-model.test.js',

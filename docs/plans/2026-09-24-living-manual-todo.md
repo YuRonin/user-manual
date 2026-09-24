@@ -76,11 +76,11 @@
   - [x] 稳定 Page ID、route binding、missing/retired。
   - [x] Scenario 身份/数据/参数/检查点校验。
   - [x] 可重复 capture/generate/verify，scope 变化重确认。
-- [ ] **P1-05 源码指纹与隐式依赖**（依赖 P1-01/03）
-  - [ ] 同路径内容 hash，Next layout/_app 等约定依赖。
-  - [ ] 显式 source/glob、样式/资源/翻译纳入图。
-  - [ ] 未解析动态依赖标 partial/broad impact。
-  - [ ] 保存旧新图并输出失效原因。
+- [x] **P1-05 源码指纹与隐式依赖**（依赖 P1-01/03）
+  - [x] 同路径内容 hash，Next layout/_app 等约定依赖。
+  - [x] 显式 source/glob、样式/资源/翻译纳入图。
+  - [x] 未解析动态依赖标 partial/broad impact。
+  - [x] 保存旧新图并输出失效原因。
 - [ ] **P1-06 Project Store 和索引 revision**（依赖 P1-01/03/05）
   - [ ] snapshot/current 提交、工作副本导入和回填。
   - [ ] owner lock、CAS、独立进程并发冲突检查。
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 完成 8 / 32，Gate 0 已通过（2026-09-24）。Phase 1 进行中：已完成 P1-01、P1-02、P1-03。下一项：P1-05。
+- 工程实施：Phase 0 完成 8 / 32，Gate 0 已通过（2026-09-24）。Phase 1 进行中：已完成 P1-01、P1-02、P1-03、P1-05。下一项：P1-06。
 
 ### 执行记录
 
@@ -481,4 +481,27 @@ Task ID: P1-03
 产物 / commit 引用: 见 git log（P1-03 提交）
 剩余风险: 风险关键词启发式可能误判（只会更保守：停在动作前）；lastCapture 缺少源码指纹，源码内容变化仍依赖 inspect 的 stale 标记（P1-05 引入内容指纹）。
 下一项可执行任务: P1-05
+```
+
+```text
+Task ID: P1-05
+状态: completed
+开始时基线 commit / dirty files: d75563b（P1-03）；工作区干净
+实际修改文件: src/inspect/fingerprint.js（新）、src/inspect/framework-dependencies.js（新）、src/inspect/import-graph.js、src/inspect/index-builder.js、src/inspect/model.js、src/inspect/store.js、src/commands/inspect.js、src/commands/capture.js、src/commands/generate.js、src/model/approval.js、test/source-fingerprint.test.js（新）、test/import-graph.test.js、test/inspect.test.js、test/index-builder.test.js、test/run.js
+契约变更: 无（实现 C01 sourceFingerprint 与 C03 dependencies.completeness / analysis.sourceRevision）。未新建 src/inspect/nextjs.js 的修改：约定依赖放在独立的 framework-dependencies.js；staleness 已在 P1-03 改为标记式，无需再改。
+执行命令与结果:
+  - 先红：旧 import-graph 用例断言“忽略静态资源与动态表达式”，与本任务要求冲突，改为 assets 记录 + partial 覆盖。
+  - node test/source-fingerprint.test.js：13 passed（重复扫描稳定；同路径改按钮文字 → stale + content-changed 原因；只改上级 layout / 全局 CSS / 翻译 JSON / 同级 loading 均改变指纹；依赖增删；tsconfig 变化 broad impact；动态 import → partial 且无变化时 uncertain；page.source glob 纳入且不扫 node_modules；App/Pages Router 约定依赖；glob 边界；源码指纹进入任务证据新鲜度）。
+  - import-graph 3、inspect 31、index-builder 3、staleness 2 passed；npm test：39 个测试文件全部通过。
+行为变更（有意）:
+  - 依赖图：新增 assets（被引用的 css/json/图片/字体）、literal import()；动态 import/require 与 tsconfig extends 记入 unresolved，completeness=partial。
+  - 页面依赖加入框架约定文件（App Router 逐层 layout/template/loading/error/not-found/global-error/default；Pages Router _app/_document；middleware），记在 dependencies.scope，不作为独立页面。
+  - page.analysis = { sourceRevision, parserVersion, origin, completeness }：真实依赖字节 hash + 依赖集合 + 全局配置（tsconfig/next.config/package.json/lockfile/tailwind/postcss）+ 解析器版本；不用 mtime。
+  - 指纹变化且分析曾完成 → status.sourceAnalysis=stale，关联任务打 stale 标记；已有 Capture 记录不改写，页面 generate 发现记录的 sourceFingerprint 与当前不同报 evidence-stale；任务新鲜度通过 pageObservationRevision 包含指纹。
+  - .manual/index/graph.json（当前）与 graph.previous.json（上一次）保留依赖图快照；inspect --json 输出 impact（changed / uncertain / added / removed / unchanged + broadImpact）与 sourceChanges。
+  - forward 索引增加 assets，reverse 索引包含资源文件。
+失败或跳过的验收及原因: 动态 import 的实际目标无法推断，只记录为不确定性；未被任何页面依赖图覆盖的源文件变化无法归属到具体页面（依赖 partial 页面的 uncertain 报告兜底）。
+产物 / commit 引用: 见 git log（P1-05 提交）
+剩余风险: 首次升级后所有已完成分析的页面会获得指纹但不会立即标 stale（没有旧指纹可比）；任务 lastCapture 的 pageRevisions 因加入指纹会在升级后判为一次过期（保守）。CSS 内部 @import 不跟随。
+下一项可执行任务: P1-06
 ```

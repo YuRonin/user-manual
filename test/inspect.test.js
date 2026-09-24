@@ -168,13 +168,16 @@ test('inspect 递归扫描并稳定持久化页面依赖', () => {
     assert.strictEqual(r.status, 0, r.stderr);
 
     const first = pageYaml(root, 'chat').dependencies;
+    // 祖先 layout / loading / error / not-found 是框架约定依赖（scope），与 import 依赖一起进入依赖集
+    const scope = ['app/chat/error.tsx', 'app/chat/layout.tsx', 'app/chat/loading.tsx', 'app/layout.tsx', 'app/not-found.tsx'];
     assert.deepStrictEqual(first, {
-      files: [
-        'components/chat/ChatPanel.tsx',
-        'components/shared/Input.tsx',
-      ],
+      files: [...scope, 'components/chat/ChatPanel.tsx', 'components/shared/Input.tsx'].sort(),
+      assets: [],
+      scope,
       unresolved: [],
+      completeness: 'complete',
     });
+    assert.match(pageYaml(root, 'chat').analysis.sourceRevision, /^sha256:/);
 
     r = run('inspect', root);
     assert.strictEqual(r.status, 0, r.stderr);
@@ -206,7 +209,12 @@ test('inspect 写入稳定的 forward.json 与 reverse.json', () => {
     const reverse = readJson(reversePath);
     assert.deepStrictEqual(forward['/chat'].entry, ['app/chat/page.tsx']);
     assert.deepStrictEqual(forward['/chat'].files, [
+      'app/chat/error.tsx',
+      'app/chat/layout.tsx',
+      'app/chat/loading.tsx',
       'app/chat/page.tsx',
+      'app/layout.tsx',
+      'app/not-found.tsx',
       'components/shared/Input.tsx',
     ]);
     assert.deepStrictEqual(reverse['components/shared/Input.tsx'], ['/chat']);

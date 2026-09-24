@@ -18,9 +18,11 @@ const { loadConfig } = require('../config/load');
 const { detectFramework } = require('../inspect/detect');
 const { scanNextjs } = require('../inspect/nextjs');
 const { buildImportGraph } = require('../inspect/import-graph');
+const { frameworkDependencies } = require('../inspect/framework-dependencies');
+const { applyFingerprints, impactReport } = require('../inspect/fingerprint');
 const { reconcile, ANALYSIS } = require('../inspect/model');
 const store = require('../inspect/store');
-const { displayPath } = require('../util/fsx');
+const { displayPath, writeText } = require('../util/fsx');
 const taskStore = require('../tasks/store');
 const { markAffectedTasks } = require('../tasks/staleness');
 
@@ -194,11 +196,13 @@ function run(argv) {
   const scan = scanNextjs(projectRoot, { appDir: detected.appDir, pagesDir: detected.pagesDir });
   const dependencyWarnings = [];
   scan.pages = scan.pages.map((page) => {
-    const dependencies = buildImportGraph(projectRoot, page.entry);
-    for (const unresolved of dependencies.unresolved) {
+    // 框架约定文件（祖先 layout、_app 等）与页面一起渲染：作为 scope 依赖一并遍历
+    const scope = frameworkDependencies(projectRoot, page, detected);
+    const graph = buildImportGraph(projectRoot, [page.entry, ...scope]);
+    for (const unresolved of graph.unresolved) {
       dependencyWarnings.push(`${page.route}: 无法解析依赖 ${unresolved}`);
     }
-    return { ...page, dependencies };
+    return { ...page, dependencies: { ...graph, scope } };
   });
 
   const stateDirAbs = path.join(projectRoot, config.artifacts.stateDir);
@@ -211,6 +215,18 @@ function run(argv) {
   }
 
   const result = reconcile(scan.pages, existing.pages, config.inspect.exclude);
+
+  // 源码指纹：同路径内容变化、依赖增删、全局配置变化都会被识别；旧图快照保留供影响计算。
+  const graphFile = path.join(store.indexDirFor(stateDirAbs), 'graph.json');
+  let previousGraph = null;
+  try { previousGraph = fs.existsSync(graphFile) ? JSON.parse(fs.readFileSync(graphFile, 'utf8')) : null; } catch (_) { previousGraph = null; }
+  const fingerprinted = applyFingerprints(projectRoot, result.pages, previousGraph);
+  result.pages = fingerprinted.pages;
+  const staleIds = new Set(result.stale.map((p) => p.id));
+  for (const change of fingerprinted.changed) {
+    if (!staleIds.has(change.id)) { result.stale.push(result.pages.find((p) => p.id === change.id)); staleIds.add(change.id); }
+  }
+  const impact = impactReport(previousGraph, fingerprinted.graph);
   const warnings = [...loaded.warnings, ...dependencyWarnings];
 
   // 代码里已不存在的路由：默认只报告，加 --prune 才删。
@@ -246,6 +262,8 @@ function run(argv) {
   const { written, projectFile } = store.writeModel(stateDirAbs, meta, indexPages, {
     docsOutputDir: config.docs.outputDir,
   });
+  if (previousGraph) writeText(path.join(store.indexDirFor(stateDirAbs), 'graph.previous.json'), JSON.stringify(previousGraph, null, 2) + '\n');
+  writeText(graphFile, JSON.stringify(fingerprinted.graph, null, 2) + '\n');
   const worklist = buildWorklist(result.pages);
 
   if (json) {
@@ -276,6 +294,8 @@ function run(argv) {
             dynamic: p.dynamic,
             entry: p.entry,
             sourceAnalysis: p.status.sourceAnalysis,
+            sourceRevision: p.analysis?.sourceRevision ?? null,
+            dependencyCompleteness: p.analysis?.completeness ?? null,
             browserVerified: !!p.browser?.verified,
             screenshot: p.browser?.screenshot ?? null,
           })),
@@ -284,6 +304,9 @@ function run(argv) {
           renamed: result.renamed,
           // 无法证明是同一页面的改名：不自动合并，在旧页面文件的 routeBindings 里声明新路由后重跑 inspect 确认
           renameCandidates: result.renameCandidates,
+          // 源码影响清单：changed / uncertain（覆盖不完整，不能视为零影响）/ added / removed / unchanged
+          impact,
+          sourceChanges: fingerprinted.changed,
           skipped: scan.skipped,
           conflicts: scan.conflicts,
           worklist,

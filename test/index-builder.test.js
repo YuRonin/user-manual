@@ -71,6 +71,7 @@ test('生成页面正索引与共享文件逆索引', () => {
     ],
     hooks: ['src/hooks/useAuth.ts'],
     apis: [],
+    assets: [],
     scenarios: [],
     screenshot: 'docs/manual/images/raw/login.png',
     manual: 'docs/manual/login.md',

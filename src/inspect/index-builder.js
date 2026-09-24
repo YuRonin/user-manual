@@ -40,6 +40,8 @@ function buildForwardIndex(pages, { docsOutputDir = 'docs/manual', tasks } = {})
       route: page.route,
       entry,
       files,
+      // 被引用的样式 / 翻译 / 图片等资源：变化同样影响页面
+      assets: uniqueSorted(page.dependencies?.assets || []),
       components: files.filter(isComponent),
       hooks: files.filter(isHook),
       apis: [],
@@ -57,7 +59,7 @@ function buildForwardIndex(pages, { docsOutputDir = 'docs/manual', tasks } = {})
 function buildReverseIndex(forward) {
   const routesByFile = new Map();
   for (const [route, info] of Object.entries(forward)) {
-    for (const file of info.files || []) {
+    for (const file of [...(info.files || []), ...(info.assets || [])]) {
       if (!routesByFile.has(file)) routesByFile.set(file, new Set());
       routesByFile.get(file).add(route);
     }

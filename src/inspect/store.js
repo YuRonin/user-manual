@@ -128,8 +128,13 @@ function renderPageYaml(page) {
     source: page.source || [],
     dependencies: {
       files: page.dependencies?.files || [],
+      assets: page.dependencies?.assets || [],
+      scope: page.dependencies?.scope || [],
       unresolved: page.dependencies?.unresolved || [],
+      completeness: page.dependencies?.completeness || 'unknown',
     },
+    // 源码指纹：依赖文件字节 + 依赖集合 + 全局配置 + 解析器版本（由 inspect 计算）
+    analysis: page.analysis ?? null,
     includeInManual: page.includeInManual !== false,
     confidence: page.confidence,
     // 真实浏览器验证的结果，由 `manual capture` 写入

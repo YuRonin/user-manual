@@ -56,7 +56,7 @@ async function main() {
     }
   });
 
-  await test('循环依赖只访问一次并忽略第三方包、静态资源与动态表达式', () => {
+  await test('循环依赖只访问一次；忽略第三方包；静态资源记入 assets；动态表达式标为部分覆盖', () => {
     const root = fx.makeTempDir('manual-import-cycle-');
     try {
       fx.writeFile(root, 'src/page.tsx', [
@@ -76,7 +76,10 @@ async function main() {
       const result = buildImportGraph(root, 'src/page.tsx');
 
       assert.deepStrictEqual(result.files, ['src/A.ts', 'src/B.ts']);
-      assert.deepStrictEqual(result.unresolved, []);
+      assert.deepStrictEqual(result.assets, ['src/icon.png', 'src/page.css']);
+      // 动态表达式无法解析：不能当作"没有依赖"，覆盖标为 partial
+      assert.deepStrictEqual(result.unresolved, ['src/page.tsx: 1 处动态 import/require（无法静态解析）']);
+      assert.strictEqual(result.completeness, 'partial');
     } finally {
       fx.cleanup(root);
     }

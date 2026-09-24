@@ -113,7 +113,8 @@ function approvalMessage(state, taskId) {
 function pageObservationRevision(page) {
   const picked = pickDefinitionFields('page', page);
   const { title, purpose, detectedActions, includeInManual, ...observable } = picked;
-  return revision(observable);
+  // 源码指纹变化（同路径改了按钮文字、layout、全局样式……）同样让已有截图过期
+  return revision({ ...observable, sourceRevision: page?.analysis?.sourceRevision ?? null });
 }
 
 /** 任务涉及的页面及其当前可观察定义 revision。 */

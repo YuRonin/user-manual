@@ -119,9 +119,16 @@ function isBrowserVerified(page) {
 }
 
 function normalizeDependencies(dependencies) {
+  const unresolved = Array.isArray(dependencies?.unresolved) ? dependencies.unresolved : [];
   return {
     files: Array.isArray(dependencies?.files) ? dependencies.files : [],
-    unresolved: Array.isArray(dependencies?.unresolved) ? dependencies.unresolved : [],
+    // 被源码引用的样式 / 翻译 / 图片 / 字体
+    assets: Array.isArray(dependencies?.assets) ? dependencies.assets : [],
+    // 框架约定依赖（layout、_app 等）：不是独立页面，但会一起渲染
+    scope: Array.isArray(dependencies?.scope) ? dependencies.scope : [],
+    unresolved,
+    // 旧文件没有这个字段：按是否有未解析项推断，不能默认成 complete
+    completeness: dependencies?.completeness || (unresolved.length > 0 ? 'partial' : 'unknown'),
   };
 }
 
@@ -192,6 +199,8 @@ function mergePage(existing, scanned) {
     entry: scanned.entry,
     source,
     dependencies: normalizeDependencies(scanned.dependencies),
+    // 源码指纹由 inspect 在合并后重新计算；这里先带上旧值用于比较
+    ...(existing.analysis ? { analysis: existing.analysis } : {}),
     includeInManual: existing.includeInManual !== false,
     confidence,
     browser,

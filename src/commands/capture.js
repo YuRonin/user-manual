@@ -383,7 +383,8 @@ async function run(argv) {
         checkpointId: 'default',
         inputHash: revisionOf({ pageId, modelRevision, scenarioRevision: scenario.revision, url: sanitizeUrl(url), spec }),
         modelRevision,
-        sourceFingerprint: null,
+        // 截图时的源码指纹：之后源码变化时据此判断这张图已过期（记录本身不改，只是不再适用）
+        sourceFingerprint: page.analysis?.sourceRevision || null,
         observedAt: capturedAt,
         finalUrl,
         actualRoute: navigation.actualRoute,
