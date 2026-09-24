@@ -38,8 +38,12 @@ npm install          # 唯一依赖 js-yaml
 ## 用法
 
 ```bash
-# 1. 初始化：收集截图规格、Browser Provider、访问地址、语言、输出目录
-node bin/manual.js init --base-url http://localhost:3000
+# 1. 初始化：同时记录手册面向外部公开还是仅内部使用
+node bin/manual.js init --base-url http://localhost:3000 --audience public
+
+# 受保护页面只需登录一次；命名档案可跨 worktree 复用
+node bin/manual.js auth login --profile default
+node bin/manual.js auth status --profile default
 
 # 2. 扫描：识别技术栈、扫出全部用户可访问页面
 node bin/manual.js inspect
@@ -97,10 +101,26 @@ DOM 连续静止 → 冻结 CSS 动画与过渡 → 静置回流。每步有独�
 |---|---|
 | `server-unreachable` | 项目没启动 / 端口不对 |
 | `http-not-found` | 404，route 可能已过期 |
-| `login-required` | 被重定向到登录页，或页面就是个登录表单 |
+| `auth-missing` | 页面需要登录，但对应认证档案尚未建立 |
+| `auth-expired` | 已有认证档案失效，需要重新登录 |
+| `auth-corrupt` | 本机认证缓存损坏或属于其它站点 |
 | `timeout` | 加载超时 |
 | `blank-page` | 加载完但 body 是空的，通常前端崩了 |
 | `http-error` · `unsafe-port` · `dns-failure` | 其余明确可判的情况 |
+
+运行 `manual auth login --profile <名称>` 会打开一次可见浏览器。登录成功后，cookies 与 localStorage
+保存在当前系统用户的缓存目录，而不是项目或 worktree 中。Windows 默认位置为
+`%LOCALAPPDATA%/living-user-manual/auth/`。`status` 只展示档案元数据，绝不输出 cookie 或 token；
+`clear` 可清除指定档案。
+
+### 公开截图怎样脱敏
+
+`privacy.audience: public` 会保护完整手机号、邮箱、账号 ID、认证字段和姓名/昵称/学校等个人信息。
+已经显示为 `134****1255` 的内容不会重复处理。浏览器按文字内容计算矩形，不再遮住整个输入框；
+最终使用完全不透明、与原像素无关的浅色合成马赛克。普通 blur 不能作为公开手册的最终遮罩。
+
+任务产物分为本地 raw、sanitized 中间图和可发布 annotated 图。正式任务文档只能引用
+`docs/manual/images/annotated/`，发布校验会阻止 raw、诊断图或不安全遮罩进入外部手册。
 
 ### generate 怎么保证「中文自然」又「事实不走样」
 
@@ -141,7 +161,7 @@ DOM 连续静止 → 冻结 CSS 动画与过渡 → 静置回流。每步有独�
   index/forward.json   页面到源码、截图与手册的正索引（派生产物）
   index/reverse.json   源码文件到受影响页面的逆索引（派生产物）
   drafts/<id>.md       事实草稿（generate 产出，保留便于回溯）
-  .gitignore           让浏览器会话与缓存不入库
+  .gitignore           让本地截图中间产物不入库
 
 <项目根>/docs/manual/
   <id>.md              正式手册（generate 定稿产出）

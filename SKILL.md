@@ -17,6 +17,7 @@ Skill 自身代码与项目数据分离：**Skill 只提供能力，项目状态
 | `manual inspect` | ✅ V0.2+ | 扫描路由与静态源码依赖，建立页面模型和正逆索引 |
 | `manual describe` | ✅ V0.2 | 把页面的源码分析结果写回模型 |
 | `manual capture` | ✅ V0.3 | 用真实浏览器打开页面并截图 |
+| `manual auth` | ✅ | 登录并管理可跨 worktree 复用的认证档案 |
 | `manual generate` | ✅ V0.4 | 生成 Markdown 手册（含中文自然化） |
 | `manual discover-tasks` | ✅ Task-first 基础 | 基于页面证据准备候选发现工作清单并写入候选任务 |
 | `manual approve-tasks` | ✅ Task-first 基础 | 由人工批准、调整或拒绝候选任务 |
@@ -153,6 +154,16 @@ node <skill>/bin/manual.js describe --project-root <项目根> --input <分析�
 
 ## `$manual-capture` / `/manual-capture` —— 真实浏览器截图
 
+受保护页面先运行：
+
+```text
+manual auth login --profile default
+```
+
+该命令打开一次可见浏览器，让用户手动完成登录；之后 `capture` 与 `capture-task` 自动复用 cookies 和
+localStorage。使用 `manual auth status` 查看档案状态，使用 `manual auth clear` 清除档案。认证值位于
+系统用户级缓存，可跨 worktree 使用；不得打印、复制进项目文件或写入证据清单。
+
 ```
 node <skill>/bin/manual.js capture <page-id> --project-root <项目根> --json
 ```
@@ -173,7 +184,8 @@ DOM 连续静止 → 冻结 CSS 动画与过渡 → 静置回流。
 ### 失败时绝不产出截图
 
 页面打不开就没有 PNG，并给出分类原因：`server-unreachable`（项目没启动）、
-`http-not-found`（404，route 可能过期）、`login-required`（需要登录）、
+`http-not-found`（404，route 可能过期）、`auth-missing`（未登录）、`auth-expired`（登录过期）、
+`auth-corrupt`（认证缓存损坏）、
 `timeout`、`blank-page`（前端崩了）、`http-error`、`unsafe-port`。
 每类都带一条可操作的建议。**把失败原因原样转达给用户，不要自己找补。**
 

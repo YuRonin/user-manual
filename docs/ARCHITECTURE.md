@@ -29,13 +29,34 @@ Skill 代码与项目数据严格分离：
   .gitignore              让下面这些不入库
   screenshots/raw/        原始截图
   screenshots/annotated/  标注后截图
-  session/                浏览器会话（登录态复用）
 <项目根>/<docs.outputDir>/  手册 Markdown + images/（入库）
+
+%LOCALAPPDATA%/living-user-manual/auth/   Windows 用户级认证缓存（不入库）
 ```
 
 原图与标注图都留存：原图可复用、可重新标注；标注图进手册。
 
 `project.yaml` 与 `index/*.json` 都是**派生索引**，每次写页面后由 `pages/*.yaml` 重新生成。不手工维护、不把派生产物当成唯一事实源，避免漂移。
+
+## Auth Cache
+
+项目配置只记录稳定的 `auth.cacheKey` 与 `activeProfile`。真正的 Playwright storage state 保存在
+操作系统用户级缓存中，因此同一项目的多个 Git worktree 可以复用登录状态。Windows 默认目录是
+`%LOCALAPPDATA%/living-user-manual/auth/<cacheKey>/<profile>.state.json`。
+
+`manual auth login` 用有头浏览器完成一次人工登录，验证成功后原子保存 cookies 与 localStorage；
+`capture` 和 `capture-task` 在创建 BrowserContext 时加载状态，并在成功执行后刷新旋转过的 cookie。
+缓存不存在、过期和损坏分别归类为 `auth-missing`、`auth-expired`、`auth-corrupt`。日志、JSON 输出、
+manifest 和正式手册都不得包含认证值。
+
+## 隐私处理
+
+隐私管线分为三层：`privacy/detector` 根据发布范围和证据分类，`privacy/geometry` 负责文字级矩形、
+裁剪和去重，`privacy/renderer` 绘制不可逆的 `neutral-mosaic`。普通文本使用 DOM Range；输入控件根据
+字体和 padding 估算值文本区域，只有显式元素级规则才遮住整个控件。
+
+公开模式仅允许完全不透明的安全遮罩，普通 blur 会被发布校验拒绝。正式 Markdown 只能引用 annotated
+图片；raw、sanitized、diagnostics 和认证缓存始终视为本地敏感产物。
 
 ## 页面模型
 
@@ -203,12 +224,11 @@ V0.2 只做 Next.js —— 先把一个框架做透，而不是每个框架都�
 ## 尚未处理（按优先级）
 
 1. Scenario：空状态 / Loading / Error / 不同业务状态（含动态路由的真实 id 从哪来）
-2. 登录态：`session/` 目录已在结构里预留，需要持久化 context + 登录流程
-3. 手册索引页（把各页 `docs/manual/<id>.md` 汇成一个目录）
-4. 批量处理（`capture --all` / `generate --all`）与并发
-5. 标注（红框 / 箭头 / 序号），产出进 `annotatedDir`
-6. `update`：基于 git diff 与现有 reverse index 的增量更新
-7. 移动端 profile
-8. 其它前端框架的扫描
-9. 数据库 Fixture、多角色复杂状态
-10. CI 自动更新
+2. 手册索引页（把各页 `docs/manual/<id>.md` 汇成一个目录）
+3. 批量处理（`capture --all` / `generate --all`）与并发
+4. `update`：基于 git diff 与现有 reverse index 的增量更新
+5. 移动端 profile
+6. 其它前端框架的扫描
+7. 数据库 Fixture、多角色复杂状态
+8. 操作系统凭据库加密认证缓存
+9. CI 自动更新
