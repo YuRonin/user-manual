@@ -11,6 +11,7 @@ const FILES = [
   'auth-cache.test.js',
   'auth-session.test.js',
   'auth-command.test.js',
+  'auth-identity.test.js',
   'import-graph.test.js',
   'index-builder.test.js',
   'index-store.test.js',

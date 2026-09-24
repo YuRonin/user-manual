@@ -598,9 +598,10 @@ class PlaywrightBrowserProvider extends BrowserProvider {
     };
   }
 
-  async exportStorageState() {
+  /** 导出 cookie 与 localStorage；显式声明 indexedDB 能力时一并导出（Playwright ≥1.51）。 */
+  async exportStorageState({ indexedDB = false } = {}) {
     if (!this.context) throw new Error('exportStorageState 之前必须先 launch()。');
-    return this.context.storageState();
+    return this.context.storageState(indexedDB ? { indexedDB: true } : undefined);
   }
 
   async waitForAuthentication({ loginUrl, verifyUrl = null, timeout = 300000 }) {

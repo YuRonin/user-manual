@@ -276,6 +276,8 @@ function buildConfig(input) {
       activeProfile: 'default',
       loginUrl: '/login',
       verifyPath: null,
+      identityAssertions: [],
+      capabilities: ['cookies', 'localStorage'],
     },
     // 页面清单不在 config 里——它是 `manual inspect` 的扫描产出，落在 project.yaml / pages/。
     // 这里只放扫描选项。

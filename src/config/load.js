@@ -117,6 +117,8 @@ function loadConfig(projectRoot) {
       activeProfile: 'default',
       loginUrl: '/login',
       verifyPath: null,
+      identityAssertions: [],
+      capabilities: ['cookies', 'localStorage'],
       ...(raw.auth || {}),
     },
   };

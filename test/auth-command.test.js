@@ -81,7 +81,10 @@ async function main() {
     });
     const result = run(root, cacheRoot, ['auth', 'status', '--json']);
     assert.strictEqual(result.status, 0, result.stderr);
-    assert.strictEqual(JSON.parse(result.stdout).status, 'ready');
+    const status = JSON.parse(result.stdout);
+    assert.strictEqual(status.status, 'stored', '可读文件只是 stored，不等于线上已登录');
+    assert.strictEqual(status.storageStatus, 'stored');
+    assert.strictEqual(status.validationStatus, 'unvalidated');
     assert.ok(!result.stdout.includes('cookie-secret'));
     assert.ok(!result.stdout.includes('local-secret'));
   });

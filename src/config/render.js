@@ -162,6 +162,12 @@ function renderConfigYaml(config, meta = {}) {
   L.push(`  activeProfile: ${scalar(config.auth.activeProfile)}`);
   L.push(`  loginUrl: ${scalar(config.auth.loginUrl)}`);
   L.push(`  verifyPath: ${scalar(config.auth.verifyPath)}`);
+  L.push('  # 登录成功的判据：在 verifyPath 页面上必须通过的身份断言，例如');
+  L.push("  #   - { type: visible, target: { role: heading, name: 个人中心 } }");
+  L.push('  # 未配置时登录状态只记为 unvalidated。');
+  L.push('  identityAssertions: []');
+  L.push('  # 保存的浏览器存储：cookies / localStorage / indexedDB（sessionStorage 不支持）。');
+  L.push(`  capabilities: [${(config.auth.capabilities || []).map(scalar).join(', ')}]`);
   L.push('');
 
   // ---- inspect
