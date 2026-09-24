@@ -37,6 +37,7 @@ const FILES = [
   'inspect.test.js',
   'capture.test.js',
   'generate.test.js',
+  'gate0.test.js',
 ];
 
 let failed = 0;
