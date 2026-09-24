@@ -1,6 +1,6 @@
-# Phase 0：修复证据可信度与发布错误
+# Phase 0：修复证据可信度与发布错误（已完成）
 
-> 入口：[总计划](2026-09-24-living-manual-optimization-plan.md)；契约：[C04～C06、C08](2026-09-24-living-manual-contracts.md)；进度：[TODO](2026-09-24-living-manual-todo.md)。所有任务尚未执行。
+> 入口：[总计划](2026-09-24-living-manual-optimization-plan.md)；契约：[C04～C06、C08](2026-09-24-living-manual-contracts.md)；进度：[TODO](2026-09-24-living-manual-todo.md)。全部任务与 Gate 0 已完成（2026-09-24）。
 
 目标是先修正现有命令，不提前实现 DAG。建议执行顺序 P0-08 → P0-01 → P0-02 → P0-03 → P0-04 → P0-05 → P0-06 → P0-07。P0-02 初期允许“缺少安全证据则明确阻止”，P0-06 完成后再打通安全产物生成。
 
