@@ -45,6 +45,8 @@ const FILES = [
   'task-rerun.test.js',
   'inspect.test.js',
   'capture.test.js',
+  'fact-pack.test.js',
+  'markdown-validation.test.js',
   'generate.test.js',
   'gate0.test.js',
 ];

@@ -206,7 +206,7 @@ test('任务：草稿后替换图片或删除 facts 中的 privacy，finalize �
   writeImage(root, artifactPath, 'swapped');
   result = cli(root, ['generate-task', 't', '--finalize', draftFile]);
   assert.strictEqual(result.status, 1);
-  assert.match(result.stdout, /hash-mismatch/);
+  assert.match(result.stdout, /draft-stale.*artifacts|hash-mismatch/, '图片内容变化使事实包失效');
   assert.strictEqual(fs.existsSync(path.join(root, 'docs/manual/tasks/t.md')), false);
 
   writeImage(root, artifactPath, 'png-bytes');

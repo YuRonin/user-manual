@@ -23,6 +23,9 @@ const store = require('../inspect/store');
 const { readIndexes, findForwardPage } = require('../inspect/index-store');
 const { buildDraft } = require('../generate/draft');
 const { extractFacts, compareFacts, formatViolations } = require('../generate/facts');
+const { buildPageFactPack } = require('../generate/fact-pack');
+const { renderPage } = require('../generate/render');
+const { validateCopy, checkPolishedMarkdown, formatFindings } = require('../generate/markdown-validate');
 const { writeText, displayPath } = require('../util/fsx');
 const { toMarkdownHref } = require('../publication/paths');
 const { validateArtifact, validatePublication, formatIssues } = require('../publication/validate');
@@ -34,9 +37,9 @@ function draftFactsPath(stateDirAbs, pageId) {
 }
 
 const KNOWN_FLAGS = new Set([
-  'projectRoot', 'finalize', 'noScreenshot', 'fallbackDraft', 'force', 'json', 'help',
+  'projectRoot', 'finalize', 'copy', 'acceptReview', 'noScreenshot', 'fallbackDraft', 'force', 'json', 'help',
 ]);
-const BOOLEAN_FLAGS = ['noScreenshot', 'fallbackDraft'];
+const BOOLEAN_FLAGS = ['noScreenshot', 'fallbackDraft', 'acceptReview'];
 
 /** 风格规范相对 Skill 根目录的位置。AI 在润色前要读它。 */
 const STYLE_GUIDE_RELATIVE = 'references/manual-writing-style.md';
@@ -64,6 +67,8 @@ manual generate —— 生成页面的 Markdown 使用手册
 
 选项:
   --project-root <路径>   项目根目录，默认当前工作目录
+  --copy <文案.json>      推荐的定稿方式：只提供文案块 { "intro": "..." }，正文由事实包渲染
+  --accept-review         确认新出现的数字 / 单位、业务承诺属实后继续定稿
   --finalize <文件>       润色后的 Markdown，传 - 从 stdin 读
   --no-screenshot         这个页面还没截图时，允许生成纯文字草稿
   --fallback-draft        校验不通过时，用事实草稿原文定稿（保事实、丢润色）
@@ -200,18 +205,25 @@ function runDraft({ projectRoot, config, page, stateDirAbs, skillRoot, indexCont
     if (issues.length > 0) return fail(formatIssues(issues), { json });
   }
 
-  const { markdown, facts } = buildDraft(page, {
-    docsOutputDir: config.docs.outputDir,
-    pageFilePath: `.manual/pages/${page.id}.yaml`,
-    includeScreenshot: !noScreenshot,
-    indexContext,
-    image,
-  });
+  let built;
+  try {
+    built = buildDraft(page, {
+      docsOutputDir: config.docs.outputDir,
+      pageFilePath: `.manual/pages/${page.id}.yaml`,
+      includeScreenshot: !noScreenshot,
+      indexContext,
+      image,
+      language: config.docs.language,
+    });
+  } catch (error) {
+    return fail([error.message], { json });
+  }
+  const { markdown, facts, pack } = built;
 
   const draftPath = path.join(stateDirAbs, 'drafts', `${page.id}.md`);
   writeText(draftPath, markdown);
   // 发布事实与草稿一起落盘：finalize 用它核对图片 hash 与隐私记录，而不是信任润色稿。
-  writeText(draftFactsPath(stateDirAbs, page.id), JSON.stringify({ pageId: page.id, images: image ? [image] : [] }, null, 2) + '\n');
+  writeText(draftFactsPath(stateDirAbs, page.id), JSON.stringify({ pageId: page.id, images: image ? [image] : [], factPack: pack, factsHash: pack.factsHash }, null, 2) + '\n');
 
   const draftFacts = extractFacts(markdown);
   const styleGuidePath = path.join(skillRoot, STYLE_GUIDE_RELATIVE);
@@ -270,7 +282,21 @@ function runDraft({ projectRoot, config, page, stateDirAbs, skillRoot, indexCont
 
 // ---------------------------------------------------------------- 阶段三：定稿
 
-function runFinalize({ projectRoot, config, page, stateDirAbs, finalizeInput, fallbackDraft, force, json }) {
+/** 草稿之后页面定义、源码指纹、截图记录或模板变了：旧草稿不能再发布。 */
+function pageDraftStale(page, pack, language) {
+  if (!pack) return null;
+  const current = buildPageFactPack({ page, image: pack.artifacts[0] ? { ...pack.artifacts[0], captureId: page.browser?.latestCaptureId ?? pack.artifacts[0].captureId ?? null } : null, language, headerComments: pack.headerComments });
+  const changed = ['inputRevision', 'templateRevision', 'language'].filter((key) => current[key] !== pack[key]);
+  return changed.length ? `draft-stale: 草稿之后事实发生变化（${changed.join(', ')}），重新运行 \`manual generate ${page.id}\` 生成草稿。` : null;
+}
+
+function reviewFailure(findings, acceptReview) {
+  if (findings.blocked.length) return formatFindings(findings.blocked, '拒绝');
+  if (findings.review.length && !acceptReview) return ['review-required:', ...formatFindings(findings.review, '需确认'), '确认这些内容属实后加 --accept-review 重新运行。'];
+  return null;
+}
+
+function runFinalize({ projectRoot, config, page, stateDirAbs, finalizeInput, copyInput, acceptReview, fallbackDraft, force, json }) {
   const draftPath = path.join(stateDirAbs, 'drafts', `${page.id}.md`);
   if (!fs.existsSync(draftPath)) {
     return fail(
@@ -279,8 +305,23 @@ function runFinalize({ projectRoot, config, page, stateDirAbs, finalizeInput, fa
     );
   }
 
+  const factsFileEarly = draftFactsPath(stateDirAbs, page.id);
+  const draftFactsEarly = fs.existsSync(factsFileEarly) ? JSON.parse(fs.readFileSync(factsFileEarly, 'utf8')) : {};
+  const pack = draftFactsEarly.factPack || null;
+  let stale;
+  try { stale = pageDraftStale(page, pack, config.docs.language); } catch (error) { return fail([error.message], { json }); }
+  if (stale) return fail([stale], { json });
+
   let polished;
-  if (finalizeInput === '-') {
+  if (copyInput) {
+    // 推荐路径：只接收文案块，正文由事实包确定性渲染
+    if (!pack) return fail(['旧版草稿没有事实包，重新运行 `manual generate` 生成草稿后再用 --copy。'], { json });
+    let copy;
+    try { copy = JSON.parse(fs.readFileSync(path.resolve(copyInput), 'utf8')); } catch (error) { return fail([`--copy 读取失败: ${error.message}`], { json }); }
+    const failure = reviewFailure(validateCopy(pack, copy), acceptReview);
+    if (failure) return fail(failure, { json });
+    polished = renderPage(pack, copy);
+  } else if (finalizeInput === '-') {
     try {
       polished = fs.readFileSync(0, 'utf8');
     } catch (e) {
@@ -298,6 +339,11 @@ function runFinalize({ projectRoot, config, page, stateDirAbs, finalizeInput, fa
 
   const draftMarkdown = fs.readFileSync(draftPath, 'utf8');
   const result = compareFacts(extractFacts(draftMarkdown), extractFacts(polished));
+  if (!copyInput && result.ok) {
+    // 结构之外的正文检查：否定事实动作直接拒绝；新数字 / 单位与业务承诺需要人确认
+    const failure = reviewFailure(checkPolishedMarkdown(draftMarkdown, polished, pack), acceptReview);
+    if (failure) return fail(failure, { json });
+  }
 
   const finalPath = path.join(projectRoot, config.docs.outputDir, `${page.id}.md`);
   if (fs.existsSync(finalPath) && !force) {
@@ -430,9 +476,12 @@ function run(argv) {
   const skillRoot = path.resolve(__dirname, '..', '..');
 
   const finalizeInput = values.finalize;
-  if (finalizeInput !== undefined && finalizeInput !== '') {
+  if (values.copy && finalizeInput) return fail(['--finalize 与 --copy 只能选一个。'], { json });
+  if (values.copy || (finalizeInput !== undefined && finalizeInput !== '')) {
     return runFinalize({
       projectRoot, config, page, stateDirAbs, finalizeInput,
+      copyInput: values.copy || null,
+      acceptReview: values.acceptReview === true,
       fallbackDraft: values.fallbackDraft === true,
       force: values.force === true,
       json,

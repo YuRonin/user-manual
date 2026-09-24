@@ -91,11 +91,11 @@
   - [x] 备份、apply journal、重复执行、故障恢复。
   - [x] legacy verified→明确 unknown，不伪造验证。
   - [x] 路径/sidecar 冲突和认证 alias 迁移验证。
-- [ ] **P1-08 FactPack 与结构化渲染**（依赖 P1-02/03/06）
-  - [ ] 统一步骤、claim、artifact 和 factsHash。
-  - [ ] 模型只能修改允许文案块，业务动作确定性渲染。
-  - [ ] zh-CN/en-US 模板和旧 Markdown 兼容验证。
-  - [ ] stale draft、否定动作、单位变化等反例通过。
+- [x] **P1-08 FactPack 与结构化渲染**（依赖 P1-02/03/06）
+  - [x] 统一步骤、claim、artifact 和 factsHash。
+  - [x] 模型只能修改允许文案块，业务动作确定性渲染。
+  - [x] zh-CN/en-US 模板和旧 Markdown 兼容验证。
+  - [x] stale draft、否定动作、单位变化等反例通过。
 - [ ] **P1-07 发布 journal / release**（依赖 P1-02/06/08）
   - [ ] prepare/asset/doc/release/current 提交状态。
   - [ ] old/new doc hash 对账及第三种内容冲突。
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 完成 8 / 32，Gate 0 已通过（2026-09-24）。Phase 1 进行中：已完成 P1-01～P1-06。下一项：P1-08。
+- 工程实施：Phase 0 完成 8 / 32，Gate 0 已通过（2026-09-24）。Phase 1 进行中：已完成 P1-01～P1-06、P1-08。下一项：P1-07。
 
 ### 执行记录
 
@@ -547,4 +547,26 @@ Task ID: P1-04
 产物 / commit 引用: 见 git log（P1-04 提交）
 剩余风险: 迁移只恢复自己备份的文件，rollback 后登记的 legacy Capture 记录保留（不可变，无害）；旧 facts 转换后 sha256/privacy 为空，必须重新生成草稿才能定稿 / 验证。
 下一项可执行任务: P1-08
+```
+
+```text
+Task ID: P1-08
+状态: completed
+开始时基线 commit / dirty files: b3bafec（P1-04）；工作区干净
+实际修改文件: src/generate/fact-pack.js（新）、src/generate/render.js（新）、src/generate/markdown-validate.js（新）、src/generate/draft.js、src/generate/task-draft.js、src/generate/task-facts.js、src/commands/generate.js、src/commands/generate-task.js、test/fact-pack.test.js（新）、test/markdown-validation.test.js（新）、test/publication-gates.test.js、test/run.js
+契约变更: 无（实现 C11）。src/generate/facts.js 保留为旧 --finalize 的兼容检查，未扩展新规则。
+执行命令与结果:
+  - node test/fact-pack.test.js：13 passed（动作句确定性生成、无可见名称回退已批准说明、重复 / 多余 stepId 拒绝与遗漏步骤校验失败、factsHash 对图片内容 / 定义 / 证据 / 语言敏感、en-US 模板与 unsupported-template、页面 detectedActions 一律 inferred、CLI --copy 定稿、覆盖动作 / 否定动作 / 编造 UI / 注入结构四种硬拦截、同数字换单位与业务承诺 review-required 与 --accept-review、draft-stale）。
+  - node test/markdown-validation.test.js：6 passed（AST 抽取跳过代码与注释、否定动作硬拦截、数字单位与承诺需审阅、文案块规则）。
+  - generate 36、generate-task 8、finalize-safety 10、publication-gates 11、task-first-e2e 2、task-rerun 8、gate0 6 passed；npm test：44 个测试文件全部通过。
+行为变更（有意）:
+  - 任务与页面草稿都先构建 FactPack（steps / claims / artifacts / allowed copy blocks / language / templateRevision / inputRevision / factsHash），再由 render.js 确定性渲染；草稿 facts 文件保存 factPack 与 factsHash。
+  - 任务步骤行改为由动作生成（zh-CN：点击「X」/ 在「X」中填写内容 …；en-US：Click 「X」…），已批准的步骤说明作为可润色的说明段落；页面“主要操作”标题注明“根据源码推断，尚未在浏览器中逐项验证”。
+  - 新定稿方式 --copy <文案.json>（generate 与 generate-task）：只接受事实包声明的文案块，其余正文由程序渲染；generate-task 草稿 JSON 输出 copyBlocks。
+  - 文案 / 润色稿检查：未声明块、结构注入、编造 UI 名称、否定事实动作 → 拒绝；新数字 / 单位（含同数字换单位）与业务承诺 → review-required，需 --accept-review。旧 --finalize 仍可用，声明为结构一致性检查。
+  - 定稿前重算事实包：factsHash 不一致 → draft-stale 并列出变化部分（草稿后图片内容被换也在此拦截）；docs.language 不受支持 → unsupported-template。
+失败或跳过的验收及原因: 否定 / 承诺 / 单位检测是关键词与模式规则，不证明任意自由文本的语义等价（按计划进入 review-required）。SKILL.md 与 references 中的工作流说明尚未改为推荐 --copy（这些文件描述整体流程，留待 Phase 3 文档同步）。
+产物 / commit 引用: 见 git log（P1-08 提交）
+剩余风险: 页面 draft-stale 只比较 inputRevision / 模板（图片内容由发布门槛的 hash 校验兜底）。
+下一项可执行任务: P1-07
 ```

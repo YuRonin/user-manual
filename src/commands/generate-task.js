@@ -7,9 +7,22 @@ const { createProjectStore } = require('../store/project');
 const { checkEvidenceUsable } = require('../model/approval');
 const { buildTaskDraft, publishAtomic } = require('../generate/task-draft');
 const { validateTaskFinal } = require('../generate/task-facts');
+const { renderTask } = require('../generate/render');
+const { diffPacks } = require('../generate/fact-pack');
+const { validateCopy, checkPolishedMarkdown, formatFindings } = require('../generate/markdown-validate');
 const { validatePublication, validateArtifact, summarizePrivacy, formatIssues } = require('../publication/validate');
 
-const KNOWN_FLAGS = new Set(['projectRoot', 'finalize', 'json', 'help']);
+const KNOWN_FLAGS = new Set(['projectRoot', 'finalize', 'copy', 'acceptReview', 'json', 'help']);
+const HELP = `
+manual generate-task <task-id> [--json]
+    生成事实草稿（.manual/drafts/tasks/<id>.md）与事实包（<id>.facts.json）。
+manual generate-task <task-id> --copy <文案.json> [--accept-review] [--json]
+    推荐的定稿方式：文案 JSON 形如 { "intro": "...", "step.<stepId>": "..." }，只能填写事实包
+    声明的文案块；动作、顺序、截图、完成声明由程序按事实包渲染，模型无法改写。
+manual generate-task <task-id> --finalize <markdown> [--accept-review] [--json]
+    兼容旧流程：校验润色后的整篇 Markdown（结构一致性检查，不证明自由文本的语义等价）。
+新出现的数字 / 单位或业务承诺需要人工确认（review-required），确认无误后加 --accept-review。
+`.trim();
 
 function fail(e, j) {
   const a = Array.isArray(e) ? e : [e];
@@ -74,9 +87,69 @@ function commitFinalize({ root, projectStore, base, manualFile, final, nextTask 
   return { ok: true };
 }
 
-function runFinalize({ root, config, projectStore, base, task, pages, factsFile, finalizeInput, json }) {
-  const loaded = loadFinalize({ factsFile, finalizeInput });
-  if (!loaded.ok) return fail(loaded.errors, json);
+/** 按当前任务与证据重新构建事实包（草稿与定稿共用）。 */
+function buildCurrent({ root, config, task }) {
+  if (!task.evidenceManifest) return { ok: false, errors: ['任务缺少 evidenceManifest。'] };
+  const evidenceFile = path.join(root, task.evidenceManifest);
+  if (!fs.existsSync(evidenceFile)) return { ok: false, errors: [`证据清单不存在: ${evidenceFile}`] };
+  const evidence = JSON.parse(fs.readFileSync(evidenceFile, 'utf8'));
+  try {
+    return buildTaskDraft(task, evidence, {
+      projectRoot: root, stateDir: path.join(root, config.artifacts.stateDir), finalPath: manualFileFor(root, config, task.id), language: config.docs.language,
+    });
+  } catch (error) {
+    return { ok: false, errors: [error.message] };
+  }
+}
+
+/** 草稿之后事实（任务定义、证据、图片内容、模板）变了：旧草稿不能再发布。 */
+function checkDraftFresh({ root, config, task, facts }) {
+  if (!facts.factPack) return { ok: true, legacy: true };
+  const current = buildCurrent({ root, config, task });
+  if (!current.ok) return current;
+  if (current.pack.factsHash !== facts.factsHash) {
+    return { ok: false, errors: [`draft-stale: 草稿之后事实发生变化（${diffPacks(facts.factPack, current.pack).join(', ')}），重新运行 manual generate-task ${task.id} 生成草稿。`] };
+  }
+  return { ok: true };
+}
+
+/** 文案审查结论：blocked 直接拒绝；review-required 需要 --accept-review。 */
+function reviewGate(findings, acceptReview) {
+  if (findings.blocked.length) return { ok: false, code: 'copy-blocked', errors: formatFindings(findings.blocked, '拒绝') };
+  if (findings.review.length && !acceptReview) {
+    return { ok: false, code: 'review-required', errors: [...formatFindings(findings.review, '需确认'), '确认这些内容属实后加 --accept-review 重新运行。'] };
+  }
+  return { ok: true, accepted: findings.review };
+}
+
+function runFinalize({ root, config, projectStore, base, task, pages, factsFile, draftFile, finalizeInput, copyInput, acceptReview, json }) {
+  if (!fs.existsSync(factsFile)) return fail('缺少任务事实文件，请先生成草稿。', json);
+  const facts = JSON.parse(fs.readFileSync(factsFile, 'utf8'));
+  const fresh = checkDraftFresh({ root, config, task, facts });
+  if (!fresh.ok) return fail(fresh.errors, json);
+  let final;
+  let review;
+  if (copyInput) {
+    if (!facts.factPack) return fail('旧版草稿没有事实包，重新运行 generate-task 生成草稿后再用 --copy。', json);
+    const copyFile = path.resolve(copyInput);
+    if (!fs.existsSync(copyFile)) return fail(`--copy 文件不存在: ${copyFile}`, json);
+    let copy;
+    try { copy = JSON.parse(fs.readFileSync(copyFile, 'utf8')); } catch (error) { return fail(`--copy 不是合法 JSON: ${error.message}`, json); }
+    review = reviewGate(validateCopy(facts.factPack, copy), acceptReview);
+    final = renderTask(facts.factPack, copy);
+  } else {
+    const loaded = loadFinalize({ factsFile, finalizeInput });
+    if (!loaded.ok) return fail(loaded.errors, json);
+    final = loaded.final;
+    const draftMarkdown = fs.existsSync(draftFile) ? fs.readFileSync(draftFile, 'utf8') : '';
+    review = reviewGate(checkPolishedMarkdown(draftMarkdown, final, facts.factPack), acceptReview);
+  }
+  if (!review.ok) {
+    if (json) process.stdout.write(JSON.stringify({ ok: false, code: review.code, errors: review.errors }, null, 2) + '\n');
+    else review.errors.forEach((x) => process.stderr.write(`[manual generate-task] ${x}\n`));
+    return 1;
+  }
+  const loaded = { final, facts };
   const checked = validateFinalize({ root, config, task, pages, final: loaded.final, facts: loaded.facts });
   if (!checked.ok) return fail(checked.errors, json);
   const committed = commitFinalize({ root, projectStore, base, manualFile: checked.manualFile, final: loaded.final, nextTask: checked.nextTask });
@@ -92,11 +165,7 @@ function runFinalize({ root, config, projectStore, base, task, pages, factsFile,
 function runDraft({ root, config, task, pages, draftDir, draftFile, factsFile, json }) {
   const usable = checkEvidenceUsable(task, pages);
   if (!usable.ok) return fail(usable.errors, json);
-  if (!task.evidenceManifest) return fail('任务缺少 evidenceManifest。', json);
-  const evidenceFile = path.join(root, task.evidenceManifest);
-  if (!fs.existsSync(evidenceFile)) return fail(`证据清单不存在: ${evidenceFile}`, json);
-  const evidence = JSON.parse(fs.readFileSync(evidenceFile, 'utf8'));
-  const built = buildTaskDraft(task, evidence, { projectRoot: root, stateDir: path.join(root, config.artifacts.stateDir), finalPath: manualFileFor(root, config, task.id) });
+  const built = buildCurrent({ root, config, task });
   if (!built.ok) return fail(built.errors, json);
   // 草稿阶段就执行同一产物门槛：隐私未知或位置非法时不给出可定稿的草稿。
   const issues = built.facts.images.flatMap((image) => validateArtifact(image, { projectRoot: root, config }));
@@ -109,14 +178,22 @@ function runDraft({ root, config, task, pages, draftDir, draftFile, factsFile, j
   fs.mkdirSync(draftDir, { recursive: true });
   fs.writeFileSync(draftFile, built.markdown, 'utf8');
   fs.writeFileSync(factsFile, JSON.stringify(built.facts, null, 2) + '\n', 'utf8');
-  if (json) process.stdout.write(JSON.stringify({ ok: true, status: 'draft', draftFile, factsFile, protected: built.facts }, null, 2) + '\n');
+  if (json) {
+    process.stdout.write(JSON.stringify({
+      ok: true, status: 'draft', draftFile, factsFile, factsHash: built.pack.factsHash,
+      // 模型可以填写的文案块及其默认文字；其余内容由程序渲染
+      copyBlocks: Object.fromEntries(Object.entries(built.pack.blocks).map(([id, block]) => [id, block.default])),
+      protected: built.facts,
+    }, null, 2) + '\n');
+  }
   return 0;
 }
 
 function run(argv) {
-  const { values, positional, unknownFlags } = parseArgs(argv, { known: KNOWN_FLAGS });
+  const { values, positional, unknownFlags } = parseArgs(argv, { known: KNOWN_FLAGS, booleans: ['acceptReview'] });
   const json = values.json === true;
-  if (values.help) { process.stdout.write('manual generate-task <task-id> [--finalize <markdown>] [--json]\n'); return 0; }
+  if (values.help) { process.stdout.write(HELP + '\n'); return 0; }
+  if (values.finalize && values.copy) return fail('--finalize 与 --copy 只能选一个。', json);
   if (unknownFlags.length) return fail(`未知参数: ${unknownFlags.join(', ')}`, json);
   if (positional.length !== 1) return fail('需要一个 task-id。', json);
   const root = path.resolve(values.projectRoot || process.cwd());
@@ -133,7 +210,12 @@ function run(argv) {
   const draftDir = path.join(state, 'drafts', 'tasks');
   const draftFile = path.join(draftDir, `${task.id}.md`);
   const factsFile = path.join(draftDir, `${task.id}.facts.json`);
-  if (values.finalize) return runFinalize({ root, config, projectStore, base, task, pages, factsFile, finalizeInput: values.finalize, json });
+  if (values.finalize || values.copy) {
+    return runFinalize({
+      root, config, projectStore, base, task, pages, factsFile, draftFile,
+      finalizeInput: values.finalize, copyInput: values.copy, acceptReview: values.acceptReview === true, json,
+    });
+  }
   return runDraft({ root, config, task, pages, draftDir, draftFile, factsFile, json });
 }
 
