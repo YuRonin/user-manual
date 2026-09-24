@@ -318,6 +318,59 @@ test('未实现的子命令给出明确提示（退出码 2）', () => {
   assert.match(r.stderr, /尚未实现/);
 });
 
+test('init 写入稳定 project.id；--force 保留原身份；cacheKey 不受影响', (root) => {
+  assert.strictEqual(runInit(root, ['--yes']).status, 0);
+  const first = readConfig(root);
+  assert.match(first.project.id, /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  const { deriveCacheKey } = require('../src/config/schema');
+  assert.strictEqual(first.auth.cacheKey, deriveCacheKey(first.project.name, first.project.baseUrl));
+  assert.strictEqual(runInit(root, ['--yes', '--force']).status, 0);
+  const second = readConfig(root);
+  assert.strictEqual(second.project.id, first.project.id);
+  assert.strictEqual(second.auth.cacheKey, first.auth.cacheKey);
+});
+
+test('读取器：v2 可读，更高版本 schema-too-new；缺 project.id 只警告不写回', (root) => {
+  assert.strictEqual(runInit(root, ['--yes']).status, 0);
+  const { loadConfig } = require('../src/config/load');
+  const text = fs.readFileSync(configPath(root), 'utf8');
+  fs.writeFileSync(configPath(root), text.replace(/^version: 1$/m, 'version: 2'));
+  assert.strictEqual(loadConfig(root).ok, true);
+  fs.writeFileSync(configPath(root), text.replace(/^version: 1$/m, 'version: 3'));
+  const tooNew = loadConfig(root);
+  assert.strictEqual(tooNew.ok, false);
+  assert.ok(tooNew.errors.some((e) => /schema-too-new/.test(e)));
+  const withoutId = text.replace(/^  id: .*\n/m, '');
+  fs.writeFileSync(configPath(root), withoutId);
+  const legacy = loadConfig(root);
+  assert.strictEqual(legacy.ok, true);
+  assert.ok(legacy.warnings.some((w) => /project-id-missing/.test(w)));
+  assert.strictEqual(fs.readFileSync(configPath(root), 'utf8'), withoutId, '读取不能写回配置');
+});
+
+test('读取器复用 init 的 URL / 规格 / DPR / 路径校验', (root) => {
+  assert.strictEqual(runInit(root, ['--yes']).status, 0);
+  const { loadConfig } = require('../src/config/load');
+  const base = readConfig(root);
+  const cases = [
+    [(c) => { c.project.baseUrl = 'ftp://example.com'; }, /只支持 http\/https/],
+    [(c) => { c.project.id = 'not-a-uuid'; }, /project.id 需要是 UUID/],
+    [(c) => { c.capture.profiles[c.capture.activeProfile].deviceScaleFactor = 9; }, /deviceScaleFactor/],
+    [(c) => { c.capture.profiles[c.capture.activeProfile].viewport.width = 10; }, /viewport.width/],
+    [(c) => { c.docs.outputDir = '../outside'; }, /不能超出项目根目录/],
+    [(c) => { c.artifacts.rawDir = '/tmp/raw'; }, /artifacts.rawDir 需要是项目根内的相对路径/],
+    [(c) => { c.artifacts.sanitizedDir = '../../leak'; }, /artifacts.sanitizedDir/],
+  ];
+  for (const [mutate, pattern] of cases) {
+    const config = JSON.parse(JSON.stringify(base));
+    mutate(config);
+    fs.writeFileSync(configPath(root), yaml.dump(config));
+    const loaded = loadConfig(root);
+    assert.strictEqual(loaded.ok, false, String(pattern));
+    assert.ok(loaded.errors.some((e) => pattern.test(e)), `${pattern} ← ${loaded.errors.join(' | ')}`);
+  }
+});
+
 // ---------------------------------------------------------------- 汇总
 process.stdout.write(`\n${passed} passed, ${failures.length} failed\n`);
 if (failures.length > 0) {

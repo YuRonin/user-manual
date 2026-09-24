@@ -18,6 +18,7 @@ const { emit } = require('../util/yaml-emit');
 const { writeText } = require('../util/fsx');
 const { normalizePage, isBrowserVerified } = require('./model');
 const { buildIndexes } = require('./index-builder');
+const { checkSchemaVersion } = require('../model/schema');
 
 const PROJECT_MODEL_VERSION = 1;
 
@@ -85,8 +86,11 @@ function readExistingPages(stateDirAbs) {
     try {
       const parsed = yaml.load(fs.readFileSync(full, 'utf8'));
       // normalizePage 兼容 V0.2 的形状（browserVerified 当时记在 status 里）
-      if (parsed && typeof parsed === 'object') pages.push(normalizePage(parsed));
-      else errors.push(`${name}: 内容为空或不是对象`);
+      if (!parsed || typeof parsed !== 'object') { errors.push(`${name}: 内容为空或不是对象`); continue; }
+      // 更高版本由新工具写入：本版本不理解其字段，读取后再写回会丢数据，直接拒绝。
+      const version = checkSchemaVersion('page', parsed);
+      if (!version.ok) errors.push(`${name}: ${version.code}: ${version.message}`);
+      else pages.push(normalizePage(parsed));
     } catch (e) {
       errors.push(`${name}: ${e.message}`);
     }

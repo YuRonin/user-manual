@@ -12,7 +12,14 @@ const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
 
-const { CONFIG_VERSION, DEFAULTS, deriveCacheKey, AUDIENCES } = require('./schema');
+const {
+  DEFAULTS, deriveCacheKey, AUDIENCES, validateBaseUrl, validateDocsDir, validateLanguage,
+} = require('./schema');
+const profiles = require('./profiles');
+const { checkSchemaVersion, isProjectRelativePath } = require('../model/schema');
+const { isUuid } = require('../model/ids');
+
+const PROJECT_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const { resolveAnnotationConfig } = require('./annotation');
 
 const CONFIG_RELATIVE = path.join(DEFAULTS.stateDir, 'config.yaml');
@@ -55,21 +62,13 @@ function loadConfig(projectRoot) {
 
   if (raw.version == null) {
     errors.push('配置缺少 version 字段，可能不是 manual init 生成的。');
-  } else if (raw.version > CONFIG_VERSION) {
-    errors.push(
-      `配置版本 ${raw.version} 高于当前工具支持的 ${CONFIG_VERSION}，请升级 manual 工具。`
-    );
+  } else {
+    const version = checkSchemaVersion('config', raw);
+    if (!version.ok) errors.push(`${version.code}: ${version.message}`);
   }
 
-  if (!raw.project?.baseUrl) errors.push('配置缺少 project.baseUrl。');
-  if (!raw.project?.name) errors.push('配置缺少 project.name。');
-
-  const activeProfile = raw.capture?.activeProfile;
-  if (!activeProfile) {
-    errors.push('配置缺少 capture.activeProfile。');
-  } else if (!raw.capture?.profiles?.[activeProfile]) {
-    errors.push(`capture.activeProfile 指向了不存在的规格: ${activeProfile}`);
-  }
+  validateProjectBlock(raw.project, errors, warnings);
+  validateCaptureBlock(raw.capture, errors);
 
   const activeProvider = raw.browser?.activeProvider;
   if (!activeProvider) {
@@ -77,6 +76,8 @@ function loadConfig(projectRoot) {
   } else if (!raw.browser?.providers?.[activeProvider]) {
     errors.push(`browser.activeProvider 指向了不存在的 Provider: ${activeProvider}`);
   }
+
+  validatePathsBlock(raw, errors);
 
   if (errors.length > 0) {
     errors.push(`（配置文件: ${configPath}）`);
@@ -157,6 +158,51 @@ function loadConfig(projectRoot) {
   }
 
   return { ok: true, config, configPath, warnings };
+}
+
+// ---------------------------------------------------------------- 与 init 共用的完整校验
+
+function validateProjectBlock(project, errors, warnings) {
+  if (!project?.baseUrl) errors.push('配置缺少 project.baseUrl。');
+  else validateBaseUrl(project.baseUrl, errors);
+  if (!project?.name) errors.push('配置缺少 project.name。');
+  else if (!PROJECT_NAME_RE.test(String(project.name))) errors.push(`project.name 只允许字母/数字/点/下划线/连字符: ${project.name}`);
+  if (project?.id != null && !isUuid(project.id)) errors.push(`project.id 需要是 UUID，收到: ${project.id}`);
+  // 旧配置没有项目身份：只读兼容，不在读取时写回；迁移或 init --force 时补上。
+  if (project && project.id == null) warnings.push('project-id-missing: 配置还没有 project.id，运行 `manual migrate` 或 `manual init --force` 补上稳定项目身份。');
+}
+
+function validateCaptureBlock(capture, errors) {
+  const activeProfile = capture?.activeProfile;
+  if (!activeProfile) { errors.push('配置缺少 capture.activeProfile。'); return; }
+  const profile = capture?.profiles?.[activeProfile];
+  if (!profile) { errors.push(`capture.activeProfile 指向了不存在的规格: ${activeProfile}`); return; }
+  const { width, height } = profile.viewport || {};
+  const limits = profiles.VIEWPORT_LIMITS;
+  if (!Number.isInteger(width) || width < limits.width.min || width > limits.width.max) {
+    errors.push(`capture.profiles.${activeProfile}.viewport.width 需在 ${limits.width.min}-${limits.width.max} 之间，收到: ${width}`);
+  }
+  if (!Number.isInteger(height) || height < limits.height.min || height > limits.height.max) {
+    errors.push(`capture.profiles.${activeProfile}.viewport.height 需在 ${limits.height.min}-${limits.height.max} 之间，收到: ${height}`);
+  }
+  const dpr = profile.deviceScaleFactor;
+  if (!Number.isFinite(dpr) || dpr < profiles.DPR_LIMITS.min || dpr > profiles.DPR_LIMITS.max) {
+    errors.push(`capture.profiles.${activeProfile}.deviceScaleFactor 需在 ${profiles.DPR_LIMITS.min}-${profiles.DPR_LIMITS.max} 之间，收到: ${dpr}`);
+  }
+}
+
+/** 所有写入目录都必须落在业务项目根内：文档目录沿用 init 的规则，产物目录至少是根相对路径。 */
+function validatePathsBlock(raw, errors) {
+  if (raw.docs?.outputDir !== undefined) validateDocsDir(raw.docs.outputDir, errors);
+  if (raw.docs?.language !== undefined) validateLanguage(raw.docs.language, errors);
+  const dirs = {
+    'docs.imagesDir': raw.docs?.imagesDir,
+    ...Object.fromEntries(Object.entries(raw.artifacts || {}).filter(([key]) => /Dir$/.test(key)).map(([key, value]) => [`artifacts.${key}`, value])),
+  };
+  for (const [field, value] of Object.entries(dirs)) {
+    if (value === undefined) continue;
+    if (!isProjectRelativePath(String(value))) errors.push(`${field} 需要是项目根内的相对路径，收到: ${value}`);
+  }
 }
 
 module.exports = { loadConfig, configPathFor, CONFIG_RELATIVE };

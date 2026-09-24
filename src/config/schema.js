@@ -9,6 +9,7 @@
 
 const path = require('path');
 const crypto = require('crypto');
+const { isUuid, newUuid } = require('../model/ids');
 const profiles = require('./profiles');
 const providers = require('./providers');
 const { DEFAULT_ANNOTATION } = require('./annotation');
@@ -19,6 +20,11 @@ const { DEFAULT_ANNOTATION } = require('./annotation');
  * 纯新增字段（加 profile、加 provider、加可选键）不需要动这个号。
  */
 const CONFIG_VERSION = 1;
+/**
+ * 本工具能读取的最高配置版本。v2 表示项目已由显式迁移启用 snapshot writer（P1-04 / P1-06）；
+ * init 仍写 v1，旧工具遇到 v2 会按自身的版本检查拒绝，从而不会以旧格式写入新项目。
+ */
+const MAX_CONFIG_VERSION = 2;
 
 const DEFAULTS = {
   baseUrl: 'http://localhost:5173',
@@ -233,6 +239,8 @@ function buildConfig(input) {
   );
   const resolvedProvider = resolveProvider(input.providerId, errors);
 
+  if (input.projectId != null && !isUuid(input.projectId)) errors.push(`project.id 需要是 UUID，收到: ${input.projectId}`);
+
   if (errors.length > 0) return { ok: false, errors };
 
   const stateDir = DEFAULTS.stateDir;
@@ -247,7 +255,8 @@ function buildConfig(input) {
 
   const config = {
     version: CONFIG_VERSION,
-    project: { name, baseUrl },
+    // projectId 与 auth.cacheKey 无关：cacheKey 仍由 name+origin 派生，已有登录缓存不会因新增身份失效。
+    project: { id: input.projectId || newUuid(), name, baseUrl },
     capture: { activeProfile: resolvedProfile.id, profiles: profileMap },
     browser: { activeProvider: resolvedProvider.id, providers: providerMap },
     docs: { language, outputDir: docsDir, imagesDir: `${docsDir}/images` },
@@ -305,6 +314,7 @@ function buildConfig(input) {
 
 module.exports = {
   CONFIG_VERSION,
+  MAX_CONFIG_VERSION,
   DEFAULTS,
   COMMON_LANGUAGES,
   AUDIENCES,
@@ -314,6 +324,7 @@ module.exports = {
   // 导出供测试直接打点
   validateBaseUrl,
   validateDocsDir,
+  validateLanguage,
   parseViewport,
   parseDpr,
 };

@@ -1,5 +1,11 @@
 'use strict';
 
+const schema = require('../model/schema');
+
+// 共享 schema 负责的结构规则：动作白名单、定位、断言、replay、截图时机、stepId 字符与版本。
+// 其余规则（必填字段、claims、状态）仍在本文件按旧格式输出，避免重复报错。
+const SHARED_CODES = new Set(['invalid-action', 'invalid-target', 'invalid-assertion', 'invalid-replay', 'invalid-capture', 'schema-too-new', 'invalid-schema-version']);
+
 const RISKS = ['read', 'local', 'write', 'destructive'];
 const STATUSES = ['candidate', 'approved', 'captured', 'generated', 'verified', 'stale'];
 const COMPLETION_VERIFICATIONS = ['expected', 'verified'];
@@ -117,6 +123,11 @@ function validateTask(input) {
         });
       }
     }
+  }
+
+  for (const error of schema.validateUserTask(input || {}).errors) {
+    const stepIdError = error.code === 'invalid-id' && /^steps\[\d+\]\.id$/.test(error.path);
+    if (SHARED_CODES.has(error.code) || stepIdError) errors.push(`${error.path} ${error.message}`);
   }
 
   return errors.length > 0 ? { ok: false, errors } : { ok: true, task };

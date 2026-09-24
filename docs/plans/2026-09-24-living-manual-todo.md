@@ -61,11 +61,11 @@
 
 详细步骤：[Phase 1](2026-09-24-living-manual-phase-1.md)。推荐顺序：01 → 02 → 03 → 05 → 06 → 04 → 08 → 07。
 
-- [ ] **P1-01 schema / ID / revision**（依赖 Gate 0）
-  - [ ] 实体 schema 与版本校验、稳定 projectId。
-  - [ ] canonical JSON/hash，定义字段与观察字段分离。
-  - [ ] action/assertion/ID/path 完整运行时校验。
-  - [ ] 旧版只读 normalize，更高版本明确拒绝。
+- [x] **P1-01 schema / ID / revision**（依赖 Gate 0）
+  - [x] 实体 schema 与版本校验、稳定 projectId。
+  - [x] canonical JSON/hash，定义字段与观察字段分离。
+  - [x] action/assertion/ID/path 完整运行时校验。
+  - [x] 旧版只读 normalize，更高版本明确拒绝。
 - [ ] **P1-02 不可变 Capture Store**（依赖 P1-01）
   - [ ] staging→hash 校验→资源安装→record commit。
   - [ ] 唯一 Capture ID、内容寻址图片、不可变冲突检测。
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 完成 8 / 32，Gate 0 已通过（2026-09-24）；按约定在进入 Phase 1 前暂停审阅。下一项：P1-01。
+- 工程实施：Phase 0 完成 8 / 32，Gate 0 已通过（2026-09-24）。Phase 1 进行中：已完成 P1-01。下一项：P1-02。
 
 ### 执行记录
 
@@ -410,4 +410,26 @@ Task ID: Gate 0
 Gate 0 对照: 1 页面端到端 ✓；2 任务入口/before/after/completion 与错误 HTTP、缺断言 ✓（page-validation、completion-claims）；3 篡改无法发布 ✓；4 非法 finalize / rename 失败旧字节不变 ✓（finalize-safety、atomic-write）；5 npm test + 渲染冒烟 ✓。
 未覆盖: Linux 环境未运行（P3-07 CI）；README/SKILL/ARCHITECTURE 中与新行为相关的说明未更新（这些文件有用户未提交修改，未触碰）。
 下一项可执行任务: P1-01（需用户审阅后再启动 Phase 1）
+```
+
+```text
+Task ID: P1-01
+状态: completed
+开始时基线 commit / dirty files: e9b71ad（Phase 0 标记完成）；工作区干净
+实际修改文件: src/model/ids.js（新）、src/model/revision.js（新）、src/model/schema.js（新）、src/util/hash.js、src/config/schema.js、src/config/load.js、src/config/render.js、src/commands/init.js、src/inspect/store.js、src/tasks/model.js、test/revision.test.js（新）、test/model-schema.test.js（新）、test/init.test.js、test/task-model.test.js、test/run.js
+契约变更: 无（实现 C01 / C03 / C04 的 schema 部分）。定义 revision 的字段白名单见 src/model/revision.js；replay 取值定为 safe / requires-input / unsafe。
+执行命令与结果:
+  - node test/revision.test.js：9 passed（键序无关、步骤顺序有关、NaN/undefined/循环/Date 抛 invalid-json-value、观察字段不改 revision、步骤/风险/动作/claim 改变 revision）。
+  - node test/model-schema.test.js：12 passed（action 白名单、target、assertion、risk/replay/capture timing、stepId 字符与重复、引用存在性、路径、schema-too-new、normalizeLegacy 不改入参、未知字段 warning 保留、Scenario/Capture/Release）。
+  - node test/init.test.js：37 passed（新增 projectId 生成与 --force 保留、cacheKey 不变；config v2 可读 / v3 schema-too-new；缺 id 只警告不写回；load 复用 URL/规格/DPR/路径校验）。
+  - node test/task-model.test.js：8 passed；npm test：34 个测试文件全部通过。
+行为变更（有意）:
+  - canonical 错误统一为 code=invalid-json-value 并带 path；拒绝非普通对象（如 Date）。
+  - config 读取支持 version 1/2，更高版本 schema-too-new；init 仍写 version 1，并写入 project.id（UUID）。auth.cacheKey 仍由 name+origin 派生，已有登录缓存不受影响。
+  - loadConfig 复用 init 的 baseUrl / docsDir / 语言校验，并校验 activeProfile 的 viewport / DPR 与 artifacts.*Dir、docs.imagesDir 必须是项目根内相对路径。
+  - 任务读取（validateTask）追加共享结构校验：动作白名单、有效定位、replay、capture.timing、stepId 安全字符、版本；页面读取拒绝更高 schemaVersion。
+失败或跳过的验收及原因: validateUserTask 的引用校验（页面/状态/claim 断言）暂未接入 readTasks（读取任务时不加载页面）；由 P1-03 在执行计划与审批入口接入。
+产物 / commit 引用: 见 git log（P1-01 提交）
+剩余风险: 页面与任务文件尚未写入 schemaVersion（仍按 v1 读取，经 normalizeLegacy 只在内存兼容）；写 v2 由 P1-04 迁移与 P1-06 snapshot writer 负责。
+下一项可执行任务: P1-02
 ```

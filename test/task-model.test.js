@@ -125,6 +125,43 @@ test('活动任务可以进入 stale，但不能从 stale 跳到 verified', () =
   assert.throws(() => transitionTask(stale, 'verified'), /不能从 stale 直接进入 verified/);
 });
 
+test('读取任务时执行共享结构校验：动作白名单、定位、replay、截图时机、stepId 字符、版本', () => {
+  const { validateTask } = require('../src/tasks/model');
+  const step = validTask().steps[0];
+  const result = validateTask(validTask({
+    steps: [
+      { ...step, id: 'Bad Id', action: { type: 'drag', target: { text: 'x' } } },
+      { ...step, id: 'no-target', action: { type: 'click', target: { role: 'button' } }, replay: 'sometimes', capture: { timing: 'later' } },
+    ],
+  }));
+  assert.strictEqual(result.ok, false);
+  const text = result.errors.join('\n');
+  for (const pattern of [/steps\[0\]\.id/, /steps\[0\]\.action\.type/, /steps\[1\]\.action\.target/, /steps\[1\]\.replay/, /steps\[1\]\.capture\.timing/]) {
+    assert.match(text, pattern);
+  }
+  const tooNew = validateTask(validTask({ schemaVersion: 99 }));
+  assert.strictEqual(tooNew.ok, false);
+  assert.match(tooNew.errors.join('\n'), /高于当前工具支持/);
+});
+
+test('读取页面文件时拒绝更高 schemaVersion，不静默降级', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const { readExistingPages } = require('../src/inspect/store');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'manual-page-version-'));
+  try {
+    fs.mkdirSync(path.join(dir, 'pages'));
+    fs.writeFileSync(path.join(dir, 'pages', 'a.yaml'), 'id: a\nroute: /a\n');
+    fs.writeFileSync(path.join(dir, 'pages', 'b.yaml'), 'schemaVersion: 9\nid: b\nroute: /b\n');
+    const result = readExistingPages(dir);
+    assert.deepStrictEqual(result.pages.map((p) => p.id), ['a']);
+    assert.match(result.errors.join('\n'), /b\.yaml: schema-too-new/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 process.stdout.write(`\n${passed} passed, ${failures.length} failed\n`);
 if (failures.length > 0) process.exitCode = 1;
 

@@ -16,6 +16,7 @@ const schema = require('../config/schema');
 const profiles = require('../config/profiles');
 const providers = require('../config/providers');
 const { renderConfigYaml, renderStateGitignore } = require('../config/render');
+const { isUuid } = require('../model/ids');
 const { writeText, backupFile, displayPath } = require('../util/fsx');
 
 const KNOWN_FLAGS = new Set([
@@ -104,6 +105,18 @@ function renderSummary(summary, files, projectRoot) {
   return lines.join('\n');
 }
 
+
+/** 读取已有 config 中的 project.id；没有或不是 UUID 时返回 null（由 buildConfig 新建）。 */
+function existingProjectId(projectRoot) {
+  const file = path.join(projectRoot, schema.DEFAULTS.stateDir, 'config.yaml');
+  try {
+    const id = yaml.load(fs.readFileSync(file, 'utf8'))?.project?.id;
+    return isUuid(id) ? id : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 function run(argv) {
   const { values, unknownFlags } = parseArgs(argv, { known: KNOWN_FLAGS });
   const json = values.json === true;
@@ -127,8 +140,10 @@ function run(argv) {
     ? values.baseUrl
     : (values.yes ? schema.DEFAULTS.baseUrl : values.baseUrl);
 
+  // --force 重建配置时保留已有项目身份：身份不能被重新推导，丢了就等于换了一个项目。
   const built = schema.buildConfig({
     projectRoot,
+    projectId: existingProjectId(projectRoot),
     baseUrl,
     name: values.name,
     language: values.lang,

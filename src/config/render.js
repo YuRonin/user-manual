@@ -57,6 +57,10 @@ function renderConfigYaml(config, meta = {}) {
   // ---- project
   L.push('# ---------------------------------------------------------------- 项目');
   L.push('project:');
+  if (config.project.id) {
+    L.push('  # 项目身份（UUID）。复制到同项目的其它 worktree 时保留；复制成新项目时删掉这一行再 init。');
+    L.push(`  id: ${scalar(config.project.id)}`);
+  }
   L.push(`  name: ${scalar(config.project.name)}`);
   L.push('  # 项目的访问地址。手册里所有页面路径都相对它拼接。');
   L.push(`  baseUrl: ${scalar(config.project.baseUrl)}`);
