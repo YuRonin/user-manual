@@ -50,6 +50,7 @@ const FILES = [
   'markdown-validation.test.js',
   'generate.test.js',
   'gate0.test.js',
+  'gate1.test.js',
 ];
 
 let failed = 0;

@@ -101,7 +101,7 @@
   - [x] old/new doc hash 对账及第三种内容冲突。
   - [x] 正式验证不再依赖可变 drafts。
   - [x] 每个边界杀进程和重复恢复测试通过。
-- [ ] **Gate 1：迁移可重复、重跑合法、证据不可变、并发不丢更新、发布可对账。**
+- [x] **Gate 1：迁移可重复、重跑合法、证据不可变、并发不丢更新、发布可对账。**
 
 ## Phase 2 — Runtime / cache / resume
 
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 完成 8 / 32，Gate 0 已通过（2026-09-24）。Phase 1 进行中：8 个任务均已完成。下一项：Phase 1 集成验收（Gate 1）。
+- 工程实施：Phase 0 与 Phase 1 全部完成，共 16 / 32；Gate 0、Gate 1 已通过（2026-09-24）。下一项：P2-01（Phase 2 开始前建议暂停审阅）。
 
 ### 执行记录
 
@@ -591,4 +591,18 @@ Task ID: P1-07
 产物 / commit 引用: 见 git log（P1-07 提交）
 剩余风险: 任务状态投影在发布完成之后提交，二者之间失败仍报告 partial-commit（发布记录已是权威，状态可重新 verify 得到）；conflict 事务需人工确认后删除其 journal 目录或重新发布。
 下一项可执行任务: Gate 1 集成验收
+```
+
+```text
+Task ID: Gate 1
+状态: completed
+开始时基线 commit / dirty files: e715c95（P1-07）；工作区干净
+实际修改文件: test/gate1.test.js（新）、test/run.js、src/generate/task-facts.js、src/commands/generate-task.js、src/commands/generate.js、docs/plans/2026-09-24-living-manual-phase-1.md（标记已完成）
+执行命令与结果:
+  - node test/gate1.test.js：8 passed —— 真实浏览器项目中：手改页面 YAML 被导入为新提交；页面采集与 --copy 定稿产生发布记录；任务候选 → 审批 → 连续两次采集（旧记录与旧图字节不变）→ 两次 --copy 定稿 → 两次 verify；删除 drafts 后 verify 仍通过；原地替换发布图使 verify（hash-mismatch）与 generate-task（size/hash-mismatch）失败；文档安装后中断的发布经 status / repair 恢复并通过 verify；旧 revision 的定义提交得到 model-conflict 且先提交的修改保留；改共享组件后 inspect 报 content-changed 与任务 stale、旧记录保留、重新采集后恢复；合成旧项目 dry-run 零写入 → apply（ID 与计划一致）→ 重复 apply 不变。
+  - npm test：46 个测试文件全部通过（Windows 11 / Node 22.14.0）。
+Gate 1 对照: 1 迁移可重复 ✓；2 重跑合法 ✓；3 源码变化保守失效且不删旧观察 ✓；4 证据不可变 / 完整性 ✓；5 发布可对账、并发不丢更新 ✓；6 发布记录独立于草稿 ✓；7 npm test ✓。
+验收中发现并修复: --copy 定稿时说明段落重复提到已有界面名称，会被旧的“UI 名称序列必须与草稿逐项一致”检查误拒（定稿与 verify 两处）。修复：--copy 路径的 UI 名称由 validateCopy 限定，发布记录中的 facts 记录实际发布文档的 UI 名称序列与所采用的文案。
+未覆盖: Linux 环境未运行（P3-07 CI）；SKILL.md / references 的工作流说明尚未同步 --copy、manual migrate、manual publication（留待文档同步）。
+下一项可执行任务: P2-01（建议先审阅 Phase 1 再进入 Phase 2）
 ```

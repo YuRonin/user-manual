@@ -1,6 +1,6 @@
-# Phase 1：版本化模型、不可变证据与可重跑发布
+# Phase 1：版本化模型、不可变证据与可重跑发布（已完成）
 
-> 前置：Phase 0 集成验收通过。入口：[总计划](2026-09-24-living-manual-optimization-plan.md)，契约：[C01～C05、C10～C11](2026-09-24-living-manual-contracts.md)，进度：[TODO](2026-09-24-living-manual-todo.md)。
+> 前置：Phase 0 集成验收通过。入口：[总计划](2026-09-24-living-manual-optimization-plan.md)，契约：[C01～C05、C10～C11](2026-09-24-living-manual-contracts.md)，进度：[TODO](2026-09-24-living-manual-todo.md)。全部任务与 Gate 1 已完成（2026-09-24）。
 
 建议顺序：P1-01 → P1-02 → P1-03 → P1-05 → P1-06 → P1-04 → P1-08 → P1-07。先完成 reader 和存储协议，再 apply 迁移；迁移开发与试运行均使用临时副本。
 

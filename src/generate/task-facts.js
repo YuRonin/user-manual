@@ -47,8 +47,12 @@ function checkClaims(got, facts, errors, template) {
   if (got.legacyVerified) errors.push('unsupported-claim: 不允许使用未绑定证据的"已验证结果"表述。');
 }
 
-/** 结构一致性检查。图片只比对文档 href；产物存在性与发布根由 publication/paths 校验。 */
-function validateTaskFinal(markdown, facts) {
+/**
+ * 结构一致性检查。图片只比对文档 href；产物存在性与发布根由 publication/paths 校验。
+ * renderedFromPack：正文由事实包渲染（--copy 路径），UI 名称已由 validateCopy 限定在事实范围内，
+ * 不再要求与草稿的 UI 名称序列逐项相同（说明段落可以重复提到已有的界面名称）。
+ */
+function validateTaskFinal(markdown, facts, { renderedFromPack = false } = {}) {
   const language = languageOf(facts);
   const got = extract(markdown, language);
   const errors = [];
@@ -61,7 +65,7 @@ function validateTaskFinal(markdown, facts) {
     errors.push('截图引用发生变化。');
   }
   if (got.images.some((i) => i.kind === 'html')) errors.push('正式文档不允许原始 HTML 图片。');
-  if (JSON.stringify(got.uiTexts) !== JSON.stringify(facts.uiTexts)) errors.push('已确认的 UI 原文发生变化。');
+  if (!renderedFromPack && JSON.stringify(got.uiTexts) !== JSON.stringify(facts.uiTexts)) errors.push('已确认的 UI 原文发生变化。');
   checkClaims(got, facts, errors, templateFor(language));
   return errors.length ? { ok: false, errors } : { ok: true };
 }

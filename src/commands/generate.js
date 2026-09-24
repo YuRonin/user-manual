@@ -341,7 +341,8 @@ function runFinalize({ projectRoot, config, page, stateDirAbs, finalizeInput, co
   if (!polished.trim()) return fail(['润色后的内容是空的。'], { json });
 
   const draftMarkdown = fs.readFileSync(draftPath, 'utf8');
-  const result = compareFacts(extractFacts(draftMarkdown), extractFacts(polished));
+  // --copy：正文由事实包渲染、文案已由 validateCopy 检查，不再做草稿逐项比对
+  const result = copyInput ? { ok: true, violations: [] } : compareFacts(extractFacts(draftMarkdown), extractFacts(polished));
   if (!copyInput && result.ok) {
     // 结构之外的正文检查：否定事实动作直接拒绝；新数字 / 单位与业务承诺需要人确认
     const failure = reviewFailure(checkPolishedMarkdown(draftMarkdown, polished, pack), acceptReview);

@@ -50,7 +50,7 @@ function loadFinalize({ factsFile, finalizeInput }) {
  * 写任何正式文件之前完成全部检查：状态流转、结构事实、发布门槛。
  * 任一项不通过都不触碰正式文档。
  */
-function validateFinalize({ root, config, task, pages, final, facts }) {
+function validateFinalize({ root, config, task, pages, final, facts, renderedFromPack = false }) {
   const usable = checkEvidenceUsable(task, pages);
   if (!usable.ok) return { ok: false, errors: usable.errors };
   // 草稿必须基于任务当前这次采集：之后重新采集过，草稿里的图与结论就不再对应。
@@ -59,7 +59,7 @@ function validateFinalize({ root, config, task, pages, final, facts }) {
   }
   // 定稿可以重复执行（重新生成已发布文档）；status 只记录最近完成的操作。
   const nextTask = { ...task, status: 'generated' };
-  const checked = validateTaskFinal(final, facts);
+  const checked = validateTaskFinal(final, facts, { renderedFromPack });
   if (!checked.ok) return { ok: false, errors: checked.errors };
   const manualFile = manualFileFor(root, config, task.id);
   const gate = validatePublication({ projectRoot: root, manualFile, markdown: final, images: facts.images, config });
@@ -141,7 +141,7 @@ function reviewGate(findings, acceptReview) {
 
 function runFinalize({ root, config, projectStore, base, task, pages, factsFile, draftFile, finalizeInput, copyInput, acceptReview, force = false, json }) {
   if (!fs.existsSync(factsFile)) return fail('缺少任务事实文件，请先生成草稿。', json);
-  const facts = JSON.parse(fs.readFileSync(factsFile, 'utf8'));
+  let facts = JSON.parse(fs.readFileSync(factsFile, 'utf8'));
   const fresh = checkDraftFresh({ root, config, task, facts });
   if (!fresh.ok) return fail(fresh.errors, json);
   let final;
@@ -154,6 +154,8 @@ function runFinalize({ root, config, projectStore, base, task, pages, factsFile,
     try { copy = JSON.parse(fs.readFileSync(copyFile, 'utf8')); } catch (error) { return fail(`--copy 不是合法 JSON: ${error.message}`, json); }
     review = reviewGate(validateCopy(facts.factPack, copy), acceptReview);
     final = renderTask(facts.factPack, copy);
+    // 发布记录中的 facts 描述实际发布的文档：UI 名称序列取自渲染结果，并记录采用的文案
+    facts = { ...facts, uiTexts: [...final.matchAll(/「([^」]+)」/g)].map((m) => m[1]), copy };
   } else {
     const loaded = loadFinalize({ factsFile, finalizeInput });
     if (!loaded.ok) return fail(loaded.errors, json);
@@ -167,7 +169,7 @@ function runFinalize({ root, config, projectStore, base, task, pages, factsFile,
     return 1;
   }
   const loaded = { final, facts };
-  const checked = validateFinalize({ root, config, task, pages, final: loaded.final, facts: loaded.facts });
+  const checked = validateFinalize({ root, config, task, pages, final: loaded.final, facts: loaded.facts, renderedFromPack: Boolean(copyInput) });
   if (!checked.ok) return fail(checked.errors, json);
   const committed = commitFinalize({ root, config, projectStore, base, manualFile: checked.manualFile, final: loaded.final, facts: loaded.facts, task, force, nextTask: checked.nextTask });
   if (!committed.ok) {
