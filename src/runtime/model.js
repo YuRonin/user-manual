@@ -12,7 +12,8 @@
 
 const { isSafeId } = require('../model/ids');
 
-const TASK_KINDS = ['inspect', 'analyze', 'capture', 'derive-image', 'draft', 'rewrite', 'validate', 'publish'];
+// fixture-setup / fixture-cleanup：hook 类 Fixture 的测试数据准备与清理（P3-05）
+const TASK_KINDS = ['inspect', 'analyze', 'capture', 'derive-image', 'draft', 'rewrite', 'validate', 'publish', 'fixture-setup', 'fixture-cleanup'];
 const TASK_STATUSES = ['pending', 'running', 'waiting_input', 'succeeded', 'failed', 'interrupted', 'cancelled'];
 const RUN_STATUSES = TASK_STATUSES;
 const REPLAYS = ['safe', 'requires-input', 'unsafe'];
@@ -83,6 +84,9 @@ function normalizeTaskDefinitions(definitions) {
       id: def?.id,
       kind: def?.kind,
       dependsOn: Array.isArray(def?.dependsOn) ? [...def.dependsOn] : [],
+      // 软顺序：after 中的任务全部结束（成功、失败或因前置失败而无法执行）后才开始，不要求它们成功。
+      // 用于"无论采集成败都要清理测试数据"。
+      after: Array.isArray(def?.after) ? [...def.after] : [],
       inputHash: def?.inputHash,
       input: def?.input === undefined ? null : def.input,
       // 规划期的复用候选与依赖原因：执行前仍会重新校验，这里只是随任务保存的说明。
@@ -97,6 +101,7 @@ function normalizeTaskDefinitions(definitions) {
     };
   });
   for (const task of tasks) {
+    for (const dep of task.after) if (!ids.has(dep)) errors.push(`任务 ${task.id} 的 after 引用未知任务 ${dep}。`);
     for (const dep of task.dependsOn) {
       if (!ids.has(dep)) errors.push(`任务 ${task.id} 依赖未知任务 ${dep}。`);
       if (dep === task.id) errors.push(`任务 ${task.id} 不能依赖自己。`);

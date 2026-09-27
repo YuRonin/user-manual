@@ -178,11 +178,11 @@
   - [x] 像素差异、动态区域和分类报告。
   - [x] baseline 不自动接受，关键断言不能被 mask 跳过。
   - [x] 按钮改名、位移、时钟、环境不同测试通过。
-- [ ] **P3-05 Fixture / 多角色**（依赖 P3-03）
-  - [ ] 登记 hook/mock、环境 allowlist、run namespace。
-  - [ ] setup/cleanup RuntimeTask 与恢复。
-  - [ ] simulated provenance 和 cache 隔离。
-  - [ ] 生产拒绝、角色隔离、清理失败报告测试通过。
+- [x] **P3-05 Fixture / 多角色**（依赖 P3-03）
+  - [x] 登记 hook/mock、环境 allowlist、run namespace。
+  - [x] setup/cleanup RuntimeTask 与恢复。
+  - [x] simulated provenance 和 cache 隔离。
+  - [x] 生产拒绝、角色隔离、清理失败报告测试通过。
 - [ ] **P3-07 CI / 安装 / 性能**（依赖 P3-02/03/04/05/06）
   - [ ] Windows/Linux、固定 Node/browser/fonts。
   - [ ] 干净安装 smoke 和私有诊断 artifact 策略。
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 全部完成，Gate 2 已通过（2026-09-28）。Phase 3 进行中，共 29 / 32。下一项：P3-05。
+- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 全部完成，Gate 2 已通过（2026-09-28）。Phase 3 进行中，共 30 / 32。下一项：P3-07。
 
 ### 执行记录
 
@@ -857,4 +857,20 @@ Task ID: P3-04
 产物 / commit 引用: 见本任务提交
 剩余风险: 漂移比较目前只对页面手册做（任务手册的漂移分类只来自行为断言）；P3-04 之前的 Capture 没有语义摘要 / 环境，比较结果为 inconclusive / environment-incompatible，重新采集后可比较；字体差异只能通过平台与浏览器版本间接体现。
 下一项可执行任务: P3-05
+```
+
+```text
+Task ID: P3-05
+状态: completed
+开始时基线 commit / dirty files: 2d63a90（P3-04）；工作区干净
+实际修改文件: src/scenarios/fixtures.js、src/scenarios/policy.js、test/scenario-fixtures.test.js（新）；src/runtime/planner.js（显式 Scenario 变体进入索引、主体键 page:<id>@<scenario>、Fixture 策略与数据 revision 进入规划 / 缓存 key、hook Fixture 生成 fixture-setup / fixture-cleanup 节点）；src/runtime/model.js（任务种类 fixture-setup / fixture-cleanup、软顺序 after）；src/runtime/runner.js（after：前置任务结束（含失败或永远无法开始）后才执行）；src/runtime/handlers.js（setup / cleanup handler、变体 Scenario 采集、Run 内 runId 传给任务采集）；src/runtime/errors.js、src/cli/output.js、src/cli/run-report.js（fixture-policy-denied / setup-failed / setup-required 为失败，cleanup-required 为等待输入并提示 resume）；src/evidence/capture-page.js（显式 Scenario：预期状态 / 身份 / 断言、mock 拦截、provenance 与 fixture 引用；变体与模拟采集不替换页面默认截图）；src/tasks/capture-usecase.js、src/tasks/executor.js（任务 Scenario 的身份与 Fixture）；src/evidence/claims.js、src/generate/fact-pack.js、src/generate/render.js（simulated 证据的声明不能是 verified，文档说明数据来源）；src/browser/playwright.js、src/browser/capabilities.js（installRoutes / routeMocking）；src/model/schema.js（Scenario data / expected.state 校验）；src/commands/capture.js（capture scenario:<id> 走 Runtime）；test/browser-session.test.js（能力表增加 routeMocking）、test/run.js
+契约变更: 新增 .manual/fixtures/<id>.yaml（kind mock / hook、environments、dataset、sideEffectClass、mock.routes / hook.module + secrets 引用）与 config.fixtures.environments（登记的测试环境及 origin allowlist / tenant）；Capture 增加 provenance.mode = simulated / fixture 与 fixture 引用；claim 状态增加 simulated；缓存 key 的 dataRevision 对 fixture 为 fixture:<id>:<revision>，live 与 fixture 永不互相命中。规范中 src/browser/session.js、src/evidence/store.js 无需修改（拦截安装在 provider 的 Context 上；Capture 字段由调用方提供）。
+执行命令与结果:
+  - node test/scenario-fixtures.test.js：11 passed（单元：定义校验、环境策略五种拒绝、数据 revision 与命名空间；真实 Chromium：mock Fixture 空状态 Scenario 标 simulated、不替换页面默认截图；fixture 采集缓存只由自己命中、定义变化使其失效；生产 / 未登记环境规划即拒绝且没有写测试数据；hook Fixture setup → capture → cleanup，数据清理、secret 不出现在 .manual；采集失败 cleanup 仍执行；清理失败 fixture-cleanup-required 等待输入（退出码 3）且数据保留，resume 后清理、重复 resume 幂等；成员 / 匿名 Scenario 身份隔离）。
+  - node test/live-verify.test.js：9 passed；node test/runtime-recovery.test.js：7 passed。
+  - npm test：66 个测试文件全部通过（macOS / Node 26.4.0）。
+失败或跳过的验收及原因: 无。设计取舍：Scenario 变体只用于 capture（与既有 scenario 目标规则一致），页面手册仍基于默认 Scenario；setup 中断按 replay=unsafe 进入 outcome-unknown，cleanup 按命名空间幂等可重放。
+产物 / commit 引用: 见本任务提交
+剩余风险: 页面手册暂不渲染多个 Scenario 的截图（变体证据可被后续章节模型引用）；hook 模块在 CLI 进程内执行，只能来自 .manual/fixtures 中登记的文件，模块本身的安全由项目维护者负责。
+下一项可执行任务: P3-07
 ```

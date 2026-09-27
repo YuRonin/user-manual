@@ -18,7 +18,7 @@ const USAGE_CODES = new Set(['invalid-arguments', 'unknown-target', 'ambiguous-t
 const WAITING_CODES = new Set([
   'approval-required', 'approval-scope-unknown', 'scope-changed', 'approval-scope-changed', 'pending', 'legacy-unverified',
   'auth-missing', 'auth-expired', 'login-required', 'review-required', 'model-input-required', 'outcome-unknown', 'lock-held-remote',
-  'analysis-required',
+  'analysis-required', 'fixture-cleanup-required',
 ]);
 const CONFLICT_CODES = new Set(['publication-conflict', 'merge-conflict', 'document-missing', 'model-conflict', 'run-input-changed', 'draft-stale', 'evidence-stale', 'plan-tampered']);
 

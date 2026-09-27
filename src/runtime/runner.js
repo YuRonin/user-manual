@@ -22,7 +22,7 @@ const { decideRetry } = require('./retry');
 const { checkpoint } = require('./faults');
 const { reconcileInterrupted } = require('./recovery');
 
-const TASK_TIMEOUT_KIND = { capture: 'scenarioActiveMs', 'derive-image': 'scenarioActiveMs' };
+const TASK_TIMEOUT_KIND = { capture: 'scenarioActiveMs', 'derive-image': 'scenarioActiveMs', 'fixture-setup': 'scenarioActiveMs', 'fixture-cleanup': 'scenarioActiveMs' };
 
 function defaultSleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -66,6 +66,19 @@ function summarize(state) {
  * @param {() => object} [p.sessionFactory]  测试可注入
  * @param {(state) => void} [p.verifyInputs] 开始前确认输入未变（resume 使用），不通过时抛错且不改动 Run
  */
+/**
+ * 任务是否已经"结束"：成功、失败、取消，或者仍在 pending 但某个前置任务已经结束且没有成功（它永远不会开始）。
+ * 等待输入 / 运行中 / 中断的任务未结束——清理要等它们，避免在恢复前删掉还要用的测试数据。
+ */
+function settled(byId, id, seen = new Set()) {
+  const task = byId.get(id);
+  if (!task || seen.has(id)) return true;
+  seen.add(id);
+  if (['succeeded', 'failed', 'cancelled'].includes(task.status)) return true;
+  if (task.status !== 'pending') return false;
+  return task.dependsOn.some((dep) => { const d = byId.get(dep); return d && d.status !== 'succeeded' && settled(byId, dep, seen); });
+}
+
 async function runRun({ runStore, runId, handlers, context = {}, signal = null, clock = () => Date.now(), sleep = defaultSleep, sessionFactory = () => createBrowserSession(), verifyInputs = null, onEvent = null }) {
   const opened = runStore.open(runId);
   const { lease } = opened;
@@ -101,7 +114,7 @@ async function runRun({ runStore, runId, handlers, context = {}, signal = null, 
       if (signal?.aborted) break;
       const state = runStore.read(runId);
       const byId = new Map(state.tasks.map((t) => [t.id, t]));
-      const ready = state.tasks.find((t) => t.status === 'pending' && t.dependsOn.every((dep) => byId.get(dep)?.status === 'succeeded'));
+      const ready = state.tasks.find((t) => t.status === 'pending' && t.dependsOn.every((dep) => byId.get(dep)?.status === 'succeeded') && (t.after || []).every((dep) => settled(byId, dep)));
       if (!ready) break;
 
       const budget = state.run.budget;

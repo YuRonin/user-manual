@@ -172,7 +172,7 @@ function storageFor(baseUrl, role) {
   });
 
   await test('能力声明：Playwright 全部能力为真；未声明的 provider 在执行前报 capability-missing', async () => {
-    assert.deepStrictEqual(capabilitiesFor(providerConfig), { capture: true, semanticActions: true, assertions: true, storageExport: true, privacyGeometry: true, popups: true });
+    assert.deepStrictEqual(capabilitiesFor(providerConfig), { capture: true, semanticActions: true, assertions: true, storageExport: true, privacyGeometry: true, popups: true, routeMocking: true });
     class ScreenshotOnly extends BrowserProvider { static get capabilities() { return { capture: true }; } }
     ADAPTERS['screenshot-only'] = ScreenshotOnly;
     try {

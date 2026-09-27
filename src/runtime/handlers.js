@@ -60,9 +60,58 @@ function dependencyOutputs(ctx, task, kind) {
 function currentSubjectInputs(ctx, subject) {
   const base = loadModel(ctx).load();
   const snapshot = collectPlanningInputs({
-    projectRoot: ctx.projectRoot, config: ctx.config, base, targets: [`${subject.type}:${subject.id}`], mode: ctx.mode,
+    projectRoot: ctx.projectRoot, config: ctx.config, base, targets: [subject.scenarioId ? `scenario:${subject.scenarioId}` : `${subject.type}:${subject.id}`], mode: ctx.mode,
   });
   return snapshot.subjects[subjectKey(subject)];
+}
+
+// ---------------------------------------------------------------- fixture-setup / fixture-cleanup（P3-05）
+
+function fixtureContext(ctx, task) {
+  const { readFixture, namespaceFor } = require('../scenarios/fixtures');
+  const { checkFixtureAllowed } = require('../scenarios/policy');
+  const current = currentSubjectInputs(ctx, task.input.subject);
+  const fixture = readFixture(ctx.stateDirAbs, task.input.fixture.id);
+  // 执行前再过一次环境策略：规划之后 baseUrl / 环境登记可能被改过
+  checkFixtureAllowed({ fixture, scenario: current.scenarioDefinition, config: ctx.config });
+  return { fixture, namespace: namespaceFor(ctx.runId, fixture.id), current };
+}
+
+async function fixtureSetup(ctx, task) {
+  const { runHook, writeFixtureState, fixtureRevision } = require('../scenarios/fixtures');
+  const { fixture, namespace } = fixtureContext(ctx, task);
+  const revision = fixtureRevision(fixture);
+  if (revision !== task.input.fixture.revision) throw new RuntimeError('run-input-changed', `Fixture ${fixture.id} 在规划之后被修改，需要重新规划。`);
+  writeFixtureState(ctx.stateDirAbs, ctx.runId, fixture.id, { fixtureId: fixture.id, revision, namespace, status: 'setting-up' });
+  let token;
+  try {
+    token = await runHook(fixture, 'setup', { namespace, baseUrl: ctx.config.project.baseUrl });
+  } catch (error) {
+    writeFixtureState(ctx.stateDirAbs, ctx.runId, fixture.id, { fixtureId: fixture.id, revision, namespace, status: 'setup-failed', error: String(error.code || 'fixture-setup-failed') });
+    if (error instanceof RuntimeError) throw error;
+    throw new RuntimeError('fixture-setup-failed', `Fixture ${fixture.id} 的 setup 失败：${error.message}（测试数据可能已部分写入命名空间 ${namespace}，稍后的 cleanup 会按命名空间清理）。`);
+  }
+  writeFixtureState(ctx.stateDirAbs, ctx.runId, fixture.id, { fixtureId: fixture.id, revision, namespace, status: 'active', token });
+  return { outputs: [{ kind: 'value', sha256: sha256Hex(JSON.stringify({ fixture: fixture.id, revision, namespace })), value: { fixture: fixture.id, namespace, status: 'active' } }] };
+}
+
+async function fixtureCleanup(ctx, task) {
+  const { runHook, readFixtureState, writeFixtureState, readFixture, namespaceFor } = require('../scenarios/fixtures');
+  const fixture = readFixture(ctx.stateDirAbs, task.input.fixture.id);
+  const namespace = namespaceFor(ctx.runId, fixture.id);
+  const state = readFixtureState(ctx.stateDirAbs, ctx.runId, fixture.id);
+  const value = (status) => ({ outputs: [{ kind: 'value', sha256: sha256Hex(JSON.stringify({ fixture: fixture.id, namespace, status })), value: { fixture: fixture.id, namespace, status } }] });
+  // 幂等：已清理 / 从未开始 setup 的直接结束
+  if (state?.status === 'cleaned') return value('cleaned');
+  if (!state) return value('nothing-to-clean');
+  try {
+    await runHook(fixture, 'cleanup', { namespace, baseUrl: ctx.config.project.baseUrl, token: state.token || null });
+  } catch (error) {
+    writeFixtureState(ctx.stateDirAbs, ctx.runId, fixture.id, { ...state, status: 'cleanup-failed', error: String(error.code || error.message).slice(0, 200) });
+    throw new RuntimeError('fixture-cleanup-required', `Fixture ${fixture.id} 的测试数据清理失败（命名空间 ${namespace}）：${error.message}。数据仍留在测试环境中，处理后 manual resume ${ctx.runId} 重试清理。`);
+  }
+  writeFixtureState(ctx.stateDirAbs, ctx.runId, fixture.id, { ...state, status: 'cleaned', token: null });
+  return value('cleaned');
 }
 
 // ---------------------------------------------------------------- validate（审批 gate 与发布门槛）
@@ -193,13 +242,16 @@ async function capture(ctx, task) {
   }
 
   if (subject.type === 'page') {
-    const result = await capturePage({ projectRoot: ctx.projectRoot, config: ctx.config, pageId: subject.id, session: ctx.session(), runId: ctx.runId });
+    const result = await capturePage({
+      projectRoot: ctx.projectRoot, config: ctx.config, pageId: subject.id, session: ctx.session(), runId: ctx.runId,
+      options: subject.scenarioId ? { scenario: current.scenarioDefinition } : {},
+    });
     checkpoint('capture-committed');
     const outputs = [{ kind: 'capture', ref: result.record.id }];
     writeCaptureCache(ctx, task, current, outputs, [result.record], result.record.observedAt);
     return { outputs, warnings: [...warnings, ...result.ready.warnings], actions: 1 };
   }
-  const result = await captureTask({ projectRoot: ctx.projectRoot, config: ctx.config, taskId: subject.id, session: ctx.session() });
+  const result = await captureTask({ projectRoot: ctx.projectRoot, config: ctx.config, taskId: subject.id, session: ctx.session(), runId: ctx.runId });
   checkpoint('capture-committed');
   const captureIds = result.updatedTask.lastCapture.captureIds;
   const outputs = [
@@ -330,6 +382,8 @@ function validate(ctx, task) {
 }
 
 const HANDLERS = {
+  'fixture-setup': fixtureSetup,
+  'fixture-cleanup': fixtureCleanup,
   analyze,
   capture,
   'derive-image': deriveImage,

@@ -88,6 +88,8 @@ function buildTaskFactPack({ task, evidence, images, claims, language }) {
     claims: claims.map(({ id, text, status, assertionRefs, checkpoint, evidence: refs }) => ({ id, text, status, assertionRefs, checkpoint: checkpoint ?? null, evidence: refs })),
     artifacts: artifacts.map(({ stepId, ...rest }) => ({ ...rest, stepId })),
     scope: { firstSkipped },
+    // 证据来源：simulated（Fixture 模拟数据）时文档必须说明，声明不能写成"已验证"
+    ...(evidence?.provenance && evidence.provenance !== 'live' ? { provenance: evidence.provenance } : {}),
     branches: task.branches || [],
     relatedTasks: task.relatedTasks || [],
     blocks,

@@ -19,6 +19,7 @@ const { buildCapturePlan, writeCapturePlan } = require('./capture-plan');
 const { executeCapturePlan } = require('./executor');
 const { prepareAuth, authRuntimeFor } = require('../auth/runtime');
 const { RuntimeError } = require('../runtime/errors');
+const { prepareScenarioData } = require('../scenarios/fixtures');
 
 function inputError(code, errors) {
   return new RuntimeError(code, errors.join(' '), { errors });
@@ -53,7 +54,7 @@ function taskProjection(task, pages, { capturedAt, captureIds, manifestRelative,
  * @param {object} [p.session]  BrowserSession；缺省时自行创建并关闭 provider
  * @returns {Promise<{ task, updatedTask, plan, planFile, evidence, scenario }>}
  */
-async function captureTask({ projectRoot, config, taskId, session = null }) {
+async function captureTask({ projectRoot, config, taskId, session = null, runId = null }) {
   const stateDir = path.join(projectRoot, config.artifacts.stateDir);
   const projectStore = createProjectStore({ stateDirAbs: stateDir, docsOutputDir: config.docs.outputDir });
   let base;
@@ -75,8 +76,13 @@ async function captureTask({ projectRoot, config, taskId, session = null }) {
   const providerId = config.browser.activeProvider;
   const profile = config.capture.profiles[profileId];
   const providerConfig = config.browser.providers[providerId];
-  const auth = prepareAuth(config);
+  // Fixture 先过环境策略；Scenario 的身份决定认证档案（匿名 / 成员 / 管理员各自隔离）
+  const data = prepareScenarioData({ stateDirAbs: stateDir, config, scenario: scenario.scenario, runId });
+  const auth = prepareAuth(config, { profile: scenario.scenario.authProfile });
   const execute = (provider, ownsProvider) => executeCapturePlan(built.plan, provider, {
+    routes: data.routes,
+    provenanceMode: data.mode,
+    fixture: data.fixture,
     baseUrl: config.project.baseUrl,
     stateDir,
     projectRoot,

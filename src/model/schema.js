@@ -364,6 +364,14 @@ function validateScenario(scenario, context = {}) {
       if (!ok) c.error(`entry.params.${key}`, 'invalid-params', '参数值需要是字符串，catch-all 参数是字符串数组。');
     }
   }
+  // 数据来源（P3-05）：live，或引用已登记的 Fixture；预期页面状态用于 Empty / Loading / Error Scenario
+  if (scenario.data !== undefined && scenario.data !== null) {
+    if (!isObject(scenario.data) || !['live', 'fixture'].includes(scenario.data.mode)) c.error('data.mode', 'invalid-data', 'data.mode 需要是 live 或 fixture。');
+    else if (scenario.data.mode === 'fixture' && !isSafeId(scenario.data.fixture)) c.error('data.fixture', 'required', 'data.mode=fixture 时需要 data.fixture（已登记的 Fixture id）。');
+  }
+  if (scenario.expected?.state !== undefined && !['normal', 'loading', 'error', 'empty'].includes(scenario.expected.state)) {
+    c.error('expected.state', 'invalid-state', `expected.state 需要是 normal / loading / error / empty，收到: ${scenario.expected.state}`);
+  }
   if (!Array.isArray(scenario.checkpoints)) c.error('checkpoints', 'required', 'checkpoints 需要是数组。');
   else {
     const ids = new Set();

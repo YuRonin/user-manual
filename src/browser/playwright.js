@@ -251,7 +251,7 @@ class PlaywrightBrowserProvider extends BrowserProvider {
   }
 
   static get capabilities() {
-    return { capture: true, semanticActions: true, assertions: true, storageExport: true, privacyGeometry: true, popups: true };
+    return { capture: true, semanticActions: true, assertions: true, storageExport: true, privacyGeometry: true, popups: true, routeMocking: true };
   }
 
   get headless() {
@@ -264,6 +264,25 @@ class PlaywrightBrowserProvider extends BrowserProvider {
     if (this.closed) throw new CaptureError(REASON.NAVIGATION_FAILED, 'provider 已关闭，不能再次使用；请为新的 Scenario 创建新的 provider。');
     if (!this.browser) this.browser = await launchBrowser(this.providerConfig, { browserType: this.browserType });
     await this.newContext();
+  }
+
+  /**
+   * Fixture 静态响应（P3-05）：只作用于本 Scenario 的 Context，在打开页面之前安装。
+   * routes: [{ matcher: RegExp(pathname), method?, status, contentType, body }]；只匹配同源请求。
+   */
+  async installRoutes(routes, { baseUrl }) {
+    await this.launch();
+    const origin = new URL(baseUrl).origin;
+    this.mockedRequests = [];
+    await this.context.route(() => true, async (route) => {
+      const request = route.request();
+      let url;
+      try { url = new URL(request.url()); } catch (_) { return route.continue(); }
+      const hit = url.origin === origin && routes.find((r) => r.matcher.test(url.pathname) && (!r.method || r.method === request.method()));
+      if (!hit) return route.continue();
+      this.mockedRequests.push(`${request.method()} ${url.pathname}`);
+      return route.fulfill({ status: hit.status, contentType: hit.contentType, body: hit.body });
+    });
   }
 
   /** 为本 Scenario 新建隔离的 Context：认证快照、视口、DPR、语言、时区、配色都在这里注入。 */

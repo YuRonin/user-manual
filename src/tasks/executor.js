@@ -103,12 +103,13 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
         // 未做隐私检测的截图明确记为 not-run，发布时按 unknown 处理
         privacy: safe ? safe.privacy : { status: 'not-run' },
         redactions: safe ? safe.redactions.map(({ kind, rect, result }) => ({ kind, rect, result })) : [],
+        ...(options.fixture ? { fixture: options.fixture } : {}),
         provenance: safe ? {
-          mode: 'live',
+          mode: options.provenanceMode || 'live',
           derivedFromRawHash: safe.derived.rawHash,
           geometryHash: safe.derived.geometryHash,
           rendererVersion: safe.derived.rendererVersion,
-        } : { mode: 'live' },
+        } : { mode: options.provenanceMode || 'live' },
       },
     });
     store.setLatest({ [`task:${plan.taskId}:${step.id}:${timing}`]: record.id });
@@ -140,12 +141,19 @@ async function executeCapturePlan(plan, provider, options) {
     taskId: plan.taskId,
     capturedAt: new Date().toISOString(),
     url: joinUrl(baseUrl, plan.entry.route),
+    // simulated：请求被 Fixture 静态响应拦截，结论只覆盖界面呈现（P3-05）
+    provenance: options.provenanceMode || 'live',
+    ...(options.fixture ? { fixture: options.fixture } : {}),
     steps: [],
   };
   const timeoutMs = options.assertionTimeoutMs ?? DEFAULT_ASSERTION_TIMEOUT_MS;
   let activeStep = null;
   try {
     // 入口：HTTP / 最终 URL / 页面状态 → 页面身份断言。全部基于等待之后重新读取的页面事实。
+    if (options.routes?.length) {
+      if (!provider.installRoutes) throw Object.assign(new Error('当前 Browser Provider 不支持请求拦截（routeMocking），不能使用 mock Fixture。'), { code: 'capability-missing' });
+      await provider.installRoutes(options.routes, { baseUrl });
+    }
     const openResult = await provider.open(result.url);
     await provider.waitUntilReady();
     const observation = provider.currentObservation ? await provider.currentObservation() : null;

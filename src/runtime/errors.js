@@ -53,6 +53,12 @@ const POLICIES = {
   'publication-conflict': INPUT,
   // 人工修改与新生成冲突 / 已发布文档被删除：等待用户选择（合并提案、owner=human、--force、retired）
   'merge-conflict': INPUT,
+  // Fixture：环境策略拒绝 / setup 失败是确定性失败；清理失败必须显式报告，不吞掉（P3-05）
+  'fixture-policy-denied': FAIL,
+  'fixture-setup-failed': FAIL,
+  // 清理失败：等待用户处理测试环境后 resume 重试（幂等），而不是静默结束
+  'fixture-cleanup-required': INPUT,
+  'fixture-setup-required': FAIL,
   'document-missing': INPUT,
   'model-conflict': INPUT,
   'run-input-changed': INPUT,

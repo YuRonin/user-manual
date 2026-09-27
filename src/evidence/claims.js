@@ -8,7 +8,8 @@
  * 编辑器断言证明；"资料已保存"不能——保存步骤没执行，它的断言就是 not_run。
  */
 
-const CLAIM_STATUSES = ['verified', 'failed', 'not_run', 'legacy-unbound'];
+// simulated：断言在 Fixture 模拟的数据上通过——证明界面呈现，不证明真实后端结果（P3-05）
+const CLAIM_STATUSES = ['verified', 'simulated', 'failed', 'not_run', 'legacy-unbound'];
 
 /** 任务里的 claims；旧任务只有 description/verification 时转为未绑定证据的 legacy claim。 */
 function claimsOf(task) {
@@ -50,8 +51,9 @@ function computeClaims(task, evidence) {
       if (hit) matched.push({ assertionId: ref, stepId: hit.stepId, scope: hit.scope, checkedAt: hit.checkedAt });
       else missing = true;
     }
-    const status = failed ? 'failed' : (missing ? 'not_run' : 'verified');
-    return { ...base, status, evidence: status === 'verified' ? matched : [] };
+    let status = failed ? 'failed' : (missing ? 'not_run' : 'verified');
+    if (status === 'verified' && evidence?.provenance === 'simulated') status = 'simulated';
+    return { ...base, status, evidence: status === 'verified' || status === 'simulated' ? matched : [] };
   });
 }
 

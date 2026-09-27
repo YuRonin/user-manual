@@ -27,6 +27,8 @@ const { createCaptureStore, sanitizeUrl } = require('./store');
 const { definitionRevision } = require('../model/revision');
 const { revisionOf } = require('../util/hash');
 const { RuntimeError } = require('../runtime/errors');
+const { resolveScenario } = require('../scenarios/store');
+const { prepareScenarioData } = require('../scenarios/fixtures');
 
 const REASON_CODES = new Set(Object.values(REASON));
 
@@ -138,8 +140,26 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
     waitFor: options.waitFor || null,
   };
 
-  const auth = prepareAuth(config);
-  const identityAssertions = (page.states?.default?.assertions || []).filter((a) => a && a.type !== 'url');
+  // Scenario：显式指定（Scenario 变体，如空状态 / 错误态 / 其他角色）或页面默认（含 .manual/scenarios 覆盖）
+  let scenario = options.scenario || null;
+  let explicitScenario = !!scenario;
+  if (!scenario) {
+    const resolved = resolveScenario(stateDirAbs, derivePageScenario(page, config, { params }), { stepIds: [] });
+    if (!resolved.ok) throw inputError('invalid-scenario', resolved.errors);
+    scenario = resolved.scenario;
+    explicitScenario = resolved.explicit;
+  }
+  const isDefaultScenario = scenario.id === `page-${page.id}`;
+  // Fixture：先过环境策略（生产 / 未登记环境拒绝），再决定拦截路由；在打开浏览器之前完成
+  const data = prepareScenarioData({ stateDirAbs, config, scenario, runId });
+  // 每个 Scenario 用自己的身份：匿名 / 成员 / 管理员互不共享认证状态
+  const auth = prepareAuth(config, { profile: scenario.authProfile });
+  // 派生的默认 Scenario 沿用通用导航规则；显式 Scenario 按声明的状态码 / 预期状态（Empty / Error / Loading）/ 跳转校验
+  const expected = explicitScenario
+    ? { statuses: scenario.expected?.httpStatuses, state: scenario.expected?.state || 'normal', allowRedirects: scenario.expected?.redirects?.length ? scenario.expected.redirects : undefined }
+    : {};
+  const checkpoint = (scenario.checkpoints || []).find((c) => c.id === 'default') || scenario.checkpoints?.[0] || null;
+  const identityAssertions = ((isDefaultScenario ? page.states?.default?.assertions : checkpoint?.assertions) || []).filter((a) => a && a.type !== 'url');
   const staging = captureStore.begin();
   const stagedRaw = staging.file(`raw.${format}`);
   const stagedSanitized = staging.file('sanitized.png');
@@ -147,12 +167,16 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
   const stagedDerivation = staging.file('derivation.json');
 
   const work = async (provider) => {
+    if (data.routes.length) {
+      if (!provider.installRoutes) throw new RuntimeError('capability-missing', '当前 Browser Provider 不支持请求拦截（routeMocking），不能使用 mock Fixture。');
+      await provider.installRoutes(data.routes, { baseUrl: config.project.baseUrl });
+    }
     const openResult = await provider.open(url, { timeout: readyOptions.timeout });
     const ready = await provider.waitUntilReady(readyOptions);
     // 等待结束后重新读取 URL 与页面事实：SPA 延迟跳转以截图时的地址为准。
     const observation = provider.currentObservation ? await provider.currentObservation() : await provider.probe();
     // 先判断这次打开到底算不算成功，再决定要不要落盘。顺序不能反。
-    const navigation = validateNavigation({ requestedUrl: url, openResult, observation });
+    const navigation = validateNavigation({ requestedUrl: url, openResult, observation, expected });
     ready.warnings.push(...navigation.warnings);
     // 页面身份：只有非 URL 断言能证明"打开的是这一页"；只有 URL 的旧模型记为 url-only。
     let identity = 'url-only';
@@ -220,7 +244,6 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
     provider: providerId,
   };
   const modelRevision = definitionRevision('page', page);
-  const scenario = derivePageScenario(page, config, { params });
   let record;
   try {
     const artifacts = [
@@ -250,8 +273,10 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
         ...(environment ? { environment } : {}),
         privacy: safe.privacy,
         redactions: safe.redactions.map(({ kind, rect, result }) => ({ kind, rect, result })),
+        // simulated：界面由拦截的静态响应驱动，只证明"界面如何呈现这种数据"；fixture：登记的测试数据
+        ...(data.fixture ? { fixture: data.fixture } : {}),
         provenance: {
-          mode: 'live',
+          mode: data.mode,
           derivedFromRawHash: safe.derived.rawHash,
           geometryHash: safe.derived.geometryHash,
           rendererVersion: safe.derived.rendererVersion,
@@ -259,25 +284,29 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
       },
       artifacts,
     });
-    captureStore.setLatest({ [`page:${pageId}`]: record.id });
+    // Scenario 变体的采集不替换页面默认截图
+    captureStore.setLatest({ [isDefaultScenario ? `page:${pageId}` : `scenario:${scenario.id}`]: record.id });
   } catch (e) {
     captureStore.abort(staging);
     throw new RuntimeError(e.code || 'capture-commit-failed', `${e.code || 'capture-commit-failed'}: ${e.message}`);
   }
 
-  const updatedPage = pageProjection(page, record, { shotMeta: shot.meta, providerId, navigation, identity });
-  // 观察提交：只改这一页的 browser 投影与可信度，不重写其它页面、不覆盖同时发生的定义修改
-  try {
-    projectStore.commit({ base, kind: 'observation', changes: { pages: [updatedPage] } });
-  } catch (e) {
-    throw new RuntimeError(e.code || 'model-commit-failed', `${e.code || 'model-commit-failed'}: ${e.message}（Capture ${record.id} 已提交，可重新运行以更新页面投影）`, { captureId: record.id });
+  // 观察提交：只改这一页的 browser 投影与可信度，不重写其它页面、不覆盖同时发生的定义修改。
+  // 模拟数据 / Scenario 变体的采集只作为独立证据，不成为页面手册的默认截图。
+  const updatedPage = isDefaultScenario && data.mode === 'live' ? pageProjection(page, record, { shotMeta: shot.meta, providerId, navigation, identity }) : page;
+  if (updatedPage !== page) {
+    try {
+      projectStore.commit({ base, kind: 'observation', changes: { pages: [updatedPage] } });
+    } catch (e) {
+      throw new RuntimeError(e.code || 'model-commit-failed', `${e.code || 'model-commit-failed'}: ${e.message}（Capture ${record.id} 已提交，可重新运行以更新页面投影）`, { captureId: record.id });
+    }
   }
 
   return {
     page, updatedPage, record, shot, ready, navigation, identity, safe, url, effectiveRoute,
     profileId, profile, providerId, capturedAt,
     screenshotRelative: record.artifacts.find((a) => a.kind === 'raw').path,
-    published: updatedPage.browser.published,
+    published: updatedPage.browser?.published || null,
   };
 }
 

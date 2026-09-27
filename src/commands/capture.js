@@ -33,7 +33,11 @@ const HELP = `
 manual capture —— 用真实浏览器打开页面并截图
 
 用法:
-  manual capture <page-id | page:<id> | task:<id>> [选项]
+  manual capture <page-id | page:<id> | task:<id> | scenario:<id>> [选项]
+
+  scenario:<id>  采集 .manual/scenarios/<id>.yaml 定义的 Scenario 变体（空状态、错误态、其他角色、
+                 Fixture 数据）。mock Fixture 的结果标 simulated；hook Fixture 的测试数据在采集前准备、
+                 采集后无论成败都清理；生产或未登记的环境直接拒绝。
 
 做什么:
   从 .manual/pages/<page-id>.yaml 取出 route → 拼出 {baseUrl}{route} → 用配置里的
@@ -169,6 +173,17 @@ async function run(argv) {
 
   // task:<id> 与 capture-task 走同一个用例；capture 只推进到证据提交，不生成文档。
   if (pageId.startsWith('task:')) return captureTaskCommand.captureTaskTarget({ projectRoot, config, taskId: pageId.slice(5), json });
+  // scenario:<id>：Scenario 变体（空状态 / 错误态 / 其他角色 / Fixture 数据）走 Runtime，
+  // hook Fixture 的 setup / cleanup 作为独立任务执行，中断后可 resume 清理。
+  if (pageId.startsWith('scenario:')) {
+    const { startRun } = require('../runtime/app');
+    const { printRun, printRuntimeError } = require('../cli/run-report');
+    try {
+      return printRun({ json, result: await startRun({ projectRoot, command: 'capture', targets: [pageId], copy: { mode: 'default' } }), label: 'capture' });
+    } catch (error) {
+      return printRuntimeError({ json, error, label: 'capture' });
+    }
+  }
   const overrides = ['profile', 'provider', 'url', 'params', 'fullPage', 'timeout', 'quietMs', 'settleMs', 'noFreezeAnimations', 'waitFor'].filter((k) => values[k] !== undefined && values[k] !== false);
 
   let result;

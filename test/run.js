@@ -70,6 +70,7 @@ const FILES = [
   'incremental-update.test.js',
   'live-verify.test.js',
   'drift-report.test.js',
+  'scenario-fixtures.test.js',
 ];
 
 let failed = 0;

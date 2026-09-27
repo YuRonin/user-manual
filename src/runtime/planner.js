@@ -17,7 +17,9 @@ const { revisionOf } = require('../util/hash');
 const { definitionRevision } = require('../model/revision');
 const { approvalState, approvalMessage, scopeHash, pageRevisionsFor, pageObservationRevision, APPROVAL_STATES } = require('../model/approval');
 const { deriveTaskScenario, derivePageScenario } = require('../scenarios/model');
-const { resolveScenario } = require('../scenarios/store');
+const { resolveScenario, readScenario, scenariosDirFor } = require('../scenarios/store');
+const { readFixture, fixtureRevision, dataRevisionFor } = require('../scenarios/fixtures');
+const { checkFixtureAllowed } = require('../scenarios/policy');
 const { buildCapturePlan } = require('../tasks/capture-plan');
 const { isActivePage, ANALYSIS } = require('../inspect/model');
 const { authDisabled, identityRevision } = require('../auth/identity');
@@ -41,8 +43,9 @@ function browserVersion() {
   try { return `playwright-${require('playwright/package.json').version}`; } catch (_) { return 'unknown'; }
 }
 
+/** 任务 / 页面的规划主体；Scenario 变体（空状态、错误态、其他角色）带 @scenarioId，彼此独立。 */
 function subjectKey(subject) {
-  return `${subject.type}:${subject.id}`;
+  return `${subject.type}:${subject.id}${subject.scenarioId ? `@${subject.scenarioId}` : ''}`;
 }
 
 /** 当前图像派生输入：隐私规则、标注主题、渲染器。任一变化 → 已有 raw 需要重新派生。 */
@@ -55,7 +58,7 @@ function imageInputsOf(config) {
  * Capture 缓存 key 的字段（C09）。handler 写缓存时用同一个函数，保证读写一致。
  * @param {{ subject, scenario, sourceHash, captureMode }} p
  */
-function captureKeyFields({ config, subject, scenario, sourceHash, captureMode, browser, platform }) {
+function captureKeyFields({ config, subject, scenario, sourceHash, captureMode, browser, platform, stateDirAbs = null }) {
   const profile = config.capture.profiles[config.capture.activeProfile];
   const provider = config.browser.providers[config.browser.activeProvider] || {};
   const authProfile = scenario.authProfile || config.auth?.activeProfile;
@@ -63,7 +66,8 @@ function captureKeyFields({ config, subject, scenario, sourceHash, captureMode, 
     projectId: config.project.id || config.auth?.cacheKey || config.project.name,
     environment: `${scenario.environment || 'local'}@${new URL(config.project.baseUrl).origin}`,
     deployedBuild: config.runtime?.deployedBuild,
-    dataRevision: scenario.data?.revision,
+    // live 与 fixture 的采集永不互相命中：fixture 的数据 revision 带 fixture 定义与数据文件的 hash
+    dataRevision: scenarioDataRevision(stateDirAbs, scenario),
     scenarioId: scenario.id,
     scenarioRevision: scenario.revision,
     checkpoint: subject.type === 'task' ? 'task-steps' : 'default',
@@ -80,6 +84,12 @@ function captureKeyFields({ config, subject, scenario, sourceHash, captureMode, 
   };
 }
 
+function scenarioDataRevision(stateDirAbs, scenario) {
+  if (scenario?.data?.mode !== 'fixture') return scenario?.data?.revision;
+  if (!stateDirAbs) return `fixture:${scenario.data.fixture}`;
+  try { return dataRevisionFor(stateDirAbs, scenario); } catch (_) { return `fixture:${scenario.data.fixture}:missing`; }
+}
+
 function scenarioIndex(stateDirAbs, model, config) {
   const out = [];
   for (const task of model.tasks) {
@@ -90,7 +100,39 @@ function scenarioIndex(stateDirAbs, model, config) {
     const derived = derivePageScenario(page, config);
     out.push({ id: derived.id, subject: { type: 'page', id: page.id }, derived, stepIds: [] });
   }
+  // 显式 Scenario 变体：.manual/scenarios/<id>.yaml 中 id 不同于默认 Scenario 的定义（P3-05）
+  const known = new Set(out.map((entry) => entry.id));
+  const fs = require('fs');
+  const dir = scenariosDirFor(stateDirAbs);
+  if (fs.existsSync(dir)) {
+    for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.yaml')).sort()) {
+      const id = file.slice(0, -'.yaml'.length);
+      if (known.has(id)) continue;
+      let parsed;
+      try { parsed = require('js-yaml').load(fs.readFileSync(require('path').join(dir, file), 'utf8')); } catch (_) { continue; }
+      const task = parsed?.userTaskId ? model.tasks.find((t) => t.id === parsed.userTaskId) : null;
+      const page = !task && parsed?.entry?.pageId ? model.pages.find((p) => p.id === parsed.entry.pageId) : null;
+      if (!task && !page) continue;
+      out.push({
+        id, variant: true,
+        subject: task ? { type: 'task', id: task.id } : { type: 'page', id: page.id },
+        stepIds: task ? (task.steps || []).map((s) => s.id) : [],
+      });
+    }
+  }
   return out;
+}
+
+/** Scenario 使用的 Fixture：先过环境策略；返回 { id, kind, revision } 或规划错误。 */
+function fixtureInputs(stateDirAbs, config, scenario) {
+  if (scenario?.data?.mode !== 'fixture') return { fixture: null, errors: [] };
+  try {
+    const fixture = readFixture(stateDirAbs, scenario.data.fixture);
+    checkFixtureAllowed({ fixture, scenario, config });
+    return { fixture: { id: fixture.id, kind: fixture.kind, revision: fixtureRevision(fixture) }, errors: [] };
+  } catch (error) {
+    return { fixture: null, errors: error.errors || [`${error.code || 'fixture-invalid'}: ${error.message}`] };
+  }
 }
 
 function taskInputs({ task, model, config, scenario }) {
@@ -146,18 +188,24 @@ function collectPlanningInputs({ projectRoot, config, base, targets, mode, cache
   const provider = config.browser.providers[config.browser.activeProvider];
   const subjects = {};
   for (const target of resolved) {
-    const key = subjectKey(target);
+    // Scenario 变体是独立的采集主体；默认 Scenario 仍按页面 / 任务本身
+    const variantEntry = target.scenarioId ? scenarios.find((item) => item.id === target.scenarioId && item.variant) : null;
+    if (variantEntry) target.variantScenarioId = variantEntry.id;
+    const key = subjectKey(variantEntry ? { ...target, scenarioId: variantEntry.id } : target);
     if (subjects[key]) continue;
-    const entry = scenarios.find((item) => item.subject.type === target.type && item.subject.id === target.id);
-    const scenarioResult = resolveScenario(stateDirAbs, entry.derived, { stepIds: entry.stepIds });
+    const entry = scenarios.find((item) => item.subject.type === target.type && item.subject.id === target.id && !item.variant);
+    const scenarioResult = variantEntry
+      ? (() => { const read = readScenario(stateDirAbs, variantEntry.id, { stepIds: variantEntry.stepIds }); return read.ok ? { ok: true, scenario: read.scenario, explicit: true } : read; })()
+      : resolveScenario(stateDirAbs, entry.derived, { stepIds: entry.stepIds });
     if (!scenarioResult.ok) throw new RuntimeError('invalid-scenario', scenarioResult.errors.join('；'));
     const scenario = scenarioResult.scenario;
+    const fixtureInfo = fixtureInputs(stateDirAbs, config, scenario);
     const entity = target.type === 'task' ? model.tasks.find((t) => t.id === target.id) : model.pages.find((p) => p.id === target.id);
     const details = target.type === 'task' ? taskInputs({ task: entity, model, config, scenario }) : pageInputs({ page: entity });
     const sourceHash = target.type === 'task'
       ? revisionOf({ scopeHash: details.scopeHash, pageRevisions: details.pageRevisions })
       : details.observationRevision;
-    const keyFields = captureKeyFields({ config, subject: target, scenario, sourceHash, captureMode: target.type === 'task' ? 'task-steps' : 'viewport', browser, platform });
+    const keyFields = captureKeyFields({ config, subject: target, scenario, sourceHash, captureMode: target.type === 'task' ? 'task-steps' : 'viewport', browser, platform, stateDirAbs });
     const keyInfo = captureKey(keyFields);
     let cache = null;
     if (cacheStore) {
@@ -171,13 +219,16 @@ function collectPlanningInputs({ projectRoot, config, base, targets, mode, cache
         : { hit: false, reason: found.reason || null, bypassed: found.bypassed || null, changedFields: found.changedFields || null };
     }
     subjects[key] = {
-      subject: { type: target.type, id: target.id },
+      subject: { type: target.type, id: target.id, ...(variantEntry ? { scenarioId: variantEntry.id } : {}) },
       scenario: { id: scenario.id, revision: scenario.revision, authProfile: scenario.authProfile, explicit: scenarioResult.explicit },
+      scenarioDefinition: scenario,
+      fixture: fixtureInfo.fixture,
       captureKey: keyInfo.key,
       captureKeyInput: keyInfo.input,
       captureUncertainty: keyInfo.uncertainty,
       cache,
       ...details,
+      planErrors: [...(details.planErrors || []), ...fixtureInfo.errors],
     };
   }
   return {
@@ -189,7 +240,7 @@ function collectPlanningInputs({ projectRoot, config, base, targets, mode, cache
     imageInputs: imageInputsOf(config),
     capabilities: capabilitiesFor(provider, config.browser.activeProvider),
     mode: { name: mode.name, browserAllowed: mode.browserAllowed },
-    targets: resolved.map((target) => ({ type: target.type, id: target.id, ref: target.ref, ...(target.scenarioId ? { scenarioId: target.scenarioId } : {}), ...(target.manualId ? { manualId: target.manualId } : {}) })),
+    targets: resolved.map((target) => ({ type: target.type, id: target.id, ref: target.ref, key: subjectKey(target.variantScenarioId ? { ...target, scenarioId: target.variantScenarioId } : target), ...(target.scenarioId ? { scenarioId: target.scenarioId } : {}), ...(target.manualId ? { manualId: target.manualId } : {}) })),
     subjects,
   };
 }
@@ -217,7 +268,7 @@ function plan(snapshot, policy) {
   const add = (node) => { nodes.push({ retry: { maxAttempts: 3, replay: 'safe' }, reuse: null, ...node }); return node.id; };
 
   snapshot.targets.forEach((target, index) => {
-    const s = snapshot.subjects[subjectKey(target)];
+    const s = snapshot.subjects[target.key || subjectKey(target)];
     const subject = s.subject;
     if (command !== 'capture' && target.scenarioId) errors.push(`scenario 目标只用于 capture：${target.ref}`);
     errors.push(...s.planErrors);
@@ -240,6 +291,20 @@ function plan(snapshot, policy) {
         summary.waitingFor.push({ node: idOf('approve', index), input: 'approval', message: s.approvalMessage });
       }
     }
+    // ---- fixture-setup（hook 类 Fixture：独立任务，写入按 Run 划分的测试数据；cleanup 在采集结束后无论成败都执行）
+    let setupId = null;
+    // 计划不随缓存命中与否改变形状（resume 时按原计划比较输入）：hook Fixture 总是先准备、后清理
+    if (s.fixture?.kind === 'hook' && !captureByKey.get(s.captureKey)) {
+      setupId = add({
+        id: idOf('fixture-setup', index), kind: 'fixture-setup', dependsOn: gateDeps.slice(),
+        inputHash: revisionOf({ fixture: s.fixture, scenario: s.scenario.id, subject }),
+        input: { subject, fixture: s.fixture, scenarioId: s.scenario.id },
+        // setup 写测试数据：中断后结果不明，不盲目重放（cleanup 按命名空间清理）
+        retry: { maxAttempts: 1, replay: 'unsafe' },
+        reason: `fixture-setup:${s.fixture.id}`,
+      });
+      summary.actions.push(`准备测试数据 ${s.fixture.id}（Scenario ${s.scenario.id}）`);
+    }
     // ---- capture（按 captureKey 去重：同一 Scenario / checkpoint / 输入的采集只做一次）
     let captureId = captureByKey.get(s.captureKey);
     let derived = null;
@@ -250,7 +315,7 @@ function plan(snapshot, policy) {
         ? `cache-hit${cache.stale ? '-stale' : ''}`
         : (cache?.bypassed ? `cache-${cache.bypassed}` : `capture-required:${cache?.reason || 'no-cache'}${cache?.changedFields?.length ? `(${cache.changedFields.join(',')})` : ''}`);
       captureId = add({
-        id: idOf('capture', index), kind: 'capture', dependsOn: gateDeps.slice(),
+        id: idOf('capture', index), kind: 'capture', dependsOn: [...gateDeps, ...(setupId ? [setupId] : [])],
         inputHash: revisionOf({ captureKey: s.captureKey, subject }),
         input: {
           subject, captureKey: s.captureKey, scenario: s.scenario,
@@ -280,6 +345,17 @@ function plan(snapshot, policy) {
         }
       }
       if (subject.type === 'task') for (const boundary of s.boundaries) summary.riskBoundaries.push({ subject: subjectKey(subject), ...boundary });
+      if (setupId) {
+        add({
+          id: idOf('fixture-cleanup', index), kind: 'fixture-cleanup', dependsOn: [], after: [setupId, captureId],
+          inputHash: revisionOf({ fixture: s.fixture, scenario: s.scenario.id, subject, cleanup: true }),
+          input: { subject, fixture: s.fixture, scenarioId: s.scenario.id },
+          // 清理按命名空间幂等：中断后可以安全重放
+          retry: { maxAttempts: 3, replay: 'safe' },
+          reason: `fixture-cleanup:${s.fixture.id}`,
+        });
+        summary.actions.push(`清理测试数据 ${s.fixture.id}`);
+      }
     }
     if (command === 'capture') return;
 
@@ -355,7 +431,7 @@ function checkDag(nodes) {
     ids.add(node.id);
   }
   for (const node of nodes) {
-    for (const dep of node.dependsOn) if (!ids.has(dep)) errors.push(`unknown-dependency: ${node.id} → ${dep}`);
+    for (const dep of [...node.dependsOn, ...(node.after || [])]) if (!ids.has(dep)) errors.push(`unknown-dependency: ${node.id} → ${dep}`);
   }
   const order = [];
   const state = new Map();
@@ -363,7 +439,7 @@ function checkDag(nodes) {
     if (state.get(node.id) === 'done') return;
     if (state.get(node.id) === 'visiting') { errors.push(`dependency-cycle: ${[...trail, node.id].join(' → ')}`); return; }
     state.set(node.id, 'visiting');
-    for (const dep of node.dependsOn) {
+    for (const dep of [...node.dependsOn, ...(node.after || [])]) {
       const target = nodes.find((n) => n.id === dep);
       if (target) visit(target, [...trail, node.id]);
     }

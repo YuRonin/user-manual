@@ -12,12 +12,13 @@
  *   storageExport    能导出 cookie / localStorage（认证刷新需要）
  *   privacyGeometry  能读取敏感元素几何（公开截图遮罩需要）
  *   popups           能跟踪同一流程里打开的弹窗 / 新标签
+ *   routeMocking     能在隔离的 Context 内用静态响应拦截请求（Fixture 模拟数据状态，P3-05）
  */
 
 const { adapterFor } = require('./index');
 const { RuntimeError } = require('../runtime/errors');
 
-const CAPABILITY_NAMES = ['capture', 'semanticActions', 'assertions', 'storageExport', 'privacyGeometry', 'popups'];
+const CAPABILITY_NAMES = ['capture', 'semanticActions', 'assertions', 'storageExport', 'privacyGeometry', 'popups', 'routeMocking'];
 
 /** 某个 provider 配置声明的能力（全部键都有布尔值）。 */
 function capabilitiesFor(providerConfig, id = providerConfig?.id || 'default') {

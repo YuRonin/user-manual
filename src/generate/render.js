@@ -23,6 +23,7 @@ const TEMPLATES = {
     notExecuted: '> 此操作未执行，指南停在提交前。',
     scopeNone: '> 验证范围：本指南的步骤均未实际执行。',
     scopePartial: (n) => `> 验证范围：只实际执行到第 ${n} 步，之后的步骤未执行。`,
+    simulated: '> 数据来源：界面状态由测试数据模拟（Fixture），未连接真实后端；以下结果只说明界面如何呈现。',
     verified: '已验证界面结果：',
     expected: '预期业务结果：',
     stepAlt: (n) => `步骤 ${n}`,
@@ -47,6 +48,7 @@ const TEMPLATES = {
     notExecuted: '> This action was not executed; the guide stops before submitting.',
     scopeNone: '> Verification scope: none of the steps in this guide were executed.',
     scopePartial: (n) => `> Verification scope: only steps up to step ${n} were executed.`,
+    simulated: '> Data source: the UI state was simulated with test fixtures, not a live backend; results below only describe how the UI presents it.',
     verified: 'Verified in the UI: ',
     expected: 'Expected result: ',
     stepAlt: (n) => `Step ${n}`,
@@ -149,6 +151,7 @@ function renderTask(pack, copy = {}) {
     blocks.push([`step.${step.id}`, L]);
   });
   const completion = [`## ${t.completion}`, ''];
+  if (pack.provenance === 'simulated') completion.push(t.simulated, '');
   if (pack.scope.firstSkipped === 0) completion.push(t.scopeNone, '');
   else if (pack.scope.firstSkipped > 0) completion.push(t.scopePartial(pack.scope.firstSkipped), '');
   for (const claim of pack.claims) completion.push(`<!-- claim:${claim.id} -->`, `${claimLabel(claim.status, t)}${claim.text}`, '');
