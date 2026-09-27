@@ -152,23 +152,29 @@ close()                                                            必须可重�
 
 ### 截图稳定性
 
-同一页面两次截图必须字节一致，否则手册每次重跑都产生无意义的 diff。做法：
+目标是**同一输入下的截图尽量稳定**，而不是保证字节一致：字体栅格化、GPU / 平台差异、动态数据都会让像素变化。
+稳定性手段：
 
 - `reducedMotion: 'reduce'` 建 context
 - 截图前先 `document.getAnimations()` 逐个 `finish()`（无限循环的 `pause()`），**再**注入
   `FREEZE_CSS` 把动画/过渡时长清零。顺序反了的话 CSS 会先把动画结束掉，
   `getAnimations()` 返回空集，计数永远是 0，等于没有可观测性。
 - `caret-color: transparent` 去掉光标闪烁，`scroll-behavior: auto` 去掉平滑滚动
+- 采集时检查几何稳定（`captureStable` 多次取几何比较，仍在变化报 `geometry-unstable`）
+
+"是否变了"不靠字节比较判断：缓存按输入 key 复用（C09），在线验证用语义摘要 + 同规格、同隐私版本的像素比较
+（`src/verify/visual-diff.js`），规格不同直接报 environment-incompatible。
 
 ### Playwright 依赖解析
 
-本机没有全局 Playwright。`loadPlaywright()` 按候选路径解析，策略沿用
-`~/.claude/skills/manual-shot/scripts/shot.js`（`~/gstack/node_modules/playwright` 是本机现成的可用副本），
-避免为这个 Skill 单独装一份浏览器内核。
+Playwright、sharp、markdown-it 都是本工具 `package.json` 里精确固定的依赖，`npm ci` 后从工具自己的
+`node_modules` 加载；浏览器用 `npx playwright install chromium` 安装。不再从个人工具目录（如 `~/gstack`）借用，
+`test/install-smoke.test.js` 在空 HOME 的临时安装里验证这一点。
 
 ## 标注
 
-`~/.claude/skills/manual-shot/scripts/annotate.py` 已经验证可用（红框 / 箭头 / ①②③ 圆圈序号 / 文字标签，中文字体走微软雅黑）。本项目选了 Node 单栈，做标注时需要把这套逻辑用 Node 重写（SVG 合成叠加即可），行为对齐那份 Python 实现。
+标注（红框 / 序号 / 文字标签）与隐私遮罩都由 `src/evidence/image-pipeline.js` 用 sharp + SVG 合成，
+从同一份原图离线派生；主题与遮罩样式变化只需重新派生，不需要重新打开浏览器（原图被 gc 回收后除外）。
 
 ## 框架支持
 
@@ -221,14 +227,27 @@ V0.2 只做 Next.js —— 先把一个框架做透，而不是每个框架都�
 登录判定刻意保守：只有「除了登录表单没别的内容」才下结论。宁可漏判
 （截到一张登录页，用户一眼看得出来），也不要误判（把正常页面挡在外面，用户还以为是权限问题）。
 
-## 尚未处理（按优先级）
+## Phase 3 之后的能力边界
 
-1. Scenario：空状态 / Loading / Error / 不同业务状态（含动态路由的真实 id 从哪来）
-2. 手册索引页（把各页 `docs/manual/<id>.md` 汇成一个目录）
-3. 批量处理（`capture --all` / `generate --all`）与并发
-4. `update`：基于 git diff 与现有 reverse index 的增量更新
-5. 移动端 profile
-6. 其它前端框架的扫描
-7. 数据库 Fixture、多角色复杂状态
-8. 操作系统凭据库加密认证缓存
-9. CI 自动更新
+已经提供：
+
+| 能力 | 范围与限制 |
+|---|---|
+| `update` 增量更新 | Git（已提交 + staged + unstaged + untracked）或发布时的源码图快照；旧新依赖图并集；全局配置 / 无法归属的源码保守扩大；无基线时全量重建 |
+| 人工编辑保护 | 块标记 + 块外人工内容；三方合并，冲突写提案并等待输入；已发布文档被删除不静默重建 |
+| `verify --artifacts` | 离线：文档与发布记录、图片 hash、隐私门槛、结构事实；不代表线上行为 |
+| `verify --live` | 在线：真实导航回放页面身份、安全步骤与完成声明；写 / 破坏性步骤不执行；页面手册另做语义与视觉漂移比较 |
+| Scenario 变体与 Fixture | 显式 Scenario（空状态 / 错误态 / 其他角色）；mock（请求拦截，simulated）与 hook（测试环境 setup / cleanup）两类登记 Fixture；生产与未登记环境拒绝 |
+| 认证 | 命名档案、CAS 刷新、cookie / localStorage；匿名必须显式声明 |
+| 隐私检测 | 声明的 DOM 候选（输入框、`data-redact`、文本中的手机号 / 邮箱 / 证件号等）；无法定位的敏感内容阻止公开发布 |
+| 模板语言 | zh-CN、en-US |
+| 保留策略 | `manual gc`：dry-run / apply，引用图保护发布记录与被引用证据 |
+
+尚未提供（不要当作已支持）：
+
+1. 非 Next.js 框架的自动扫描（其它框架只给出"暂不支持"提示）
+2. 跨进程常驻 daemon / 受控并发执行（Runtime 是单进程串行，一个 Run 内复用 Browser）
+3. 多个 Scenario 截图同时渲染进同一页面手册（变体证据目前只作为独立 Capture）
+4. 任务手册的视觉漂移比较（任务只做行为断言回放）
+5. 手册索引页、移动端 profile、操作系统凭据库加密认证缓存
+6. 业务站点部署或 PR 自动合并（CI 只测试本工具）

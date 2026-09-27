@@ -90,3 +90,14 @@ node <skill>/bin/manual.js approve-tasks \
 ```
 
 所有决策先整体校验再落盘。只有 `candidate` 可以批准或拒绝；批准后状态为 `approved`，拒绝会删除尚未进入后续阶段的候选文件。不要手工编辑任务 YAML 来绕过审批。
+
+## 批准之后：生成、维护与验证
+
+- 生成：`manual generate task:<id> --plan --json` 先展示动作、风险边界与需要浏览器的场景，用户确认后去掉 `--plan` 执行。
+- 维护：代码变化后用 `manual update --plan` 查看哪些任务指南受影响（`reasonPaths` 给出原因链），确认后 `manual update`。
+  指南里块外的人工补充会被保留；与生成内容冲突时停在退出码 4，按 `proposed.md` 与用户确认处理。
+- 验证：`manual verify task:<id>` 是离线产物检查；`manual verify task:<id> --live` 真实回放安全步骤与完成声明，
+  写 / 破坏性步骤不执行（对应声明 `not_run`），报告验证覆盖与停止边界。不要把 `not_run` 说成"已验证"。
+- 不同数据状态或角色：在 `.manual/scenarios/<id>.yaml` 声明 Scenario（`authProfile`、`data.mode: fixture` 引用
+  `.manual/fixtures/` 中登记的 Fixture），用 `manual capture scenario:<id>` 采集；mock Fixture 的结果是 `simulated`，
+  只说明界面如何呈现，完成声明不能写成"已验证"。生产环境与未登记环境一律拒绝执行 Fixture。

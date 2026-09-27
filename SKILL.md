@@ -16,7 +16,7 @@ Skill 自身代码与项目数据分离：**Skill 只提供能力，项目状态
 | `manual init` | ✅ V0.1 | 收集配置，生成 `.manual/config.yaml` |
 | `manual inspect` | ✅ V0.2+ | 扫描路由与静态源码依赖，建立页面模型和正逆索引 |
 | `manual describe` | ✅ V0.2 | 把页面的源码分析结果写回模型 |
-| `manual capture` | ✅ V0.3 | 用真实浏览器采集页面或任务证据（`page:<id>` / `task:<id>`），只推进到证据提交 |
+| `manual capture` | ✅ V0.3 | 用真实浏览器采集页面或任务证据（`page:<id>` / `task:<id>` / `scenario:<id>`），只推进到证据提交 |
 | `manual auth` | ✅ | 登录并管理可跨 worktree 复用的认证档案 |
 | `manual generate` | ✅ Runtime | 规划并执行：按需采集（复用有效缓存）→ 草稿 → 文案 → 发布门槛 → 发布；`--plan` 只预览 |
 | `manual status` / `resume` / `run-submit` | ✅ Runtime | 查看 Run、从任务快照继续、提交模型文案响应 |
@@ -25,11 +25,15 @@ Skill 自身代码与项目数据分离：**Skill 只提供能力，项目状态
 | `manual discover-tasks` | ✅ Task-first 基础 | 基于页面证据准备候选发现工作清单并写入候选任务 |
 | `manual approve-tasks` | ✅ Task-first 基础 | 由人工批准、调整或拒绝候选任务 |
 | `manual plan-capture` / `capture-task` | ✅ 兼容 | 任务截图计划 / 安全交互采集（与 `capture task:<id>` 同一用例） |
-| `manual generate-task` / `verify` | ✅ 兼容 / 验证 | 分步生成任务指南（`--copy` / `--finalize`）；验证已发布文档与证据 |
+| `manual update` | ✅ Phase 3 | 按源码变化只更新受影响的已发布手册；`--plan` 只读预览影响与原因 |
+| `manual verify` | ✅ Phase 3 | `--artifacts`（默认，离线）/ `--live`（真实导航回放 + 漂移报告），`--all` 验证全部已发布手册 |
+| `manual gc` | ✅ Phase 3 | 按保留策略回收未引用的临时文件、原图与旧 Run（默认只列出） |
+| `manual generate-task` | ✅ 兼容 | 分步生成任务指南（`--copy` / `--finalize`） |
 | `manual migrate-artifacts` | ✅ 兼容迁移 | 检查旧页面原图，显式复制到非发布产物目录且不删除源文件 |
-| `manual update` | ⏳ | 增量更新与过期处理 |
+| `manual doctor` | ✅ | 只读检查 Node、依赖、Chromium、中文字体、配置与认证缓存 |
 
-未实现的命令被调用时 CLI 会明确提示，不会静默失败。
+兼容入口（`plan-capture`、`capture-task`、`generate-task`、`generate --draft/--finalize`）保留至少一个迁移窗口，
+新流程用 `generate` / `update` / `capture scenario:<id>`；迁移说明见 docs/MIGRATION.md，运行时说明见 docs/RUNTIME.md。
 
 **任何命令都不改动业务项目代码**，只写 `.manual/` 与配置里指定的文档目录。
 
@@ -71,11 +75,32 @@ node <skill>/bin/manual.js generate <task:<id>|page:<id>> --project-root <项目
 |---|---|---|
 | 0 | 完成 | 报告文档路径；`cache` 里的复用项说明“使用了 observedAt 时刻的历史观察，未在线确认” |
 | 3 | 等待输入 | 看 `waiting[].code`：`model-input-required` → 读请求文件（只读其中列出的文件），按 `references/manual-writing-style.md` 第七节写响应 → `manual run-submit <runId> --request <id> --input <响应.json>` → `manual resume <runId>`；`approval-required` / `scope-changed` → 把任务展示给用户，得到明确确认后 `approve-tasks` 再 `resume`；`auth-*` → 请用户登录后 `resume`；`review-required` → 展示需确认的数字 / 承诺，用户确认后带 `--accept-review` 重新运行 |
-| 4 | 漂移或冲突 | `run-input-changed` → `manual resume <runId> --replan`；`publication-conflict` → 把人工修改展示给用户，由用户决定是否 `--force` |
+| 4 | 漂移或冲突 | `run-input-changed` → `manual resume <runId> --replan`；`merge-conflict` → 把 `proposed.md` 与逐块对照展示给用户：采用提案（合入正式文档）或把要保留的块头改为 `owner=human`，然后 `resume`；只有用户明确要求才 `--force`；`document-missing` → 问用户是重新生成（`--force`）还是下线（标 retired）；`verify` 的 failed / drift → 报告分类与差异，不要自动重新生成或接受新基线 |
 | 1 | 失败 | `manual status <runId> --json` 报告失败任务的 code 与提示；Runtime 已按策略重试过，不要自行循环重跑 |
 | 2 | 参数错误 / 目标歧义 | 把 `candidates` 给用户选，用 `task:` / `page:` 前缀重新运行 |
 
 常用选项：`--plan`（只预览，不执行）、`--copy <文案.json>`（已有文案块）、`--copy-default`（不改写文案）、`--offline`（只用历史证据）、`--refresh`（强制重新采集，仅在用户要求时使用）。
+
+`fixture-cleanup-required`（退出码 3）表示测试数据清理失败：告诉用户数据仍在测试环境的哪个命名空间，确认环境可用后 `resume`。
+
+### 代码变了：`update`
+
+```
+node <skill>/bin/manual.js update --plan --project-root <项目根> --json   # 先给用户看影响范围与原因链
+node <skill>/bin/manual.js update --project-root <项目根> --json          # 确认后执行
+```
+
+- `sections[].reasonPaths` 是"哪个文件 → 哪个页面 → 哪个 Scenario → 哪份手册"的原因链，按它向用户解释；`confidence=conservative` 表示范围被保守扩大（全局配置、未知依赖），说明原因即可，不要自行缩小范围。
+- `fullRebuild` 表示没有可比较的基线（旧发布记录或非 Git 且无快照）：这些手册会整体重建。
+- `retirement` 是页面被删除后的下线建议：只转告用户，不要删除文档或图片。
+- 源码变化会让受影响页面的语义分析需要复核（`model-input-required` 的 analyze 请求）：按请求读源码、提交分析后 `resume`。
+- 远端 build / 数据 / 权限变化不在源码影响里：需要 `verify --live`。
+
+### 手册还对吗：`verify`
+
+`manual verify <目标>` 默认只做离线产物验证（`onlineChecked=false`）。用户想知道线上是否变了时用 `--live`：
+结果 `failed`（行为与手册不一致）/ `drift`（页面内容与发布时不同）/ `inconclusive`（网络或环境问题，不能下结论）。
+逐条转述 `failures[].category` 与 `claims[]`；写操作步骤不会执行，对应声明是 `not_run`，要如实说明验证覆盖范围。
 
 ---
 

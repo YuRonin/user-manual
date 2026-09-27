@@ -185,3 +185,12 @@ manual resume <runId>
 - 文案只能改说法：否定或改写受保护的动作、UI 名称会被直接拒绝；新出现的数字、单位或业务承诺需要人工确认（review-required）。
 - 页面语义分析（`kind: analyze`）的响应是 `{ "output": { "title": "…", "purpose": "…", "detectedActions": ["…"] } }`，只能填这三个字段；结果标记为模型推断，不等于浏览器验证。
 - 同一份响应重复提交是幂等的；请求与响应可能含业务文案，保存在本地 `runs/` 下，不入库。
+
+### 块标记与人工补充
+
+正式文档中的 `<!-- manual:block id=… -->` … `<!-- /manual:block -->` 由程序生成，用来在更新时定位生成内容：
+
+- 文案块（`intro`、`step.<id>`）里**不要**写 HTML 注释、标题、图片或列表——`validateCopy` 会拒绝（`structure-in-copy`）。
+- 需要长期保留的人工说明写在块**之外**（两个块之间），`generate` / `update` 会原样保留；
+  想接管某个生成块时把块头改为 `<!-- manual:block id=… owner=human -->`，之后生成器不再覆盖它。
+- 数据来自 Fixture 模拟时，文档会写明"数据来源：界面状态由测试数据模拟"，改写时不能删掉或弱化这句说明。

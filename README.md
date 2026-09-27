@@ -21,9 +21,13 @@
 | V0.2 | `inspect` 扫描项目、建立页面模型；`describe` 写回源码分析 | ✅ |
 | V0.3 | `capture` 真实浏览器截图 | ✅ |
 | V0.4 | `generate` 生成 Markdown 手册（事实草稿 → 中文自然化 → 事实校验） | ✅ |
-| V0.5 | Scenario：空状态 / Loading / Error / 不同业务状态 | ⏳ |
-| V0.6 | `update` 基于 git diff 的增量更新 | ⏳ |
-| V0.7 | `verify` 校验手册是否过期 | ⏳ |
+| V0.5 | Scenario 变体：空状态 / Loading / Error / 不同角色；登记的 mock / hook Fixture | ✅ |
+| V0.6 | `update` 基于源码变化（Git 或源码快照）的增量更新，人工编辑三方合并保护 | ✅ |
+| V0.7 | `verify --artifacts` / `--live`：离线产物检查与在线回放、语义 / 视觉漂移报告 | ✅ |
+| V0.8 | `gc` 保留策略；Windows / Linux CI、干净安装冒烟与性能验收 | ✅ |
+
+能力边界与尚未支持的扩展见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#phase-3-之后的能力边界)；
+运行时（Run / 等待输入 / 恢复 / 缓存）见 [docs/RUNTIME.md](docs/RUNTIME.md)，旧项目迁移见 [docs/MIGRATION.md](docs/MIGRATION.md)。
 
 ## 安装
 
@@ -60,7 +64,26 @@ node bin/manual.js resume <runId>                # → docs/manual/chat.md
 
 任务型指南（“怎样完成某件事”）：`discover-tasks` 提出候选 → 人工 `approve-tasks` 确认 → `generate task:<id>`。写操作停在动作前，删除类操作不执行。
 
-退出码：0 成功 / `--plan`；1 失败；2 参数错误或目标歧义；3 等待输入（登录、审批、文案、人工确认）；4 检测到漂移或冲突（证据过期、输入变化、人工修改）。
+持续维护：
+
+```bash
+# 代码改了：只更新受影响的已发布手册（先看影响与原因链，再执行）
+node bin/manual.js update --plan
+node bin/manual.js update --copy-default
+
+# 手册还对吗：离线核对产物；在线回放页面与任务（源码没变、线上变了也能发现）
+node bin/manual.js verify --all
+node bin/manual.js verify --all --live
+
+# 回收过期的临时文件与原图（默认只列出）
+node bin/manual.js gc
+node bin/manual.js gc --apply --expect <planHash>
+```
+
+正式文档里生成的内容由 `<!-- manual:block … -->` 标记分段：块外可以自由补充说明，`update` / `generate` 会保留；
+同一块被人和生成器同时改动时停下来（退出码 4），给出提案与逐块对照，不会静默覆盖。
+
+退出码：0 成功 / `--plan`；1 失败或无法下结论；2 参数错误或目标歧义；3 等待输入（登录、审批、文案、人工确认、测试数据清理）；4 检测到漂移或冲突（证据过期、输入变化、人工修改冲突、在线验证失败或内容漂移）。
 
 高级与兼容命令：
 
@@ -70,10 +93,12 @@ node bin/manual.js resume <runId>                # → docs/manual/chat.md
 | `resume <runId> [--replan]` | 从任务快照继续；输入变了用 `--replan` 创建新 Run |
 | `generate <目标> --offline / --refresh / --no-cache` | 只用历史证据 / 强制重新采集 / 不读写缓存 |
 | `generate <目标> --copy <文案.json> / --copy-default` | 直接提供文案块 / 使用默认文案 |
-| `capture <page-id|task:<id>>` | 只采集证据，不生成文档 |
+| `capture <page-id|task:<id>|scenario:<id>>` | 只采集证据，不生成文档；`scenario:` 采集空状态 / 错误态 / 其他角色 / Fixture 数据 |
 | `generate <page-id> --draft` / `--finalize <文件>` | 兼容的页面三段式（草稿 → 润色 → 校验定稿） |
 | `plan-capture` / `capture-task` / `generate-task` | 兼容的任务分步命令 |
-| `verify <task-id>` | 复核已发布任务文档与证据 |
+| `verify <目标> [--live]` / `verify --all` | 离线产物验证（默认）或在线回放与漂移报告；每次写不可变验证报告 |
+| `update [--plan] [--base <提交>]` | 按源码变化增量更新已发布手册 |
+| `gc [--apply]` | 按保留策略回收未引用的临时文件、原图与旧 Run |
 | `publication status / repair` | 查看与恢复中断的发布 |
 | `migrate --dry-run / --apply` | 旧项目迁移 |
 

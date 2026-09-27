@@ -25,6 +25,7 @@ const COMMANDS = [
   { name: 'publication', module: 'publication', summary: '查看与恢复中断的发布事务（status / repair）' },
   { name: 'migrate', module: 'migrate', summary: '显式迁移旧项目到 v2 模型（--dry-run / --apply / --rollback）' },
   { name: 'migrate-artifacts', module: 'migrate-artifacts', summary: '检查旧页面原图并安全复制到非发布产物目录' },
+  { name: 'gc', module: 'gc', summary: '按保留策略回收未引用的临时文件、原图与旧 Run（默认只列出，--apply 执行）' },
   { name: 'doctor', module: 'doctor', summary: '只读检查 Node、依赖、浏览器、配置与认证缓存环境' },
 ];
 

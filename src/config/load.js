@@ -144,6 +144,19 @@ function loadConfig(projectRoot) {
     return { ok: false, errors: ['verify.visual.dynamicRegions 需要是 [{ id, selector }] 数组（selector 必填）。'] };
   }
 
+  // 产物保留（P3-08）：天数为正整数；固定的 Capture 为 UUID 列表
+  if (raw.retention !== undefined) {
+    const { DEFAULT_RETENTION } = require('../store/retention');
+    config.retention = { ...DEFAULT_RETENTION, ...raw.retention };
+    for (const field of ['stagingDays', 'diagnosticsDays', 'runLogDays', 'rawDays', 'unreferencedCaptureDays']) {
+      if (!Number.isInteger(config.retention[field]) || config.retention[field] <= 0) return { ok: false, errors: [`retention.${field} 需要是正整数，收到: ${config.retention[field]}`] };
+    }
+    const { isUuid } = require('../model/ids');
+    if (!Array.isArray(config.retention.pinnedCaptures) || config.retention.pinnedCaptures.some((id) => !isUuid(id))) {
+      return { ok: false, errors: ['retention.pinnedCaptures 需要是 Capture id（UUID）数组。'] };
+    }
+  }
+
   config.privacy.rules = {
     redact: [],
     preserve: [],

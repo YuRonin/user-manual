@@ -189,4 +189,4 @@ async function run(argv) {
   return code || (errors.length ? exitCodeFor(errors) : 0);
 }
 
-module.exports = { run, HELP, prepareVerify };
+module.exports = { run, HELP, KNOWN_FLAGS, prepareVerify };

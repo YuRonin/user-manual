@@ -188,11 +188,11 @@
   - [x] 干净安装 smoke 和私有诊断 artifact 策略。
   - [x] 冷/热/局部更新调用数与耗时报表。
   - [ ] 全量回归在矩阵环境通过。（待推送后由 GitHub Actions 运行；本地 macOS 已全部通过）
-- [ ] **P3-08 保留策略和文档收尾**（依赖 P3-01～07）
-  - [ ] 引用图 roots、gc dry-run/apply 再校验。
-  - [ ] 已引用资源保留、raw 清理后重采集说明。
-  - [ ] 兼容退出、迁移/Runtime/Skill/README 对齐。
-  - [ ] 全部最终场景验收和未实现项说明。
+- [x] **P3-08 保留策略和文档收尾**（依赖 P3-01～07）
+  - [x] 引用图 roots、gc dry-run/apply 再校验。
+  - [x] 已引用资源保留、raw 清理后重采集说明。
+  - [x] 兼容退出、迁移/Runtime/Skill/README 对齐。
+  - [x] 全部最终场景验收和未实现项说明。（最终场景由 Gate 3 验收；未实现项见 docs/ARCHITECTURE.md"Phase 3 之后的能力边界"）
 - [ ] **Gate 3：定向 update、在线漂移检测、编辑保护、跨平台 CI 和保留策略全部通过。**
 
 ## 建议的首批三个交付包
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 全部完成，Gate 2 已通过（2026-09-28）。Phase 3 进行中，共 30 / 32（P3-07 除矩阵实际运行外已完成）。下一项：P3-08。
+- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 全部完成，Gate 2 已通过（2026-09-28）。Phase 3 进行中，共 31 / 32（P3-07 除矩阵实际运行外已完成）。下一项：Gate 3。
 
 ### 执行记录
 
@@ -891,4 +891,20 @@ Task ID: P3-07
 产物 / commit 引用: 见本任务提交
 剩余风险: 矩阵首次运行可能暴露平台差异（路径、字体、Windows 文件占用）；性能耗时受 runner 负载影响，仅作报告。
 下一项可执行任务: P3-08（P3-07 的矩阵验收在推送后补记）
+```
+
+```text
+Task ID: P3-08
+状态: completed
+开始时基线 commit / dirty files: 49526b9（P3-07）；工作区干净
+实际修改文件: src/store/retention.js、src/commands/gc.js、test/retention.test.js、test/docs-consistency.test.js、docs/RUNTIME.md、docs/MIGRATION.md（新）；src/cli/commands.js（gc；别名由注册表自动生成）；src/config/load.js（retention 校验）；src/commands/verify.js（导出 KNOWN_FLAGS）；SKILL.md（命令表、update / verify / 冲突与清理的处理方式、兼容入口）；README.md（版本表、持续维护用法、块标记说明、命令表）；docs/ARCHITECTURE.md（截图稳定性不再承诺字节一致、依赖解析改为自带 node_modules、标注由 sharp 实现、Phase 3 能力边界与未实现项）；references/task-workflow.md（批准之后的生成 / 维护 / 验证 / Scenario）；references/manual-writing-style.md（块标记与人工补充）；test/run.js
+契约变更: 新增 config.retention = { stagingDays, diagnosticsDays, runLogDays, rawDays, unreferencedCaptureDays, pinnedCaptures }；发布记录元数据永久保留（规范中的"保留的历史 releases"取为全部保留）。规范中 bin/manual.js、src/compat/aliases.js、src/config/schema.js 无需改动（命令与别名来自注册表；retention 默认值在 load 时补充）。
+执行命令与结果:
+  - node test/retention.test.js：7 passed（真实 Chromium 生成证据后以"31 天后"计算：现在无过期对象且 CLI dry-run 不写文件；过期后列出 staging / 诊断 / 已结束 Run / 未引用 Capture / 原图，发布记录、被发布引用的发布图与 Capture、等待中的 Run 保留；计划不一致时 apply 拒绝且不删除；apply 只删计划对象，指向外部的链接只删链接、外部文件保留，verify page:chat 仍通过，重复执行无新对象；原图回收后 generate 计划为 capture-required；允许根之外的路径拒绝）。
+  - node test/compat-aliases.test.js：2 passed；node test/runtime-cli.test.js：6 passed；node test/docs-consistency.test.js：4 passed（注册表每个命令出现在 SKILL / README 且 --help 可用；文档中的 update / verify / gc 参数均有效；无"计划中"与"字节一致"等过时说法；RUNTIME.md 覆盖完整流程）。
+  - npm test：70 个测试文件全部通过（macOS / Node 26.4.0）。
+失败或跳过的验收及原因: 未删除任何兼容实现：兼容入口仍被调用，按 MIGRATION.md 保留至少到下一个主版本。
+产物 / commit 引用: 见本任务提交
+剩余风险: 缓存条目引用的 Capture 被回收后由查找时的 artifact-missing 处理（重新采集），gc 不单独清理缓存条目。
+下一项可执行任务: Gate 3 集成验收
 ```

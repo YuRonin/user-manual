@@ -81,6 +81,8 @@ const FILES = [
   'ci-workflow.test.js',
   'install-smoke.test.js',
   'performance.test.js',
+  'retention.test.js',
+  'docs-consistency.test.js',
 ];
 
 // 启动真实 Chromium 或测试服务器的文件；其余为 unit。新增浏览器测试时加到这里（ci-workflow.test 会核对）。
