@@ -62,7 +62,8 @@ const TEMPLATES = {
   },
 };
 
-const TEMPLATE_VERSION = 'render-1';
+// render-2：正文按稳定块 ID 分段（<!-- manual:block id=… --> … <!-- /manual:block -->），供人工编辑保护的三方合并定位（P3-06）。
+const TEMPLATE_VERSION = 'render-2';
 
 class TemplateError extends Error {
   constructor(language) {
@@ -109,56 +110,66 @@ function blockText(pack, copy, blockId) {
   return pack.blocks[blockId]?.default ?? '';
 }
 
+/*
+ * 生成块：每个块由成对的注释包围，块外的内容属于人工（ownership=human），生成器从不覆盖。
+ * 块 ID 在同一文档内唯一且稳定（与 section / step / claim 身份绑定），不随顺序或文字变化。
+ */
+function blockOpen(id) {
+  return `<!-- manual:block id=${id} -->`;
+}
+
+const BLOCK_CLOSE = '<!-- /manual:block -->';
+
+/** 把 [id, lines] 列表拼成文档；块之间以一个空行分隔。 */
+function assemble(blocks, prefix = []) {
+  const parts = blocks.filter(([, lines]) => lines.length).map(([id, lines]) => {
+    while (lines.length && lines[lines.length - 1] === '') lines.pop();
+    return [blockOpen(id), ...lines, BLOCK_CLOSE].join('\n');
+  });
+  return [...prefix, parts.join('\n\n')].filter((x) => x !== undefined).join('\n') + '\n';
+}
+
 /** 任务指南。copy 只能填充 pack.blocks 中声明的块，调用前应先 validateCopy。 */
 function renderTask(pack, copy = {}) {
   const t = templateFor(pack.language);
   const hrefOf = new Map(pack.artifacts.map((a) => [a.id, a.markdownHref]));
-  const L = [`# ${pack.title}`, ''];
+  const blocks = [];
+  const overview = [`# ${pack.title}`];
   const intro = blockText(pack, copy, 'intro');
-  if (intro) L.push(intro, '');
-  L.push(`## ${t.before}`, '');
-  for (const item of pack.preconditions) L.push(`- ${item}`);
-  L.push('', `## ${t.steps}`, '');
+  if (intro) overview.push('', intro);
+  blocks.push(['overview', overview]);
+  blocks.push(['before', [`## ${t.before}`, '', ...pack.preconditions.map((item) => `- ${item}`)]]);
+  blocks.push(['steps', [`## ${t.steps}`]]);
   pack.steps.forEach((step, index) => {
-    L.push(`<!-- step:${step.id} -->`, `${index + 1}. ${step.sentence}`);
+    const L = [`<!-- step:${step.id} -->`, `${index + 1}. ${step.sentence}`];
     const note = blockText(pack, copy, `step.${step.id}`);
     if (note && note !== step.sentence) L.push('', `   ${note}`);
     for (const ref of step.artifactRefs) L.push('', `   ![${t.stepAlt(index + 1)}](${hrefOf.get(ref)})`);
     if (step.executed === false) L.push('', `   ${t.notExecuted}`);
-    L.push('');
+    blocks.push([`step.${step.id}`, L]);
   });
-  L.push(`## ${t.completion}`, '');
-  if (pack.scope.firstSkipped === 0) L.push(t.scopeNone, '');
-  else if (pack.scope.firstSkipped > 0) L.push(t.scopePartial(pack.scope.firstSkipped), '');
-  for (const claim of pack.claims) L.push(`<!-- claim:${claim.id} -->`, `${claimLabel(claim.status, t)}${claim.text}`, '');
-  if (pack.branches.length) {
-    L.push(`## ${t.branches}`, '');
-    for (const b of pack.branches) L.push(`- **${b.condition}**：${b.effect}`);
-    L.push('');
-  }
-  if (pack.relatedTasks.length) {
-    L.push(`## ${t.related}`, '');
-    for (const id of pack.relatedTasks) L.push(`- ${id}`);
-    L.push('');
-  }
-  return L.join('\n');
+  const completion = [`## ${t.completion}`, ''];
+  if (pack.scope.firstSkipped === 0) completion.push(t.scopeNone, '');
+  else if (pack.scope.firstSkipped > 0) completion.push(t.scopePartial(pack.scope.firstSkipped), '');
+  for (const claim of pack.claims) completion.push(`<!-- claim:${claim.id} -->`, `${claimLabel(claim.status, t)}${claim.text}`, '');
+  blocks.push(['completion', completion]);
+  if (pack.branches.length) blocks.push(['branches', [`## ${t.branches}`, '', ...pack.branches.map((b) => `- **${b.condition}**：${b.effect}`)]]);
+  if (pack.relatedTasks.length) blocks.push(['related', [`## ${t.related}`, '', ...pack.relatedTasks.map((id) => `- ${id}`)]]);
+  return assemble(blocks);
 }
 
 /** 页面手册。detectedActions 没有逐项浏览器证据，一律带"推断"标题；截图不能把它们提升为已验证。 */
 function renderPage(pack, copy = {}, { draft = false } = {}) {
   const t = templateFor(pack.language);
-  // 草稿头部的来源注释只用于人工核对，不进入正式文档
-  const L = draft ? [...pack.headerComments, '', `# ${pack.title}`, ''] : [`# ${pack.title}`, ''];
+  const overview = [`# ${pack.title}`];
   const intro = blockText(pack, copy, 'intro');
-  if (intro) L.push(intro, '');
-  L.push(t.route(pack.route), '');
-  for (const artifact of pack.artifacts) L.push(`![${pack.title}](${artifact.markdownHref})`, '');
-  if (pack.actions.length) {
-    L.push(`## ${t.actionsInferred}`, '');
-    pack.actions.forEach((action, i) => L.push(`${i + 1}. ${action.text}`));
-    L.push('');
-  }
-  return L.join('\n');
+  if (intro) overview.push('', intro);
+  const location = [t.route(pack.route)];
+  for (const artifact of pack.artifacts) location.push('', `![${pack.title}](${artifact.markdownHref})`);
+  const blocks = [['overview', overview], ['location', location]];
+  if (pack.actions.length) blocks.push(['actions', [`## ${t.actionsInferred}`, '', ...pack.actions.map((action, i) => `${i + 1}. ${action.text}`)]]);
+  // 草稿头部的来源注释只用于人工核对，不进入正式文档
+  return assemble(blocks, draft ? [...pack.headerComments, ''] : []);
 }
 
-module.exports = { TEMPLATES, TEMPLATE_VERSION, TemplateError, templateFor, templateRevision, actionSentence, visibleTargetName, claimLabel, renderTask, renderPage };
+module.exports = { BLOCK_CLOSE, blockOpen, TEMPLATES, TEMPLATE_VERSION, TemplateError, templateFor, templateRevision, actionSentence, visibleTargetName, claimLabel, renderTask, renderPage };

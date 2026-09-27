@@ -565,22 +565,37 @@ async function main() {
     }
   });
 
-  await test('正式文档已存在时不覆盖，--force 才覆盖', async () => {
+  await test('正式文档存在：未发布过的不覆盖；已发布且未手改可重复定稿；手改冲突需 --force', async () => {
     const root = await prepareProject(server.baseUrl);
     try {
       await run('generate', root, ['chat', '--no-screenshot']);
       const draft = readDraft(root, 'chat');
       const p = writePolished(root, 'chat', draft);
+      const docFile = path.join(root, 'docs', 'manual', 'chat.md');
 
+      // 不属于任何发布记录的同名文档：不覆盖
+      fs.mkdirSync(path.dirname(docFile), { recursive: true });
+      fs.writeFileSync(docFile, '# 别人写的文档\n');
       let r = await run('generate', root, ['chat', '--finalize', p]);
-      assert.strictEqual(r.status, 0, r.stderr);
-
-      r = await run('generate', root, ['chat', '--finalize', p]);
       assert.strictEqual(r.status, 1);
       assert.match(r.stderr, /已存在/);
-
       r = await run('generate', root, ['chat', '--finalize', p, '--force']);
       assert.strictEqual(r.status, 0, r.stderr);
+
+      // 已发布且没有手改：重复定稿是幂等的
+      r = await run('generate', root, ['chat', '--finalize', p]);
+      assert.strictEqual(r.status, 0, r.stderr);
+
+      // 手改了整篇（润色稿没有块标记）且新定稿内容不同：冲突，等待处理；--force 才覆盖
+      fs.writeFileSync(docFile, fs.readFileSync(docFile, 'utf8') + '\n手工补充。\n');
+      fs.writeFileSync(p, fs.readFileSync(p, 'utf8').replace(/^# .*$/m, (h) => `${h}`) + '\n新的润色段落。\n');
+      r = await run('generate', root, ['chat', '--finalize', p]);
+      assert.strictEqual(r.status, 4, r.stderr);
+      assert.match(r.stderr, /merge-conflict/);
+      assert.match(fs.readFileSync(docFile, 'utf8'), /手工补充/, '冲突时正式文档不变');
+      r = await run('generate', root, ['chat', '--finalize', p, '--force']);
+      assert.strictEqual(r.status, 0, r.stderr);
+      assert.doesNotMatch(fs.readFileSync(docFile, 'utf8'), /手工补充/);
     } finally {
       fx.cleanup(root);
     }

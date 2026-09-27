@@ -158,11 +158,11 @@
   - [x] 旧新图 union 与全局依赖保守扩散。
   - [x] Page→Scenario→Section 可解释影响路径。
   - [x] 非 Git/无基线/不完整依赖明确回退。
-- [ ] **P3-06 ManualSection / 编辑保护**（依赖 Gate 2）
-  - [ ] 稳定 section/block ID 与 ownership。
-  - [ ] 旧/当前/新三方比较和自由编辑保护。
-  - [ ] 冲突保存 proposed diff、等待输入。
-  - [ ] 文档移动/手工删除不静默覆盖。
+- [x] **P3-06 ManualSection / 编辑保护**（依赖 Gate 2）
+  - [x] 稳定 section/block ID 与 ownership。
+  - [x] 旧/当前/新三方比较和自由编辑保护。
+  - [x] 冲突保存 proposed diff、等待输入。
+  - [x] 文档移动/手工删除不静默覆盖。
 - [ ] **P3-02 update CLI**（依赖 P3-01/06）
   - [ ] --plan 只读，执行复用 Runtime。
   - [ ] 仅更新受影响 section/文件，失败保留旧版。
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 全部完成，Gate 2 已通过（2026-09-28）。Phase 3 进行中，共 25 / 32。下一项：P3-06。
+- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 全部完成，Gate 2 已通过（2026-09-28）。Phase 3 进行中，共 26 / 32。下一项：P3-02。
 
 ### 执行记录
 
@@ -793,4 +793,20 @@ Task ID: P3-01
 产物 / commit 引用: 见本任务提交
 剩余风险: 显式 --base 没有与该提交同时刻的源码图，删除 / rename 的归属按最近一次 inspect 的图 ∪ 当前图判断，不做内容二次确认（宁可多报）；Git 调用受 .gitignore 影响，被忽略但被页面依赖的文件只能靠图快照内容比较发现。
 下一项可执行任务: P3-06
+```
+
+```text
+Task ID: P3-06
+状态: completed
+开始时基线 commit / dirty files: 2fd2669（P3-01）；工作区干净
+实际修改文件: src/generate/merge.js、src/generate/manual-model.js、src/generate/manual-store.js、test/manual-merge.test.js（新）；src/generate/render.js（按稳定块 ID 输出 <!-- manual:block id=… --> … <!-- /manual:block -->，TEMPLATE_VERSION → render-2）；src/generate/task-usecase.js、page-usecase.js（定稿前三方合并，prepare 接收 force / runId）；src/publication/publisher.js（generatedBlob、acceptedEdits、sections；合并时看到的当前文档 hash 不再判为冲突）；src/model/schema.js（校验新字段）；src/runtime/handlers.js（去掉"文档未变时自动 --force"，改由合并保护）；src/runtime/errors.js、src/cli/output.js（merge-conflict / document-missing → 等待输入、退出码 4）；src/commands/generate-task.js（--force 透传到 prepare）；test/fact-pack.test.js、test/generate.test.js（按新语义更新断言）、test/run.js
+契约变更: C10 发布记录新增 generatedBlob（纯生成正文 .manual/releases/blobs/<sha256>.md）、acceptedEdits、sections；C11 的"事实块 / 自由说明块"落实为块标记：块外内容 = human，owner=human 的块由人接管。模板版本升级使 P3-06 之前的草稿判为 draft-stale（需重新生成草稿）。
+执行命令与结果:
+  - node test/manual-merge.test.js：14 passed（块解析忽略代码块中的同形标记；无手改 → 新生成；生成未变 → 保留原文字节；不重叠修改合并；同块冲突提案；owner=human 接管；删块 / 删改过的块冲突；块外文字两边都改冲突；无基准整篇冲突；ManualSection 页面 / Capture / claim 引用，同一页面参与多个章节；CLI：blob 与章节落盘、重复定稿字节不变、人工说明保留且旧发布记录不改写、冲突退出码 4 且正式文档不变并写提案、采用提案后可继续、--force 覆盖、文档被删 document-missing、旧发布无 blob 的两种情况）。
+  - node test/publication-recovery.test.js：11 passed；node test/publication-paths.test.js：7 passed（1 skipped，平台相关）。
+  - npm test：60 个测试文件全部通过（macOS / Node 26.4.0）。
+失败或跳过的验收及原因: 规范中"冲突后 run-submit 提交选择"未新增 merge 请求类型：冲突解决通过编辑正式文档（采用提案 / owner=human）后 resume，或 --force；resume 时 handler 重新比较，行为幂等。
+产物 / commit 引用: 见本任务提交
+剩余风险: 人工在块外插入的图片不在 facts.images 中，任务文档会因"截图引用发生变化"被拒（安全但限制了自由图片）；块外内容以"前一个块"为锚点，锚点块被新生成删除时接到更早的块之后。
+下一项可执行任务: P3-02
 ```

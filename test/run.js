@@ -65,6 +65,7 @@ const FILES = [
   'gate2.test.js',
   'git-changes.test.js',
   'impact-analysis.test.js',
+  'manual-merge.test.js',
 ];
 
 let failed = 0;

@@ -22,6 +22,7 @@ const { newUuid } = require('../model/ids');
 const releases = require('./release-store');
 const { validateRelease } = require('../model/schema');
 const { currentSourceBaseline } = require('../update/baseline');
+const { writeGeneratedBlob } = require('../generate/manual-store');
 
 const STATES = ['prepared', 'assets-installed', 'document-installed', 'release-committed', 'completed'];
 
@@ -154,13 +155,14 @@ function advance(projectRoot, stateDirAbs, journal, hooks = {}) {
  * @param {object} [p.hooks]           故障注入：after:<state>
  * @param {string} [p.runId]           Run 内发布时事务目录放在 runs/<runId>/publication/
  */
-function publish({ projectRoot, stateDirAbs, manualId, documentFile, markdown, facts, captureIds = [], definitionRevisions = {}, force = false, hooks = {}, runId = null, sourceBaseline = null }) {
+function publish({ projectRoot, stateDirAbs, manualId, documentFile, markdown, facts, captureIds = [], definitionRevisions = {}, force = false, hooks = {}, runId = null, sourceBaseline = null, generated = null, baseDocHash = null, acceptedEdits = [], sections = null }) {
   const documentPath = toPosix(path.relative(projectRoot, documentFile));
   const oldDocHash = fileHash(documentFile);
   const newDocHash = hashOf(markdown);
   // 用户编辑冲突：文档与上次发布的版本不同（被手改过），不能静默覆盖
   const previous = releases.readCurrentRelease(stateDirAbs, manualId);
-  if (!force && previous && oldDocHash && oldDocHash !== previous.documentHash && oldDocHash !== newDocHash) {
+  // baseDocHash：定稿前已把当前文档（含人工修改）三方合并进 markdown（P3-06）；只接受合并时看到的那个版本
+  if (!force && previous && oldDocHash && oldDocHash !== previous.documentHash && oldDocHash !== newDocHash && oldDocHash !== baseDocHash) {
     throw new PublicationError('publication-conflict', `${documentPath} 在上次发布之后被手工修改过；确认要覆盖请加 --force（旧版本仍保留在发布记录中）。`);
   }
   for (const journal of listJournals(stateDirAbs)) {
@@ -185,6 +187,10 @@ function publish({ projectRoot, stateDirAbs, manualId, documentFile, markdown, f
     createdAt: new Date().toISOString(),
     // 源码基线：update 据此找出"发布之后改了什么"（P3-01）
     sourceBaseline: sourceBaseline || currentSourceBaseline(projectRoot, stateDirAbs),
+    // 纯生成正文（不含人工内容）的 blob：下次生成时作为三方合并的"旧生成"
+    generatedBlob: hashOf(generated ?? markdown),
+    ...(acceptedEdits.length ? { acceptedEdits } : {}),
+    ...(sections ? { sections } : {}),
     facts,
   };
   // 记录不完整（如旧 facts 没有图片 hash）必须在写任何文件之前发现
@@ -192,6 +198,7 @@ function publish({ projectRoot, stateDirAbs, manualId, documentFile, markdown, f
   if (!checked.ok) {
     throw new PublicationError('invalid-release', `发布记录不完整，未写入任何文件: ${checked.errors.map((e) => `${e.path} ${e.message}`).join('；')}`);
   }
+  writeGeneratedBlob(stateDirAbs, generated ?? markdown);
   const dir = publicationDirFor(stateDirAbs, transactionId, runId);
   fs.mkdirSync(dir, { recursive: true });
   writeFileAtomic(path.join(dir, 'document.md'), markdown);

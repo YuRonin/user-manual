@@ -106,7 +106,8 @@ test('页面：detectedActions 一律标为源码推断，截图不能把它们�
   const md = renderPage(withShot);
   assert.match(md, /## 主要操作（根据源码推断，尚未在浏览器中逐项验证）/);
   assert.match(md, /!\[工作台\]\(images\/annotated\/p\.png\)/);
-  assert.doesNotMatch(md, /<!--/, '正式文档不含草稿注释');
+  // 正式文档只含块标记（人工编辑保护定位用），不含草稿的来源注释
+  assert.deepStrictEqual(md.match(/<!--[^>]*-->/g).filter((c) => !/^<!-- \/?manual:block( id=[a-z.-]+)? -->$/.test(c)), [], '正式文档不含草稿注释');
 });
 
 // ------------------------------------------------------------ CLI：--copy 定稿

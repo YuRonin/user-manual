@@ -20,7 +20,7 @@ const WAITING_CODES = new Set([
   'auth-missing', 'auth-expired', 'login-required', 'review-required', 'model-input-required', 'outcome-unknown', 'lock-held-remote',
   'analysis-required',
 ]);
-const CONFLICT_CODES = new Set(['publication-conflict', 'model-conflict', 'run-input-changed', 'draft-stale', 'evidence-stale', 'plan-tampered']);
+const CONFLICT_CODES = new Set(['publication-conflict', 'merge-conflict', 'document-missing', 'model-conflict', 'run-input-changed', 'draft-stale', 'evidence-stale', 'plan-tampered']);
 
 /** 从错误对象、ErrorResult、"code: 说明" 字符串或它们的数组中取第一个分类码。 */
 function codeOf(input) {

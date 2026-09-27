@@ -51,6 +51,9 @@ const POLICIES = {
   'approval-required': INPUT,
   'scope-changed': INPUT,
   'publication-conflict': INPUT,
+  // 人工修改与新生成冲突 / 已发布文档被删除：等待用户选择（合并提案、owner=human、--force、retired）
+  'merge-conflict': INPUT,
+  'document-missing': INPUT,
   'model-conflict': INPUT,
   'run-input-changed': INPUT,
   'lock-held-remote': INPUT,

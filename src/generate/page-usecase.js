@@ -30,6 +30,8 @@ const { validateArtifact, validatePublication, formatIssues } = require('../publ
 const { createCaptureStore } = require('../evidence/store');
 const { verifyCaptureRecord, describeProblems } = require('../evidence/integrity');
 const { RuntimeError } = require('../runtime/errors');
+const { reconcileDocument } = require('./manual-store');
+const { manualFromPack } = require('./manual-model');
 
 function failure(code, errors, extra = {}) {
   const list = Array.isArray(errors) ? errors : [errors];
@@ -168,7 +170,7 @@ function reviewFailure(findings, acceptReview) {
  * 事实比对不通过：默认拒绝（fact-mismatch，附 violations）；fallbackDraft 时用草稿原文。
  * @returns {{ page, body, finalPath, draftPath, draftFacts, factCheck, violations }}
  */
-function preparePageFinal({ projectRoot, config, pageId, copy = null, markdown = null, acceptReview = false, fallbackDraft = false, force = false }) {
+function preparePageFinal({ projectRoot, config, pageId, copy = null, markdown = null, acceptReview = false, fallbackDraft = false, force = false, runId = null }) {
   const { page, stateDirAbs } = loadPage(projectRoot, config, pageId);
   const { draftPath, factsFile } = draftPathsFor(stateDirAbs, page.id);
   if (!fs.existsSync(draftPath)) throw failure('draft-missing', [`找不到事实草稿: ${displayPath(draftPath, projectRoot)}`, `先运行 \`manual generate ${page.id}\`。`]);
@@ -202,24 +204,27 @@ function preparePageFinal({ projectRoot, config, pageId, copy = null, markdown =
   }
 
   const finalPath = path.join(projectRoot, config.docs.outputDir, `${page.id}.md`);
-  if (fs.existsSync(finalPath) && !force) throw failure('document-exists', [`正式文档已存在: ${displayPath(finalPath, projectRoot)}`, '加 --force 覆盖。']);
   // 事实校验没过：默认拒绝落盘；--fallback-draft 则按「事实优先」用草稿原文。
   if (!result.ok && !fallbackDraft) throw failure('fact-mismatch', ['事实校验未通过。'], { violations: result.violations, draftPath, pageId: page.id });
 
   const content = result.ok ? polished : draftMarkdown;
-  const body = content.replace(/\s*$/, '') + '\n';
+  const generated = content.replace(/\s*$/, '') + '\n';
+  // 人工编辑保护：已发布文档的手改与新生成三方合并；从未发布过、却已存在的文档仍需 --force
+  const merge = reconcileDocument({ projectRoot, stateDirAbs, manualId: manualIdFor('page', page.id), documentFile: finalPath, generated, force, runId });
+  if (merge.mode === 'untracked' && !force) throw failure('document-exists', [`正式文档已存在: ${displayPath(finalPath, projectRoot)}`, '加 --force 覆盖。']);
+  const body = merge.markdown;
   // 统一发布门槛（含 --fallback-draft）：图片引用、hash、产物位置与隐私记录都以草稿 facts 为准。
   if (!fs.existsSync(factsFile)) throw failure('draft-missing', [`缺少草稿事实文件: ${displayPath(factsFile, projectRoot)}`, `重新运行 \`manual generate ${page.id}\`。`]);
   const draftFacts = JSON.parse(fs.readFileSync(factsFile, 'utf8'));
   const gate = validatePublication({ projectRoot, manualFile: finalPath, markdown: body, images: draftFacts.images || [], config });
   if (!gate.ok) throw failure(gate.errors[0]?.code || 'publication-gate', formatIssues(gate.errors));
-  return { page, body, finalPath, draftPath, draftFacts, factCheck: result.ok ? 'passed' : 'failed-used-draft', violations: result.violations };
+  return { page, body, generated, merge, finalPath, draftPath, draftFacts, factCheck: result.ok ? 'passed' : 'failed-used-draft', violations: result.violations };
 }
 
 /** 发布事务；原子替换失败（如文件被占用）时旧文档保持不变。 */
 function publishPageFinal({ projectRoot, config, prepared, force = false, runId = null, hooks = {} }) {
   const stateDirAbs = path.join(projectRoot, config.artifacts.stateDir);
-  const { page, body, finalPath, draftFacts } = prepared;
+  const { page, body, finalPath, draftFacts, generated = null, merge = {} } = prepared;
   try {
     const published = publish({
       projectRoot,
@@ -233,6 +238,10 @@ function publishPageFinal({ projectRoot, config, prepared, force = false, runId 
       force,
       runId,
       hooks,
+      generated,
+      baseDocHash: merge.baseDocHash || null,
+      acceptedEdits: merge.acceptedEdits || [],
+      sections: draftFacts.factPack ? manualFromPack(draftFacts.factPack).sections : null,
     });
     return { finalPath, release: published.release };
   } catch (error) {

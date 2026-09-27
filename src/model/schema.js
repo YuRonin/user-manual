@@ -446,6 +446,9 @@ function validateRelease(release) {
       if (b.gitCommit !== null && b.gitCommit !== undefined && !/^[a-f0-9]{40}([a-f0-9]{24})?$/.test(String(b.gitCommit))) c.error('sourceBaseline.gitCommit', 'invalid-commit', 'gitCommit 需要是完整提交 id。');
     }
   }
+  // 人工编辑保护（P3-06）：纯生成正文 blob 与章节；旧记录没有这些字段
+  if (release.generatedBlob !== undefined && (typeof release.generatedBlob !== 'string' || !SHA256_RE.test(release.generatedBlob))) c.error('generatedBlob', 'invalid-hash', 'generatedBlob 需要是 sha256。');
+  if (release.sections !== undefined && (!Array.isArray(release.sections) || release.sections.some((s) => !isObject(s) || !nonEmpty(s.id)))) c.error('sections', 'invalid-sections', 'sections 需要是带 id 的章节数组。');
   return c.result({ version: version.version });
 }
 

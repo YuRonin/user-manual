@@ -54,7 +54,7 @@ function runFinalize({ root, config, taskId, finalizeInput, copyInput, acceptRev
   }
   let manualFile;
   try {
-    const prepared = prepareTaskFinal({ projectRoot: root, config, taskId, copy, markdown, acceptReview });
+    const prepared = prepareTaskFinal({ projectRoot: root, config, taskId, copy, markdown, acceptReview, force });
     ({ manualFile } = publishTaskFinal({ projectRoot: root, config, taskId, prepared, force }));
   } catch (error) {
     return failWith(error, json);

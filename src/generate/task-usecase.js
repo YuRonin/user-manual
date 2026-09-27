@@ -25,6 +25,8 @@ const { diffPacks } = require('./fact-pack');
 const { validateCopy, checkPolishedMarkdown, formatFindings } = require('./markdown-validate');
 const { validatePublication, validateArtifact, summarizePrivacy, formatIssues } = require('../publication/validate');
 const { RuntimeError } = require('../runtime/errors');
+const { reconcileDocument } = require('./manual-store');
+const { manualFromPack } = require('./manual-model');
 
 function failure(code, errors, extra = {}) {
   const list = Array.isArray(errors) ? errors : [errors];
@@ -120,7 +122,7 @@ function draftTask({ projectRoot, config, taskId }) {
  * 写任何正式文件之前完成全部检查。copy（文案块对象）与 markdown（润色稿）二选一；都不给时使用默认文案块。
  * @returns {{ final, facts, manualFile, accepted }}
  */
-function prepareTaskFinal({ projectRoot, config, taskId, copy = null, markdown = null, acceptReview = false }) {
+function prepareTaskFinal({ projectRoot, config, taskId, copy = null, markdown = null, acceptReview = false, force = false, runId = null }) {
   const { task, pages } = loadTask({ projectRoot, config, taskId });
   const { draftFile, factsFile } = draftPaths(projectRoot, config, taskId);
   if (!fs.existsSync(factsFile)) throw failure('draft-missing', '缺少任务事实文件，请先生成草稿。');
@@ -149,13 +151,20 @@ function prepareTaskFinal({ projectRoot, config, taskId, copy = null, markdown =
   if (task.lastCapture && JSON.stringify(facts.evidence?.captureIds || null) !== JSON.stringify(task.lastCapture.captureIds || [])) {
     throw failure('draft-stale', `draft-stale: 草稿基于较早的采集，重新运行 manual generate-task ${task.id} 生成草稿后再定稿。`);
   }
+  const manualFile = manualFileFor(projectRoot, config, task.id);
+  // 人工编辑保护：上次发布之后的手改与新生成三方合并；冲突不写正式文档（merge-conflict，等待输入）
+  const generated = final;
+  const reconciled = reconcileDocument({
+    projectRoot, stateDirAbs: path.join(projectRoot, config.artifacts.stateDir), manualId: manualIdFor('task', task.id),
+    documentFile: manualFile, generated, force, runId,
+  });
+  final = reconciled.markdown;
   const checked = validateTaskFinal(final, facts, { renderedFromPack: fromPack });
   if (!checked.ok) throw failure(codeOf(checked.errors, 'fact-mismatch'), checked.errors);
-  const manualFile = manualFileFor(projectRoot, config, task.id);
   const gate = validatePublication({ projectRoot, manualFile, markdown: final, images: facts.images, config });
   if (!gate.ok) throw failure(gate.errors[0]?.code || 'publication-gate', formatIssues(gate.errors));
   // 定稿可以重复执行（重新生成已发布文档）；status 只记录最近完成的操作。
-  return { final, facts, manualFile, accepted: review.accepted || [] };
+  return { final, generated, facts, manualFile, accepted: review.accepted || [], merge: reconciled };
 }
 
 /**
@@ -164,7 +173,7 @@ function prepareTaskFinal({ projectRoot, config, taskId, copy = null, markdown =
  */
 function publishTaskFinal({ projectRoot, config, taskId, prepared, force = false, runId = null, hooks = {} }) {
   const { projectStore, base, task } = loadTask({ projectRoot, config, taskId });
-  const { final, facts, manualFile } = prepared;
+  const { final, facts, manualFile, generated = null, merge = {} } = prepared;
   let published;
   try {
     published = publish({
@@ -179,6 +188,10 @@ function publishTaskFinal({ projectRoot, config, taskId, prepared, force = false
       force,
       runId,
       hooks,
+      generated,
+      baseDocHash: merge.baseDocHash || null,
+      acceptedEdits: merge.acceptedEdits || [],
+      sections: facts.factPack ? manualFromPack(facts.factPack).sections : null,
     });
   } catch (error) {
     if (error.transactionId && error.code !== 'publication-conflict' && !['file-busy', 'write-failed'].includes(error.code)) {

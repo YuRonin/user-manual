@@ -25,7 +25,7 @@ const { rederiveCaptures } = require('../evidence/rederive');
 const { captureTask, taskProjection } = require('../tasks/capture-usecase');
 const { draftTask, prepareTaskFinal, publishTaskFinal } = require('../generate/task-usecase');
 const { draftPage, preparePageFinal, publishPageFinal } = require('../generate/page-usecase');
-const { manualIdFor, readCurrentRelease } = require('../publication/release-store');
+const { manualIdFor } = require('../publication/release-store');
 const { lookup, offlineMissError } = require('../cache/lookup');
 const { collectPlanningInputs, imageInputsOf, subjectKey } = require('./planner');
 const { RuntimeError } = require('./errors');
@@ -89,23 +89,13 @@ function readCopy(ctx, task) {
   return ref.kind === 'request' ? copyFromResponse(file) : JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
-/** 页面正式文档存在且与上次发布一致（没有人工修改）时，重新生成不需要 --force。 */
-function pageDocUnchanged(ctx, pageId) {
-  const file = path.join(ctx.projectRoot, ctx.config.docs.outputDir, `${pageId}.md`);
-  if (!fs.existsSync(file)) return true;
-  const release = readCurrentRelease(ctx.stateDirAbs, manualIdFor('page', pageId));
-  return !!release && String(release.documentHash).replace(/^sha256:/, '') === sha256Hex(fs.readFileSync(file));
-}
-
 function prepareFinal(ctx, task, copy) {
   const subject = task.input.subject;
-  if (subject.type === 'task') {
-    return prepareTaskFinal({ projectRoot: ctx.projectRoot, config: ctx.config, taskId: subject.id, copy, acceptReview: !!task.input.acceptReview });
-  }
-  return preparePageFinal({
-    projectRoot: ctx.projectRoot, config: ctx.config, pageId: subject.id, copy, acceptReview: !!task.input.acceptReview,
-    force: !!ctx.plan.tasks.find((t) => t.kind === 'publish')?.input?.force || pageDocUnchanged(ctx, subject.id),
-  });
+  // --force 由 publish 节点携带：覆盖人工修改；未指定时由三方合并保护人工修改（P3-06）
+  const force = !!ctx.plan.tasks.find((t) => t.kind === 'publish')?.input?.force;
+  const common = { projectRoot: ctx.projectRoot, config: ctx.config, copy, acceptReview: !!task.input.acceptReview, force, runId: ctx.runId };
+  if (subject.type === 'task') return prepareTaskFinal({ ...common, taskId: subject.id });
+  return preparePageFinal({ ...common, pageId: subject.id });
 }
 
 function publicationGate(ctx, task) {
