@@ -225,7 +225,8 @@ async function executeCapturePlan(plan, provider, options) {
       }
     );
   } finally {
-    await provider.close();
+    // BrowserSession 管理的 provider 由 session 在刷新认证后关闭。
+    if (options.ownsProvider !== false) await provider.close();
   }
 }
 

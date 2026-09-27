@@ -11,7 +11,7 @@ const { deriveTaskScenario } = require('../scenarios/model');
 const { resolveScenario } = require('../scenarios/store');
 const { buildCapturePlan, writeCapturePlan } = require('../tasks/capture-plan');
 const { executeCapturePlan } = require('../tasks/executor');
-const { prepareAuth, assertAuthenticated, classifyAuthFailure, refreshAuth } = require('../auth/runtime');
+const { prepareAuth, authRuntimeFor } = require('../auth/runtime');
 
 const KNOWN_FLAGS = new Set(['projectRoot', 'json', 'help']);
 const HELP = 'manual capture-task <task-id> [--project-root <路径>] [--json]';
@@ -68,11 +68,7 @@ async function run(argv) {
       annotatedDir: config.artifacts.annotatedDir,
       theme,
       redactionRules: config.privacy || {},
-      authRuntime: {
-        assertAuthenticated: (openResult) => assertAuthenticated(openResult, auth),
-        classify: (error) => classifyAuthFailure(error, auth),
-        refresh: (actualProvider) => refreshAuth(actualProvider, auth),
-      },
+      authRuntime: authRuntimeFor(auth),
     });
     // 采集可以重复执行：记录这次观察所依据的输入，新鲜度之后由它与当前定义比较得出。
     // status 只是兼容投影，不再参与"能否执行"的判断；旧的 stale 标记被新观察清除。

@@ -24,14 +24,7 @@ function availableTypes() {
   return Object.keys(ADAPTERS);
 }
 
-/**
- * 按配置造一个 provider。
- * @param {object} options
- * @param {string} options.id             provider 在 config.yaml 里的 id
- * @param {object} options.providerConfig 该 provider 的配置（含 type）
- * @param {object} options.profile        截图规格
- */
-function createProvider({ id, providerConfig, profile, storageState = null }) {
+function adapterFor(id, providerConfig) {
   const type = providerConfig && providerConfig.type;
 
   if (!type) {
@@ -50,7 +43,21 @@ function createProvider({ id, providerConfig, profile, storageState = null }) {
     );
   }
 
-  return new Adapter({ id, providerConfig, profile, storageState });
+  return Adapter;
 }
 
-module.exports = { createProvider, availableTypes, ADAPTERS, BrowserProvider, DEFAULT_READY_OPTIONS };
+/**
+ * 按配置造一个 provider。
+ * @param {object} options
+ * @param {string} options.id             provider 在 config.yaml 里的 id
+ * @param {object} options.providerConfig 该 provider 的配置（含 type）
+ * @param {object} options.profile        截图规格
+ * @param {object} [options.browser]      借用的 Browser（BrowserSession 提供，provider 不负责关闭）
+ * @param {object} [options.browserType]  注入的 browserType（测试 / 其他内核）
+ */
+function createProvider({ id, providerConfig, profile, storageState = null, browser = null, browserType = null }) {
+  const Adapter = adapterFor(id, providerConfig);
+  return new Adapter({ id, providerConfig, profile, storageState, browser, browserType });
+}
+
+module.exports = { createProvider, adapterFor, availableTypes, ADAPTERS, BrowserProvider, DEFAULT_READY_OPTIONS };

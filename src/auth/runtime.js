@@ -97,4 +97,16 @@ async function refreshAuth(provider, auth) {
   }
 }
 
-module.exports = { prepareAuth, classifyAuthFailure, assertAuthenticated, refreshAuth, cacheRoot, LOGIN_PATH_RE };
+/**
+ * 执行器使用的认证钩子。在 BrowserSession 中运行时由 session 在 Scenario 成功结束后刷新，
+ * 传 { refresh: false } 避免同一 Context 刷新两次。
+ */
+function authRuntimeFor(auth, { refresh = true } = {}) {
+  return {
+    assertAuthenticated: (openResult) => assertAuthenticated(openResult, auth),
+    classify: (error) => classifyAuthFailure(error, auth),
+    ...(refresh ? { refresh: (provider) => refreshAuth(provider, auth) } : {}),
+  };
+}
+
+module.exports = { prepareAuth, classifyAuthFailure, assertAuthenticated, refreshAuth, authRuntimeFor, cacheRoot, LOGIN_PATH_RE };

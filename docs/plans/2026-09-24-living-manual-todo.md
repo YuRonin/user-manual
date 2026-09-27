@@ -112,11 +112,11 @@
   - [x] task snapshot 为恢复依据，events 为诊断。
   - [x] 日志去敏、损坏末行处理和本地产物 ignore。
   - [x] 错误 code/scope/retryability 保留完整。
-- [ ] **P2-04 BrowserSession**（依赖 P2-01）
-  - [ ] Browser ownership 与 Context 创建拆分。
-  - [ ] Scenario/角色隔离及 page/popup alias。
-  - [ ] Provider capabilities 与 auth 刷新接线。
-  - [ ] 1 Browser/3 Context 计数、崩溃和清理测试通过。
+- [x] **P2-04 BrowserSession**（依赖 P2-01）
+  - [x] Browser ownership 与 Context 创建拆分。
+  - [x] Scenario/角色隔离及 page/popup alias。
+  - [x] Provider capabilities 与 auth 刷新接线。
+  - [x] 1 Browser/3 Context 计数、崩溃和清理测试通过。
 - [ ] **P2-05 分层缓存**（依赖 P2-01）
   - [ ] source/capture/image/manual 独立 key 与 policy。
   - [ ] hash/scope/privacy/TTL 检查和 miss reason。
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 进行中（2026-09-27 起），已完成 17 / 32。下一项：P2-04。
+- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 进行中（2026-09-27 起），已完成 18 / 32。下一项：P2-05。
 
 ### 执行记录
 
@@ -621,4 +621,20 @@ Task ID: P2-01
 产物 / commit 引用: 见本任务提交
 剩余风险: 租约续期依赖状态写入或调用方显式 renew()，单个任务执行超过租约（30s）时需要 runner 心跳（P2-03 实现）；已有项目的 .gitignore 只在创建 Run 时补齐。
 下一项可执行任务: P2-04
+```
+
+```text
+Task ID: P2-04
+状态: completed
+开始时基线 commit / dirty files: 427da97（P2-01）；工作区干净
+实际修改文件: src/browser/session.js、src/browser/capabilities.js（新）；src/browser/playwright.js（launchBrowser / launchOptionsFor、借用 Browser 与 ownsBrowser、newContext 注入 locale / timezoneId、main / popup-N 页面别名与 usePage、action.page 显式切换、close 只关自有资源）；src/browser/provider.js（静态 capabilities）；src/browser/index.js（adapterFor，createProvider 接受 browser / browserType）；src/auth/runtime.js（authRuntimeFor）；src/tasks/executor.js（ownsProvider）；src/commands/capture-task.js（改用 authRuntimeFor）；test/browser-session.test.js（新）、test/run.js
+契约变更: 无（实现 C07 browserSession.withScenario）。补充约定：Browser 复用分组键 = provider type + launchOptionsFor（headless / channel / args / slowMo）；Scenario 的认证刷新由 session 在 fn 成功结束后执行，执行器在 session 中运行时用 authRuntimeFor(auth, { refresh: false })；Browser 断开时当前 Scenario 报 browser-crashed（C08 可重试）；不使用 persistent userDataDir（SSO 专用目录留待需要时单独适配）。
+执行命令与结果:
+  - node test/browser-session.test.js：7 passed（假 browserType 计数：同规格 3 Scenario = 1 launch / 3 context / 3 context close / session.close 后 1 browser close；有头与 channel 不同各自启动；Scenario 抛错仍关 Context 且共享 Browser 保持连接；崩溃 → browser-crashed，下个 Scenario 重新启动；Context 注入 DPR / locale / timezone / storageState，匿名不注入；能力声明与 capability-missing；真实 Chromium 中 member / admin 的 cookie 与 localStorage 互不可见、popup-1 别名切换后断言与返回 main、session 关闭后 Browser 断开；认证缓存只在成功 Scenario 后以 generation CAS 刷新）。
+  - 回归：node test/auth-session.test.js 2 passed；capture-task 1 passed；task-executor 3 passed；page-validation 19 passed。
+  - npm test：48 个测试文件全部通过（macOS / Node 26.4.0）。
+失败或跳过的验收及原因: 无。实施中发现并修复：先监听 context 'page' 再建主页面会把主页面登记成 popup-1。
+产物 / commit 引用: 见本任务提交
+剩余风险: capture / capture-task 命令仍各自创建 provider，接入 BrowserSession 在 P2-03 Runner 中完成；弹窗登记依赖 Playwright 的 context 'page' 事件，非 Playwright provider 需声明 popups=false。
+下一项可执行任务: P2-05
 ```

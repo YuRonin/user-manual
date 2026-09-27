@@ -46,6 +46,14 @@ class BrowserProvider {
     this.storageState = storageState;
   }
 
+  /**
+   * 显式能力声明（见 capabilities.js）。planner 在执行前据此检查，不靠"有没有这个方法"猜。
+   * 基类什么都不承诺；子类覆盖。
+   */
+  static get capabilities() {
+    return {};
+  }
+
   /** provider 类型，用于元数据。子类覆盖。 */
   get type() {
     return 'abstract';

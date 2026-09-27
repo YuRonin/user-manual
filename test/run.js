@@ -53,6 +53,7 @@ const FILES = [
   'gate1.test.js',
   'run-store.test.js',
   'runtime-errors.test.js',
+  'browser-session.test.js',
 ];
 
 let failed = 0;

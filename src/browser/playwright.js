@@ -200,12 +200,48 @@ function probePage() {
 
 // ---------------------------------------------------------------- Provider
 
+/** 浏览器启动参数。BrowserSession 用它判断两个 Scenario 能否共用同一个 Browser 进程。 */
+function launchOptionsFor(providerConfig = {}) {
+  const launchOptions = { headless: providerConfig.headless !== false };
+  // config 里的 'chromium' 指内置内核，不是 Playwright 的 channel；
+  // 只有 chrome / msedge 这类系统浏览器才需要传 channel。
+  const channel = providerConfig.channel;
+  if (channel && channel !== 'chromium') launchOptions.channel = channel;
+  if (Array.isArray(providerConfig.launchArgs)) launchOptions.args = providerConfig.launchArgs;
+  if (providerConfig.slowMo) launchOptions.slowMo = Number(providerConfig.slowMo);
+  return launchOptions;
+}
+
+/** 启动一个 Browser 进程。browserType 可注入（测试计数 / 其他内核）；默认用解析到的 Playwright chromium。 */
+async function launchBrowser(providerConfig = {}, { browserType = null } = {}) {
+  const launchOptions = launchOptionsFor(providerConfig);
+  try {
+    return await (browserType || loadPlaywright().chromium).launch(launchOptions);
+  } catch (e) {
+    if (e instanceof CaptureError) throw e;
+    throw new CaptureError(
+      REASON.BROWSER_LAUNCH_FAILED,
+      `Chromium 启动失败: ${String(e.message).split('\n')[0]}`,
+      { headless: launchOptions.headless, channel: launchOptions.channel || 'chromium' }
+    );
+  }
+}
+
 class PlaywrightBrowserProvider extends BrowserProvider {
+  /**
+   * @param {object} options  除 BrowserProvider 的字段外：
+   * @param {object} [options.browser]      借用的 Browser（BrowserSession 提供）；close() 不会关闭它
+   * @param {object} [options.browserType]  注入的 browserType（带 launch()），仅在自己启动 Browser 时使用
+   */
   constructor(options) {
     super(options);
-    this.browser = null;
+    this.browser = options.browser || null;
+    this.ownsBrowser = !options.browser;
+    this.browserType = options.browserType || null;
     this.context = null;
     this.page = null;
+    this.pages = new Map();
+    this.popupCount = 0;
     this.pageErrors = [];
     this.closed = false;
   }
@@ -214,34 +250,27 @@ class PlaywrightBrowserProvider extends BrowserProvider {
     return 'playwright';
   }
 
+  static get capabilities() {
+    return { capture: true, semanticActions: true, assertions: true, storageExport: true, privacyGeometry: true, popups: true };
+  }
+
   get headless() {
     return this.providerConfig.headless !== false;
   }
 
+  /** 兼容入口：Browser（自有或借用）+ 本 provider 独占的 Context。 */
   async launch() {
-    if (this.browser) return;
+    if (this.context) return;
+    if (this.closed) throw new CaptureError(REASON.NAVIGATION_FAILED, 'provider 已关闭，不能再次使用；请为新的 Scenario 创建新的 provider。');
+    if (!this.browser) this.browser = await launchBrowser(this.providerConfig, { browserType: this.browserType });
+    await this.newContext();
+  }
 
-    const playwright = loadPlaywright();
+  /** 为本 Scenario 新建隔离的 Context：认证快照、视口、DPR、语言、时区、配色都在这里注入。 */
+  async newContext() {
     const { viewport, deviceScaleFactor } = this.profile;
-
-    const launchOptions = { headless: this.headless };
-    // config 里的 'chromium' 指内置内核，不是 Playwright 的 channel；
-    // 只有 chrome / msedge 这类系统浏览器才需要传 channel。
-    const channel = this.providerConfig.channel;
-    if (channel && channel !== 'chromium') launchOptions.channel = channel;
-    if (Array.isArray(this.providerConfig.launchArgs)) launchOptions.args = this.providerConfig.launchArgs;
-    if (this.providerConfig.slowMo) launchOptions.slowMo = Number(this.providerConfig.slowMo);
-
-    try {
-      this.browser = await playwright.chromium.launch(launchOptions);
-    } catch (e) {
-      throw new CaptureError(
-        REASON.BROWSER_LAUNCH_FAILED,
-        `Chromium 启动失败: ${String(e.message).split('\n')[0]}`,
-        { headless: this.headless, channel: channel || 'chromium' }
-      );
-    }
-
+    const locale = this.profile.locale || this.providerConfig.locale;
+    const timezoneId = this.profile.timezoneId || this.providerConfig.timezoneId;
     this.context = await this.browser.newContext({
       viewport: { width: viewport.width, height: viewport.height },
       deviceScaleFactor: deviceScaleFactor,
@@ -249,17 +278,49 @@ class PlaywrightBrowserProvider extends BrowserProvider {
       hasTouch: this.profile.hasTouch,
       userAgent: this.profile.userAgent || undefined,
       colorScheme: this.profile.colorScheme || undefined,
+      ...(locale ? { locale } : {}),
+      ...(timezoneId ? { timezoneId } : {}),
       // 动画对截图是噪音：同一页面两次截图不该因为动画相位不同而不一样
       reducedMotion: 'reduce',
       ...(this.storageState ? { storageState: this.storageState } : {}),
     });
-
     this.page = await this.context.newPage();
+    this.registerPage('main', this.page);
+    // 同一流程内打开的弹窗 / 新标签登记为 popup-N，由动作显式切换，不默认作用于旧 Page。
+    // 先登记 main 再监听，避免把主页面本身当成弹窗。
+    this.context.on('page', (page) => {
+      if ([...this.pages.values()].includes(page)) return;
+      this.popupCount += 1;
+      this.registerPage(`popup-${this.popupCount}`, page);
+    });
+  }
+
+  registerPage(alias, page) {
+    this.pages.set(alias, page);
     // 白屏时这些是唯一线索，先收着
-    this.page.on('pageerror', (err) => this.pageErrors.push(String(err.message).split('\n')[0]));
-    this.page.on('console', (msg) => {
+    page.on('pageerror', (err) => this.pageErrors.push(String(err.message).split('\n')[0]));
+    page.on('console', (msg) => {
       if (msg.type() === 'error') this.pageErrors.push(msg.text().split('\n')[0]);
     });
+  }
+
+  pageAliases() {
+    return [...this.pages.keys()];
+  }
+
+  /** 切换后续动作 / 断言 / 截图的目标页面。弹窗登记是异步的，给一个短暂的等待窗口。 */
+  async usePage(alias, { timeout = 5000 } = {}) {
+    const deadline = Date.now() + timeout;
+    while (!this.pages.has(alias)) {
+      if (Date.now() >= deadline) throw Object.assign(new Error(`没有名为 ${alias} 的页面（当前: ${this.pageAliases().join(', ')}）。`), { code: 'page-alias-missing' });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    this.page = this.pages.get(alias);
+    // 新开的弹窗先是 about:blank，再导航到目标地址；等它离开空白页后再交给后续动作。
+    const remaining = Math.max(deadline - Date.now(), 1000);
+    if (this.page.url() === 'about:blank') await this.page.waitForURL((url) => url.href !== 'about:blank', { timeout: remaining }).catch(() => {});
+    await this.page.waitForLoadState('domcontentloaded', { timeout: remaining }).catch(() => {});
+    return this.page;
   }
 
   /**
@@ -426,6 +487,7 @@ class PlaywrightBrowserProvider extends BrowserProvider {
   }
 
   async performAction(action) {
+    if (action.page) await this.usePage(action.page);
     if (action.type === 'inspect' && !action.target) return { target: null, rect: null };
     const locator = await this.uniqueVisibleLocator(action.target);
     const rect = await locator.boundingBox();
@@ -631,15 +693,17 @@ class PlaywrightBrowserProvider extends BrowserProvider {
   async close() {
     if (this.closed) return;
     this.closed = true;
-    // 逐层关闭，任一层失败都不该掩盖真正的截图错误
-    for (const target of [this.context, this.browser]) {
+    // 逐层关闭，任一层失败都不该掩盖真正的截图错误；借用的 Browser 归 BrowserSession 管理。
+    const targets = this.ownsBrowser ? [this.context, this.browser] : [this.context];
+    for (const target of targets) {
       if (!target) continue;
       try { await target.close(); } catch (_) { /* 已经关了 */ }
     }
     this.context = null;
     this.browser = null;
     this.page = null;
+    this.pages.clear();
   }
 }
 
-module.exports = { PlaywrightBrowserProvider, loadPlaywright, resolvePlaywright, legacyPlaywrightCandidates, FREEZE_CSS };
+module.exports = { PlaywrightBrowserProvider, launchBrowser, launchOptionsFor, loadPlaywright, resolvePlaywright, legacyPlaywrightCandidates, FREEZE_CSS };
