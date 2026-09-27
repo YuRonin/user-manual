@@ -13,6 +13,7 @@
  * 不写截图、不改 Capture / 发布记录 / 任务状态；只追加一份不可变验证报告。
  */
 
+const fs = require('fs');
 const path = require('path');
 
 const { createProjectStore } = require('../store/project');
@@ -29,6 +30,102 @@ const releases = require('../publication/release-store');
 const { sectionsOf } = require('../generate/manual-model');
 const { RuntimeError } = require('../runtime/errors');
 const { classify, overall } = require('./report');
+const { createCaptureStore } = require('../evidence/store');
+const { captureStable, derivePublished } = require('../evidence/capture-safe');
+const { RENDERER_VERSION } = require('../evidence/image-pipeline');
+const { policyRevision } = require('../publication/validate');
+const { compareSemantic } = require('./semantic-diff');
+const { environmentCompatible, applicableMasks, compareImages } = require('./visual-diff');
+const { newUuid } = require('../model/ids');
+
+const DRIFT_ORDER = ['behavior-breaking', 'content-changed', 'visual-only', 'environment-incompatible', 'inconclusive', 'none'];
+
+function scaleRect(rect, dpr) {
+  return { x: Math.floor(rect.x * dpr), y: Math.floor(rect.y * dpr), width: Math.ceil(rect.width * dpr), height: Math.ceil(rect.height * dpr) };
+}
+
+/**
+ * 页面手册的语义 / 视觉漂移：与发布时的 Capture 比较（基线只来自已发布的已验证采集，不自动接受新图）。
+ * 当前图走与发布相同的派生管线（同隐私策略 / 渲染器）生成到临时目录，比较后删除原图与中间产物。
+ */
+async function pageDrift({ provider, projectRoot, config, stateDirAbs, release, identityAssertions, reportId }) {
+  const out = { semantic: { status: 'baseline-missing' }, visual: { status: 'not-compared', reasons: [] }, warnings: [] };
+  const captureId = (release.captureIds || [])[0];
+  let baseline = null;
+  try { baseline = captureId ? createCaptureStore({ projectRoot, stateDirAbs }).read(captureId) : null; } catch (_) { baseline = null; }
+  const current = provider.semanticSnapshot ? await provider.semanticSnapshot() : null;
+  out.semantic = compareSemantic(baseline?.semantic || null, current);
+  if (!baseline) { out.visual.reasons.push('baseline-capture-missing'); return out; }
+  const published = (baseline.artifacts || []).find((a) => a.kind === 'published');
+  if (!published || !fs.existsSync(path.join(projectRoot, published.path))) { out.visual.reasons.push('baseline-image-missing'); return out; }
+  const env = provider.environmentInfo ? provider.environmentInfo({ fullPage: !!baseline.spec?.fullPage }) : null;
+  const compat = environmentCompatible(baseline.environment || null, env);
+  if (!compat.ok) { out.visual = { status: 'environment-incompatible', reasons: compat.mismatches }; return out; }
+  const versions = [];
+  if (baseline.provenance?.rendererVersion && baseline.provenance.rendererVersion !== RENDERER_VERSION) versions.push(`rendererVersion: ${baseline.provenance.rendererVersion} → ${RENDERER_VERSION}`);
+  if (baseline.privacy?.policyRevision && baseline.privacy.policyRevision !== policyRevision(config)) versions.push('privacy-policy-changed');
+  if (versions.length) { out.visual = { status: 'baseline-incompatible', reasons: versions }; return out; }
+
+  const work = path.join(stateDirAbs, 'verifications', `.work-${reportId}`);
+  fs.mkdirSync(work, { recursive: true });
+  try {
+    const format = config.artifacts.format || 'png';
+    const rawPath = path.join(work, `raw.${format}`);
+    const captured = await captureStable(provider, { rawPath, fullPage: !!baseline.spec?.fullPage, format });
+    const safe = await derivePublished({
+      captured, rawPath,
+      sanitizedPath: path.join(work, 'sanitized.png'),
+      publishedPath: path.join(work, 'published.png'),
+      theme: config.annotation.themes[config.annotation.activeTheme],
+      redactionRules: config.privacy || {},
+    });
+    if (!safe.published) { out.visual = { status: 'not-compared', reasons: ['privacy-not-passed'] }; return out; }
+    const dpr = env.dpr || 1;
+    const regions = config.verify?.visual?.dynamicRegions || [];
+    const masks = [];
+    for (const region of regions) {
+      const rect = provider.rectOf ? await provider.rectOf(region.selector) : null;
+      if (rect) masks.push({ id: region.id || region.selector, rect });
+    }
+    const critical = [];
+    for (const assertion of identityAssertions) {
+      const rect = assertion.target && provider.rectOf ? await provider.rectOf(assertion.target, { content: true }) : null;
+      if (rect) critical.push({ id: assertion.id || assertion.target.name || 'assertion', rect });
+    }
+    const { used, refused } = applicableMasks(masks, critical);
+    for (const r of refused) out.warnings.push(`critical-region-not-masked: 动态区域 ${r.id} 与断言目标 ${r.overlaps} 重叠，关键区域不能被忽略。`);
+    const diffPath = path.join(stateDirAbs, 'verifications', `${reportId}-visual-diff.png`);
+    const compared = await compareImages({
+      baseline: path.join(projectRoot, published.path),
+      current: path.join(work, 'published.png'),
+      masks: used.map((m) => scaleRect(m.rect, dpr)),
+      tolerance: config.verify?.visual?.tolerance,
+      threshold: config.verify?.visual?.threshold,
+      diffPath,
+    });
+    out.visual = {
+      ...compared,
+      diffPath: compared.diffPath ? path.relative(projectRoot, compared.diffPath).replace(/\\/g, '/') : null,
+      masks: used.map((m) => m.id),
+      refusedMasks: refused,
+      baselineCaptureId: baseline.id,
+    };
+    return out;
+  } finally {
+    // 原图未脱敏：比较结束立即删除，只保留基于发布图的差异 PNG
+    fs.rmSync(work, { recursive: true, force: true });
+  }
+}
+
+/** 漂移分类：行为失败优先，其次语义内容，再次视觉。 */
+function classifyDrift({ behaviorFailed, semantic, visual }) {
+  if (behaviorFailed) return 'behavior-breaking';
+  if (semantic?.status === 'changed') return 'content-changed';
+  if (visual && ['changed', 'size-changed'].includes(visual.status)) return 'visual-only';
+  if (visual && ['environment-incompatible', 'baseline-incompatible'].includes(visual.status)) return 'environment-incompatible';
+  if (!semantic || ['baseline-missing', 'unavailable'].includes(semantic.status)) return 'inconclusive';
+  return 'none';
+}
 
 function codeOf(error) {
   return error?.reason || error?.code || 'navigation-failed';
@@ -102,8 +199,10 @@ function loadSubject(projectRoot, config, target) {
  * @param {number} [p.timeoutMs]
  * @returns {Promise<object>} 报告主体（未落盘）
  */
-async function verifyLive({ projectRoot, config, target, session, timeoutMs = DEFAULT_ASSERTION_TIMEOUT_MS }) {
+async function verifyLive({ projectRoot, config, target, session, timeoutMs = DEFAULT_ASSERTION_TIMEOUT_MS, drift: driftEnabled = true }) {
   const startedAt = new Date().toISOString();
+  const reportId = newUuid();
+  let drift = null;
   const { stateDirAbs, model, manualId, release, entity } = loadSubject(projectRoot, config, target);
   const profileId = config.capture.activeProfile;
   const providerId = config.browser.activeProvider;
@@ -149,7 +248,16 @@ async function verifyLive({ projectRoot, config, target, session, timeoutMs = DE
     checks.push(...await collectAssertions(provider, identityAssertions, { scope: 'page-identity', idPrefix: `${target.id}:default`, timeoutMs }));
     const identityOk = !checks.some((c) => c.outcome !== 'passed');
     const stepRecords = [];
-    if (!plan) return { stepRecords };
+    if (!plan) {
+      if (driftEnabled && identityOk) {
+        try {
+          drift = await pageDrift({ provider, projectRoot, config, stateDirAbs, release, identityAssertions, reportId });
+        } catch (error) {
+          drift = { semantic: { status: 'unavailable' }, visual: { status: 'not-compared', reasons: [`${error.code || 'error'}: ${error.message}`] }, warnings: [] };
+        }
+      }
+      return { stepRecords };
+    }
     let stopped = identityOk ? null : 'identity-failed';
     for (const step of plan.steps) {
       const record = { id: step.id, status: null, validations: [] };
@@ -226,8 +334,20 @@ async function verifyLive({ projectRoot, config, target, session, timeoutMs = DE
     identityChecks: checks.filter((c) => c.scope === 'page-identity').length,
   };
   const sections = sectionResults(release, target, checks, steps, claims);
-  const result = overall(checks, claims.filter((c) => c.outcome !== 'not_run'));
+  let result = overall(checks, claims.filter((c) => c.outcome !== 'not_run'));
+  const behaviorFailed = result === 'failed';
+  const driftReport = {
+    classification: classifyDrift({ behaviorFailed, semantic: drift?.semantic || (target.type === 'task' ? { status: 'same' } : null), visual: drift?.visual || null }),
+    semantic: drift?.semantic || null,
+    visual: drift?.visual || null,
+    warnings: drift?.warnings || [],
+    // 基线只来自已发布的采集；验证发现差异不会自动接受新图（需要重新 generate / update 并通过发布门槛）
+    baselineAccepted: false,
+  };
+  // 语义内容变化：行为断言仍通过也说明手册可能过期 → drift；视觉差异不能否定已验证行为，语义失败也不能被"图很像"覆盖
+  if (result === 'passed' && driftReport.classification === 'content-changed') result = 'drift';
   return {
+    id: reportId,
     kind: 'live',
     manualId,
     releaseId: release.id,
@@ -254,6 +374,7 @@ async function verifyLive({ projectRoot, config, target, session, timeoutMs = DE
     claims,
     sections,
     coverage,
+    drift: driftReport,
     result,
   };
 }
@@ -281,4 +402,4 @@ function sectionResults(release, target, checks, steps, claims) {
   });
 }
 
-module.exports = { verifyLive, collectAssertions, sectionResults };
+module.exports = { verifyLive, collectAssertions, sectionResults, classifyDrift, DRIFT_ORDER };

@@ -8,7 +8,7 @@
  *       onlineChecked, inputRevisions, environment, checks[], claims[], sections[], coverage, result, drift? }
  *
  * result: passed / failed / inconclusive。退出码策略（C08）：
- *   passed → 0；failed（与手册不一致：产品行为变化或手册过期）→ 4；
+ *   passed → 0；failed（行为与手册不一致）/ drift（内容与发布时不同）→ 4；
  *   需要登录 / 身份不符 → 3；inconclusive（网络、超时、浏览器崩溃，不能证明产品回归）→ 1。
  */
 
@@ -19,7 +19,8 @@ const { newUuid } = require('../model/ids');
 const { writeFileAtomic } = require('../util/atomic-write');
 const { EXIT } = require('../cli/output');
 
-const RESULTS = ['passed', 'failed', 'inconclusive'];
+// drift：行为断言仍通过，但页面内容（语义摘要）与手册发布时不同，手册可能已过期。
+const RESULTS = ['passed', 'failed', 'drift', 'inconclusive'];
 
 // 失败分类：产品 / 手册不一致（failed）与无法下结论（inconclusive）严格分开。
 const CLASSIFY = {
@@ -89,7 +90,7 @@ function overall(checks, claims = []) {
 
 function exitCodeForReport(report) {
   if (report.result === 'passed') return EXIT.OK;
-  if (report.result === 'failed') return EXIT.CONFLICT;
+  if (report.result === 'failed' || report.result === 'drift') return EXIT.CONFLICT;
   if (report.checks.some((c) => c.needsInput)) return EXIT.WAITING;
   return EXIT.FAILED;
 }

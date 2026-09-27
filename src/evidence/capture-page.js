@@ -168,6 +168,9 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
         });
       }
     }
+    // 语义摘要与采集环境：在线验证据此判断内容漂移、视觉比较是否可比（P3-04）
+    const semantic = provider.semanticSnapshot ? await provider.semanticSnapshot() : null;
+    const environment = provider.environmentInfo ? provider.environmentInfo({ fullPage: options.fullPage === true }) : null;
     // 稳定截图 + 离线派生：原图只留在 rawDir，发布图由同一份原图遮罩后写入 annotatedDir。
     const captured = await captureStable(provider, { rawPath: stagedRaw, fullPage: options.fullPage === true, format });
     fs.writeFileSync(stagedDerivation, derivationSidecar(captured));
@@ -184,7 +187,7 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
       const refreshed = await refreshAuth(provider, auth);
       if (refreshed.warning) ready.warnings.push(refreshed.warning);
     }
-    return { shot: captured.shot, ready, navigation, identity, safe };
+    return { shot: captured.shot, ready, navigation, identity, safe, semantic, environment };
   };
 
   let observed;
@@ -205,7 +208,7 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
       : new CaptureError(e.code && REASON_CODES.has(e.code) ? e.code : REASON.NAVIGATION_FAILED, String(e.message || e), { url });
     throw classifyAuthFailure(normalized, auth);
   }
-  const { shot, ready, navigation, identity, safe } = observed;
+  const { shot, ready, navigation, identity, safe, semantic, environment } = observed;
 
   // ---- 提交不可变 Capture：产物安装 → 记录可见 → latest 引用 → 页面投影
   const capturedAt = new Date().toISOString();
@@ -243,6 +246,8 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
         identity,
         spec,
         validations: navigation.validations,
+        ...(semantic ? { semantic } : {}),
+        ...(environment ? { environment } : {}),
         privacy: safe.privacy,
         redactions: safe.redactions.map(({ kind, rect, result }) => ({ kind, rect, result })),
         provenance: {

@@ -69,6 +69,7 @@ const FILES = [
   'update-cli.test.js',
   'incremental-update.test.js',
   'live-verify.test.js',
+  'drift-report.test.js',
 ];
 
 let failed = 0;

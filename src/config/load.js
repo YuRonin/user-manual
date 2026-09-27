@@ -131,6 +131,19 @@ function loadConfig(projectRoot) {
     if (!Number.isInteger(value) || value <= 0) return { ok: false, errors: [`${field} 需要是正整数，收到: ${value}`] };
   }
 
+  // 在线验证的漂移比较（P3-04）：阈值、容差与动态区域（只用于视觉比较，不能跳过断言）
+  const visual = raw.verify?.visual || {};
+  config.verify = {
+    ...(raw.verify || {}),
+    visual: { threshold: 0.002, tolerance: 24, dynamicRegions: [], ...visual },
+  };
+  const v = config.verify.visual;
+  if (typeof v.threshold !== 'number' || !(v.threshold >= 0 && v.threshold < 1)) return { ok: false, errors: [`verify.visual.threshold 需要是 [0, 1) 之间的数字，收到: ${v.threshold}`] };
+  if (!Number.isInteger(v.tolerance) || v.tolerance < 0 || v.tolerance > 255) return { ok: false, errors: [`verify.visual.tolerance 需要是 0-255 的整数，收到: ${v.tolerance}`] };
+  if (!Array.isArray(v.dynamicRegions) || v.dynamicRegions.some((r) => !r || typeof r.selector !== 'string' || !r.selector.trim())) {
+    return { ok: false, errors: ['verify.visual.dynamicRegions 需要是 [{ id, selector }] 数组（selector 必填）。'] };
+  }
+
   config.privacy.rules = {
     redact: [],
     preserve: [],

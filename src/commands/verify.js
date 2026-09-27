@@ -40,11 +40,14 @@ manual verify —— 检查已发布的手册
                 不从旧截图或缓存返回结果。写 / 破坏性步骤不执行，对应声明报告为 not_run，并给出验证覆盖与停止边界。
                 失败分类：page-not-found / ui-changed / state-changed / role-mismatch / redirected /
                 verification-inconclusive（网络、超时——不能证明产品回归）。
+                页面手册还会与发布时的采集比较：语义摘要（标题 / 按钮 / 链接等可访问名称）不同 → content-changed（drift）；
+                只有像素不同 → visual-only（报告差异比例与差异图，不否定已验证行为）；浏览器 / 视口 / DPR 等规格不同 →
+                environment-incompatible（不比较）。动态区域用 config 的 verify.visual.dynamicRegions 声明，只用于比较。
 
 输出:
   每次验证写入新的不可变报告 .manual/verifications/<id>.json（基线发布、观察时间、输入 revision、逐条检查与结果）。
 
-退出码: 0 通过；4 与手册不一致（failed）；3 需要登录 / 身份不符；1 无法下结论（inconclusive）或其它失败；2 参数错误。
+退出码: 0 通过（含 visual-only）；4 与手册不一致（failed / drift）；3 需要登录 / 身份不符；1 无法下结论（inconclusive）或其它失败；2 参数错误。
 `.trim();
 
 function resolveTargets(root, config, raw, all) {
@@ -163,7 +166,7 @@ async function run(argv) {
     reports: reports.map((r) => ({
       verificationId: r.id, target: r.target, releaseId: r.releaseId, result: r.result, coverage: r.coverage,
       failures: r.checks.filter((c) => c.outcome !== 'passed').map(({ id, scope, outcome, code, category, message, stepId }) => ({ id, scope, outcome, code, category, message, stepId })),
-      claims: r.claims, sections: r.sections,
+      claims: r.claims, sections: r.sections, drift: r.drift,
     })),
     errors,
   };
@@ -172,6 +175,12 @@ async function run(argv) {
     for (const r of body.reports) {
       process.stdout.write(`[manual verify --live] ${r.target}: ${r.result}（声明 ${r.coverage.claims.verified}/${r.coverage.claims.total} 已验证，步骤 ${r.coverage.steps.executed}/${r.coverage.steps.total} 已执行${r.coverage.stoppedAt ? `，在 ${r.coverage.stoppedAt.stepId} 前停止（${r.coverage.stoppedAt.reason}）` : ''}）\n`);
       for (const f of r.failures) process.stdout.write(`    ${f.outcome} ${f.category || ''} ${f.id}: ${f.message || ''}\n`);
+      if (r.drift && r.drift.classification !== 'none') {
+        process.stdout.write(`    漂移: ${r.drift.classification}`);
+        if (r.drift.semantic?.status === 'changed') process.stdout.write(`（新增 ${r.drift.semantic.added.join('、') || '无'}；消失 ${r.drift.semantic.removed.join('、') || '无'}）`);
+        if (r.drift.visual?.diffPath) process.stdout.write(`（像素差异 ${(r.drift.visual.ratio * 100).toFixed(2)}%，${r.drift.visual.diffPath}）`);
+        process.stdout.write('\n');
+      }
     }
     for (const e of errors) process.stderr.write(`[manual verify] ${e}\n`);
   }

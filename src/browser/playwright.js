@@ -457,6 +457,54 @@ class PlaywrightBrowserProvider extends BrowserProvider {
     }
   }
 
+  /**
+   * 页面可访问结构摘要（P3-04 语义漂移）：白名单角色 + 可访问名称，不含正文与控件值。
+   * 失败（页面跳转中等）返回 null，调用方按"无法比较"处理。
+   */
+  async semanticSnapshot() {
+    if (!this.page) return null;
+    try {
+      const { parseAriaSnapshot, semanticSummary } = require('../verify/semantic-diff');
+      return semanticSummary(parseAriaSnapshot(await this.page.locator('body').ariaSnapshot({ timeout: 5000 })));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /** 采集环境（视觉比较的前提）：浏览器版本、平台、视口、DPR、语言、时区。 */
+  environmentInfo({ fullPage = false } = {}) {
+    const { environmentOf } = require('../verify/visual-diff');
+    return environmentOf({
+      browserVersion: this.browser?.version ? `chromium-${this.browser.version()}` : null,
+      viewport: this.profile.viewport,
+      dpr: this.profile.deviceScaleFactor,
+      locale: this.profile.locale || this.providerConfig.locale || null,
+      timezone: this.profile.timezoneId || this.providerConfig.timezoneId || null,
+      fullPage,
+    });
+  }
+
+  /**
+   * 选择器 / 语义目标在视口中的矩形（CSS 像素）；找不到返回 null。
+   * content=true 时取元素内容（文字）的实际范围：块级标题的盒子常常占满整行，不能代表关键内容所在区域。
+   */
+  async rectOf(target, { content = false } = {}) {
+    if (!this.page) return null;
+    try {
+      const locator = typeof target === 'string' ? this.page.locator(target).first() : this.locatorFor(target).first();
+      if (!content) return await locator.boundingBox({ timeout: 2000 });
+      return await locator.evaluate((el) => {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const r = range.getBoundingClientRect();
+        const box = r.width && r.height ? r : el.getBoundingClientRect();
+        return { x: box.x, y: box.y, width: box.width, height: box.height };
+      }, null, { timeout: 2000 });
+    } catch (_) {
+      return null;
+    }
+  }
+
   /** 兼容旧调用：等同 currentObservation()。 */
   async probe() {
     return this.currentObservation();

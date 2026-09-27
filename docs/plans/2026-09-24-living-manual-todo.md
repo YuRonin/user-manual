@@ -173,11 +173,11 @@
   - [x] 每次 live 真实导航，按 claim/Scenario 回放。
   - [x] 风险边界和未验证覆盖明确报告。
   - [x] 无 Git diff 的 API/权限变化检测通过。
-- [ ] **P3-04 语义/视觉漂移**（依赖 P3-03）
-  - [ ] 安全文本摘要及可比较环境检查。
-  - [ ] 像素差异、动态区域和分类报告。
-  - [ ] baseline 不自动接受，关键断言不能被 mask 跳过。
-  - [ ] 按钮改名、位移、时钟、环境不同测试通过。
+- [x] **P3-04 语义/视觉漂移**（依赖 P3-03）
+  - [x] 安全文本摘要及可比较环境检查。
+  - [x] 像素差异、动态区域和分类报告。
+  - [x] baseline 不自动接受，关键断言不能被 mask 跳过。
+  - [x] 按钮改名、位移、时钟、环境不同测试通过。
 - [ ] **P3-05 Fixture / 多角色**（依赖 P3-03）
   - [ ] 登记 hook/mock、环境 allowlist、run namespace。
   - [ ] setup/cleanup RuntimeTask 与恢复。
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 全部完成，Gate 2 已通过（2026-09-28）。Phase 3 进行中，共 28 / 32。下一项：P3-04。
+- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 全部完成，Gate 2 已通过（2026-09-28）。Phase 3 进行中，共 29 / 32。下一项：P3-05。
 
 ### 执行记录
 
@@ -841,4 +841,20 @@ Task ID: P3-03
 产物 / commit 引用: 见本任务提交
 剩余风险: 在线验证只回放安全步骤；多角色（不同 authProfile 的 Scenario）的实际身份切换依赖 P3-05；live 失败时不保存诊断截图（避免未脱敏图像落盘）。
 下一项可执行任务: P3-04
+```
+
+```text
+Task ID: P3-04
+状态: completed
+开始时基线 commit / dirty files: c252e96（P3-03）；工作区干净
+实际修改文件: src/verify/semantic-diff.js、src/verify/visual-diff.js、test/drift-report.test.js（新）；src/verify/live.js（页面手册的语义 / 视觉漂移与分类）；src/verify/report.js（result 增加 drift → 退出码 4）；src/browser/playwright.js（semanticSnapshot / environmentInfo / rectOf）；src/evidence/capture-page.js（Capture 记录语义摘要与采集环境）；src/config/load.js（verify.visual：threshold / tolerance / dynamicRegions 校验）；src/commands/verify.js（输出漂移分类与差异图位置）；test/run.js
+契约变更: Capture 记录新增可选字段 semantic（白名单角色 + 可访问名称的摘要，不含正文与控件值，名称中的手机号 / 邮箱等替换为 [redacted]）与 environment（浏览器版本、平台、视口、DPR、语言、时区、fullPage）；验证报告新增 drift = { classification, semantic, visual, warnings, baselineAccepted:false }。分类优先级：behavior-breaking > content-changed > visual-only > environment-incompatible > inconclusive > none；content-changed 使结果为 drift（退出码 4），visual-only 不改变通过结论。src/config/schema.js 无需改动（verify 块在 load 时补默认值并校验）。
+执行命令与结果:
+  - node test/drift-report.test.js：10 passed（单元：语义摘要白名单与去敏、多重集比较；图像比较的阈值 / mask / 尺寸变化 / 关键区域拒绝 mask / 环境逐项比较。真实 Chromium：Capture 记录语义与环境；无变化 none；按钮改名 content-changed 退出码 4 并列出新增 / 消失的名称；布局下移 visual-only 退出码 0，差异比例、包围盒、差异图存在且临时原图已删除；时钟区域未声明时 visual-only、声明 dynamicRegions 后被 mask 为 none；mask 与标题断言重叠被拒绝并警告；视口变化 environment-incompatible 不比较；多次发现差异后发布记录与 Capture 数量不变）。
+  - node test/live-verify.test.js：9 passed。
+  - npm test：65 个测试文件全部通过（macOS / Node 26.4.0）。
+失败或跳过的验收及原因: 无。
+产物 / commit 引用: 见本任务提交
+剩余风险: 漂移比较目前只对页面手册做（任务手册的漂移分类只来自行为断言）；P3-04 之前的 Capture 没有语义摘要 / 环境，比较结果为 inconclusive / environment-incompatible，重新采集后可比较；字体差异只能通过平台与浏览器版本间接体现。
+下一项可执行任务: P3-05
 ```
