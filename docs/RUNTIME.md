@@ -36,9 +36,10 @@ manual generate page:chat --json            # 执行
 Run 的节点：`(fixture-setup) → capture | derive-image → (analyze) → draft → (rewrite) → validate → publish → (fixture-cleanup)`。
 缓存命中的采集报告 `cache-hit` 与当时的 `observedAt`（历史观察，未在线确认）。
 
-### 等待输入（退出码 3）
+### 等待输入（Run 状态 waiting_input）
 
-`waiting[].code` 与处理方式：
+Run 停在 `waiting_input` 时退出码为 3；其中人工修改冲突（`merge-conflict`）与已发布文档缺失（`document-missing`）
+属于冲突类，退出码为 4。`waiting[].code` 与处理方式：
 
 | code | 处理 |
 |---|---|

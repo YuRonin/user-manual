@@ -1,5 +1,7 @@
 # Phase 3：增量更新、在线验证、Fixture 与 CI
 
+> 状态：本地实现完成（2026-09-28）：P3-01～P3-08 与 Gate 3 的 11 个场景在 macOS 通过；跨平台 CI 矩阵待首次运行。执行记录见 [TODO](2026-09-24-living-manual-todo.md)。
+>
 > 前置：Phase 2 集成验收通过。入口：[总计划](2026-09-24-living-manual-optimization-plan.md)，契约：[C03～C05、C09～C11](2026-09-24-living-manual-contracts.md)，进度：[TODO](2026-09-24-living-manual-todo.md)。
 
 建议顺序：P3-01 → P3-06 → P3-02 → P3-03 → P3-04 → P3-05 → P3-07 → P3-08。先实现保守可靠的影响范围，再优化精准程度。Fixture 基础引用此前已有，本阶段才增加自动 setup/cleanup。

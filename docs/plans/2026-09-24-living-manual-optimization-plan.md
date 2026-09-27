@@ -14,10 +14,10 @@
 ## 1. 文档状态与阅读顺序
 
 - 日期：2026-09-24。
-- 状态：待实施；本轮仅编写文档。
+- 状态：Phase 0～2 已完成并通过 Gate 0～2；Phase 3 本地实现完成（Gate 3 场景在 macOS 通过，跨平台 CI 待运行）。进度以 TODO 为准。
 - 基线：当前工作区的实际代码，而非仅 HEAD；已有 README.md、SKILL.md、docs/ARCHITECTURE.md、test/compat-aliases.test.js 修改和 preserved-from-neoagent-worktree-2026-09-18/，均不由本计划覆盖。
-- 当前 package.json 为 0.1.0；update 未实现，verify 只做离线任务产物检查。
-- 本计划中的新文件、新命令、新 schema 都是目标设计，不代表当前可调用。
+- 编写计划时（2026-09-24）package.json 为 0.1.0、update 未实现、verify 只做离线任务产物检查；这些已在 Phase 3 实现，现状以 README.md / docs/RUNTIME.md 为准。
+- 本计划中的文件、命令、schema 是当时的目标设计；实施中的偏差记录在 TODO 各任务的"契约变更"中。
 - 路径均相对于仓库根目录 E:/NeoStar/user-manual，除非明确写为业务项目产物路径。
 
 | 何时阅读 | 文档 |

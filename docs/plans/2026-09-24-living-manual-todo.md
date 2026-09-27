@@ -1,6 +1,6 @@
 # Living User Manual Optimization TODO LIST
 
-> 状态：Phase 0、Phase 1、Phase 2 已完成，Phase 3 待开始。此文件是实施进度唯一来源；计划已写完不代表下面的工程任务已完成。
+> 状态：Phase 0～2 已完成；Phase 3 除 P3-07 的跨平台矩阵实际运行外全部完成（本地 Gate 3 场景已通过，等待 CI）。此文件是实施进度唯一来源；计划已写完不代表下面的工程任务已完成。
 > 总入口：[实施总计划](2026-09-24-living-manual-optimization-plan.md)；接口：[数据与接口契约](2026-09-24-living-manual-contracts.md)。
 
 ## 使用规则
@@ -193,7 +193,7 @@
   - [x] 已引用资源保留、raw 清理后重采集说明。
   - [x] 兼容退出、迁移/Runtime/Skill/README 对齐。
   - [x] 全部最终场景验收和未实现项说明。（最终场景由 Gate 3 验收；未实现项见 docs/ARCHITECTURE.md"Phase 3 之后的能力边界"）
-- [ ] **Gate 3：定向 update、在线漂移检测、编辑保护、跨平台 CI 和保留策略全部通过。**
+- [ ] **Gate 3：定向 update、在线漂移检测、编辑保护、跨平台 CI 和保留策略全部通过。**（除"跨平台 CI"外均已在本地通过，见 Gate 3 执行记录；待 GitHub Actions 矩阵首次运行通过后勾选）
 
 ## 建议的首批三个交付包
 
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 全部完成，Gate 2 已通过（2026-09-28）。Phase 3 进行中，共 31 / 32（P3-07 除矩阵实际运行外已完成）。下一项：Gate 3。
+- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 全部完成，Gate 2 已通过（2026-09-28）。Phase 3：P3-01～06、P3-08 完成，P3-07 除矩阵实际运行外完成，共 31 / 32；Gate 3 本地场景全部通过（2026-09-28），跨平台 CI 待推送后运行。下一项：推送并观察 GitHub Actions 矩阵，通过后勾选 P3-07 与 Gate 3。
 
 ### 执行记录
 
@@ -907,4 +907,28 @@ Task ID: P3-08
 产物 / commit 引用: 见本任务提交
 剩余风险: 缓存条目引用的 Capture 被回收后由查找时的 artifact-missing 处理（重新采集），gc 不单独清理缓存条目。
 下一项可执行任务: Gate 3 集成验收
+```
+
+```text
+Task ID: Gate 3
+状态: in_progress（11 个最终场景本地全部通过；"跨平台 CI"尚未实际运行）
+开始时基线 commit / dirty files: 11dcac7（P3-08）；工作区干净
+实际修改文件: test/gate3.test.js（新）、test/run.js、docs/RUNTIME.md 与 README.md（冲突类等待的退出码为 4 的说明）、docs/plans/2026-09-24-living-manual-phase-3.md 与总计划（状态行）
+执行命令与结果:
+  - node test/gate3.test.js：12 passed（真实 Chromium + CLI 子进程，同一 Git 项目，约 33 秒）：
+    1 首次 generate page:chat / page:home / task:edit-profile 完整 Run，Capture 全部断言通过、隐私 passed、provenance live，verify --all 通过；
+    2 再次 generate cache-hit，保留 observedAt，零新截图；
+    3 只改 docs.language 计划为 cache-hit；改 capture profile locale → capture-required:input-changed(locale)；
+    4 改共享组件：update --plan 只含 page:chat 与 task:edit-profile（reasonPath [Shared.tsx, task-profile, edit-profile-default, task-edit-profile]），执行后两者 updated，首页 bytes / mtime 不变；
+    5 改 package.json：confidence=conservative，三份手册都进入计划，baselines 报告 global-changed:package.json；
+    6 Git 无 diff、权限收回：verify --live 退出码 4（open-editor 失败），update --plan 无目标，离线 verify 仍通过；
+    7 块外人工说明在 update 中保留；简介块两边都改 → Run 等待 merge-conflict（退出码 4），正式文档不变，提案含新简介与人工说明，采用提案后 resume 完成；
+    8 generate --refresh 在 capture-committed 被杀（137）后 resume 成功且 Capture 数不变；
+    9 mock Fixture 错误态：expected.state=error 的 Scenario 采集成功并标 simulated；同一数据声明为 normal → unexpected-page-state；
+    10 public：文档目录只有正式文档与 images/annotated，Markdown 不含 .manual / raw / sanitized / diagnostics / cookie / 手机号，发布图隐私均 passed，verify --all 通过；
+    11 过期 staging：gc dry-run 只列出该目录且不删除，gc --apply --expect <planHash> 只删除它，verify --all 仍通过。
+  - npm test：71 个测试文件全部通过（unit 43 / browser 28；667 项通过；macOS 26.4 / Node 26.4.0 / npm 11.17.0 / git 2.50.1 / Playwright 1.63.0 Chromium），总耗时约 10 分 11 秒。
+Gate 3 对照: 定向 update ✓（场景 4、5）；在线漂移检测 ✓（场景 6，另见 drift-report / live-verify）；编辑保护 ✓（场景 7）；保留策略 ✓（场景 11，另见 retention）；跨平台 CI ✗ 未运行（工作流已编写并经 ci-workflow.test 静态校验）。
+未覆盖 / 限制: Windows / Linux 矩阵需要推送到 GitHub 后由 Actions 运行；本阶段只在 macOS 上实际执行过全量测试。
+下一项可执行任务: 推送后观察 manual-tests 工作流；通过则勾选 P3-07 与 Gate 3，失败则按平台差异修复。
 ```
