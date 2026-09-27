@@ -217,7 +217,7 @@ function preparePageFinal({ projectRoot, config, pageId, copy = null, markdown =
 }
 
 /** 发布事务；原子替换失败（如文件被占用）时旧文档保持不变。 */
-function publishPageFinal({ projectRoot, config, prepared, force = false }) {
+function publishPageFinal({ projectRoot, config, prepared, force = false, runId = null, hooks = {} }) {
   const stateDirAbs = path.join(projectRoot, config.artifacts.stateDir);
   const { page, body, finalPath, draftFacts } = prepared;
   try {
@@ -231,6 +231,8 @@ function publishPageFinal({ projectRoot, config, prepared, force = false }) {
       captureIds: (draftFacts.images || []).map((image) => image.captureId).filter(Boolean),
       definitionRevisions: { [page.id]: definitionRevision('page', page) },
       force,
+      runId,
+      hooks,
     });
     return { finalPath, release: published.release };
   } catch (error) {

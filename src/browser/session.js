@@ -32,6 +32,12 @@ function createBrowserSession({ browserType = null, launcher = launchBrowser } =
     if (entry) pool.delete(key);
     const browser = await launcher(providerConfig, { browserType });
     stats.launches += 1;
+    // 启动期间 session 已被关闭（例如取消）：这个 Browser 不再有人负责，立即关闭，避免残留进程。
+    if (closed) {
+      try { await browser.close(); } catch (_) { /* 已经退出 */ }
+      stats.browserCloses += 1;
+      throw new RuntimeError('session-closed', 'BrowserSession 已在启动浏览器期间关闭。');
+    }
     const fresh = { key, browser, crashed: false };
     browser.on('disconnected', () => {
       if (closed || fresh.closing) return;

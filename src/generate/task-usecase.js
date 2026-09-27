@@ -162,7 +162,7 @@ function prepareTaskFinal({ projectRoot, config, taskId, copy = null, markdown =
  * 提交：发布事务（文档、发布记录、current 指针，按 journal 推进、可对账）→ 任务状态投影。
  * 两者不是一个事务：文档已替换而状态写入失败时报告 partial-commit，不伪称成功。
  */
-function publishTaskFinal({ projectRoot, config, taskId, prepared, force = false }) {
+function publishTaskFinal({ projectRoot, config, taskId, prepared, force = false, runId = null, hooks = {} }) {
   const { projectStore, base, task } = loadTask({ projectRoot, config, taskId });
   const { final, facts, manualFile } = prepared;
   let published;
@@ -177,6 +177,8 @@ function publishTaskFinal({ projectRoot, config, taskId, prepared, force = false
       captureIds: task.lastCapture?.captureIds || task.captureIds || (facts.images || []).map((image) => image.captureId),
       definitionRevisions: { [task.id]: definitionRevision('userTask', task) },
       force,
+      runId,
+      hooks,
     });
   } catch (error) {
     if (error.transactionId && error.code !== 'publication-conflict' && !['file-busy', 'write-failed'].includes(error.code)) {

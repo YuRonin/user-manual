@@ -133,6 +133,21 @@ function storageFor(baseUrl, role) {
     await session.close();
   });
 
+  await test('启动浏览器期间 session 被关闭（取消）：新启动的 Browser 立即关闭，不残留进程', async () => {
+    const fake = fakeBrowserType();
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const slowType = { launch: async (options) => { await gate; return fake.browserType.launch(options); } };
+    const session = createBrowserSession({ browserType: slowType });
+    const pending = session.withScenario({ providerConfig, profile }, async (provider) => provider.open('http://app.test/'));
+    await session.close();
+    release();
+    await assert.rejects(pending, (e) => e.code === 'session-closed');
+    assert.strictEqual(fake.counts.launches, 1);
+    assert.strictEqual(fake.counts.browserCloses, 1);
+    assert.strictEqual(fake.browsers[0].isConnected(), false);
+  });
+
   await test('Context 注入 viewport / DPR / locale / timezone 与认证快照；匿名 Scenario 不注入', async () => {
     const fake = fakeBrowserType();
     const session = createBrowserSession({ browserType: fake.browserType });

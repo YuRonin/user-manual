@@ -40,12 +40,32 @@ function fileHash(file) {
   return fs.existsSync(file) ? `sha256:${sha256Hex(fs.readFileSync(file))}` : null;
 }
 
-function publicationDirFor(stateDirAbs, transactionId) {
-  return path.join(stateDirAbs, 'publication', transactionId);
+/*
+ * 事务目录（契约 C10）：Run 内的发布放在 runs/<runId>/publication/<transactionId>/；
+ * 没有 Run 的发布（兼容命令）与 Phase 1 旧事务在 .manual/publication/<transactionId>/。两处都会被读取。
+ */
+function journalRoots(stateDirAbs) {
+  const roots = [path.join(stateDirAbs, 'publication')];
+  const runs = path.join(stateDirAbs, 'runs');
+  if (fs.existsSync(runs)) {
+    for (const runId of fs.readdirSync(runs).sort()) {
+      const dir = path.join(runs, runId, 'publication');
+      if (fs.existsSync(dir)) roots.push(dir);
+    }
+  }
+  return roots;
+}
+
+function publicationDirFor(stateDirAbs, transactionId, runId = null) {
+  for (const root of journalRoots(stateDirAbs)) {
+    const dir = path.join(root, transactionId);
+    if (fs.existsSync(dir)) return dir;
+  }
+  return runId ? path.join(stateDirAbs, 'runs', runId, 'publication', transactionId) : path.join(stateDirAbs, 'publication', transactionId);
 }
 
 function writeJournal(stateDirAbs, journal) {
-  const file = path.join(publicationDirFor(stateDirAbs, journal.transactionId), 'journal.json');
+  const file = path.join(publicationDirFor(stateDirAbs, journal.transactionId, journal.runId || null), 'journal.json');
   fs.mkdirSync(path.dirname(file), { recursive: true });
   writeFileAtomic(file, JSON.stringify({ ...journal, updatedAt: new Date().toISOString() }, null, 2) + '\n');
 }
@@ -56,9 +76,15 @@ function readJournal(stateDirAbs, transactionId) {
 }
 
 function listJournals(stateDirAbs) {
-  const dir = path.join(stateDirAbs, 'publication');
-  if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir).map((id) => readJournal(stateDirAbs, id)).filter(Boolean);
+  const out = [];
+  for (const root of journalRoots(stateDirAbs)) {
+    if (!fs.existsSync(root)) continue;
+    for (const id of fs.readdirSync(root)) {
+      const file = path.join(root, id, 'journal.json');
+      if (fs.existsSync(file)) out.push(JSON.parse(fs.readFileSync(file, 'utf8')));
+    }
+  }
+  return out;
 }
 
 /** 本次发布引用的图片：必须已按内容安装且 hash 与 facts 一致。 */
@@ -125,8 +151,9 @@ function advance(projectRoot, stateDirAbs, journal, hooks = {}) {
  * @param {object} p.definitionRevisions
  * @param {boolean} [p.force]          覆盖上次发布之后的手工修改
  * @param {object} [p.hooks]           故障注入：after:<state>
+ * @param {string} [p.runId]           Run 内发布时事务目录放在 runs/<runId>/publication/
  */
-function publish({ projectRoot, stateDirAbs, manualId, documentFile, markdown, facts, captureIds = [], definitionRevisions = {}, force = false, hooks = {} }) {
+function publish({ projectRoot, stateDirAbs, manualId, documentFile, markdown, facts, captureIds = [], definitionRevisions = {}, force = false, hooks = {}, runId = null }) {
   const documentPath = toPosix(path.relative(projectRoot, documentFile));
   const oldDocHash = fileHash(documentFile);
   const newDocHash = hashOf(markdown);
@@ -162,11 +189,11 @@ function publish({ projectRoot, stateDirAbs, manualId, documentFile, markdown, f
   if (!checked.ok) {
     throw new PublicationError('invalid-release', `发布记录不完整，未写入任何文件: ${checked.errors.map((e) => `${e.path} ${e.message}`).join('；')}`);
   }
-  const dir = publicationDirFor(stateDirAbs, transactionId);
+  const dir = publicationDirFor(stateDirAbs, transactionId, runId);
   fs.mkdirSync(dir, { recursive: true });
   writeFileAtomic(path.join(dir, 'document.md'), markdown);
   writeFileAtomic(path.join(dir, 'release.json'), JSON.stringify(release, null, 2) + '\n');
-  const journal = { transactionId, manualId, documentPath, oldDocHash, newDocHash, releaseId: release.id, factsHash: release.factsHash, state: 'prepared', createdAt: new Date().toISOString() };
+  const journal = { transactionId, manualId, documentPath, oldDocHash, newDocHash, releaseId: release.id, factsHash: release.factsHash, runId, state: 'prepared', createdAt: new Date().toISOString() };
   writeJournal(stateDirAbs, journal);
   hooks['after:prepared']?.();
   try {

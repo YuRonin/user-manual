@@ -21,6 +21,7 @@ const { newUuid } = require('../model/ids');
 const { writeFileAtomic } = require('../util/atomic-write');
 const { createProjectStore } = require('../store/project');
 const { RuntimeError } = require('./errors');
+const { checkpoint } = require('./faults');
 
 const REQUEST_SCHEMA_VERSION = 1;
 const STYLE_GUIDE = 'references/manual-writing-style.md';
@@ -119,6 +120,7 @@ function requestModel(ctx, kind, task) {
   };
   fs.mkdirSync(dir, { recursive: true });
   writeFileAtomic(requestFileFor(ctx.runDir, requestId), JSON.stringify(request, null, 2) + '\n');
+  if (kind === 'rewrite') checkpoint('rewrite-requested');
   return waitingFor(ctx, request);
 }
 

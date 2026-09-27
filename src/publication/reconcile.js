@@ -39,25 +39,28 @@ function repair(projectRoot, stateDirAbs, { dryRun = false, hooks = {} } = {}) {
   const results = [];
   for (const journal of listJournals(stateDirAbs)) {
     if (['completed', 'conflict', 'aborted'].includes(journal.state)) continue;
-    const current = fileHash(path.join(projectRoot, journal.documentPath));
-    if (current !== journal.newDocHash && current !== journal.oldDocHash) {
-      writeJournal(stateDirAbs, { ...journal, state: 'conflict', conflictAt: new Date().toISOString(), conflictFrom: journal.state });
-      results.push({ transactionId: journal.transactionId, from: journal.state, result: 'conflict', message: `${journal.documentPath} 被修改过，已保留修改。` });
-      continue;
-    }
-    try {
-      advance(projectRoot, stateDirAbs, journal, hooks);
-      results.push({ transactionId: journal.transactionId, from: journal.state, result: 'completed' });
-    } catch (error) {
-      if (error instanceof PublicationError && error.code === 'publication-conflict') {
-        writeJournal(stateDirAbs, { ...journal, state: 'conflict', conflictAt: new Date().toISOString(), conflictFrom: journal.state });
-        results.push({ transactionId: journal.transactionId, from: journal.state, result: 'conflict', message: error.message });
-      } else {
-        results.push({ transactionId: journal.transactionId, from: journal.state, result: 'failed', message: `${error.code || 'error'}: ${error.message}` });
-      }
-    }
+    results.push(repairTransaction(projectRoot, stateDirAbs, journal, hooks));
   }
   return results;
 }
 
-module.exports = { status, repair };
+/** 对账单个事务（Runtime 恢复 publish 任务时只处理本 Run 的事务）。 */
+function repairTransaction(projectRoot, stateDirAbs, journal, hooks = {}) {
+  const current = fileHash(path.join(projectRoot, journal.documentPath));
+  if (current !== journal.newDocHash && current !== journal.oldDocHash) {
+    writeJournal(stateDirAbs, { ...journal, state: 'conflict', conflictAt: new Date().toISOString(), conflictFrom: journal.state });
+    return { transactionId: journal.transactionId, from: journal.state, result: 'conflict', message: `${journal.documentPath} 被修改过，已保留修改。` };
+  }
+  try {
+    advance(projectRoot, stateDirAbs, journal, hooks);
+    return { transactionId: journal.transactionId, from: journal.state, result: 'completed' };
+  } catch (error) {
+    if (error instanceof PublicationError && error.code === 'publication-conflict') {
+      writeJournal(stateDirAbs, { ...journal, state: 'conflict', conflictAt: new Date().toISOString(), conflictFrom: journal.state });
+      return { transactionId: journal.transactionId, from: journal.state, result: 'conflict', message: error.message };
+    }
+    return { transactionId: journal.transactionId, from: journal.state, result: 'failed', message: `${error.code || 'error'}: ${error.message}` };
+  }
+}
+
+module.exports = { status, repair, repairTransaction };

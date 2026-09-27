@@ -177,6 +177,8 @@ function runStatus({ projectRoot, runId = null }) {
     })),
     cache: state.plan.summary?.cache || [],
     riskBoundaries: state.plan.summary?.riskBoundaries || [],
+    // 恢复理由与复用来源：来自事件日志（日志缺失时为空，不影响任务状态）。
+    recovery: events.events.filter((e) => /^recovery:/.test(e.message || '')).map((e) => ({ taskId: e.taskId, result: e.message.slice('recovery:'.length), at: e.at })),
     events: { count: events.events.length, truncated: events.truncated, skipped: events.skipped },
   };
 }

@@ -30,6 +30,7 @@ const { lookup, offlineMissError } = require('../cache/lookup');
 const { collectPlanningInputs, imageInputsOf, subjectKey } = require('./planner');
 const { RuntimeError } = require('./errors');
 const { requestModel } = require('./model-request');
+const { checkpoint, publicationHooks } = require('./faults');
 const { copyFromResponse } = require('./model-response');
 
 const rel = (ctx, file) => path.relative(ctx.projectRoot, file).replace(/\\/g, '/');
@@ -203,11 +204,13 @@ async function capture(ctx, task) {
 
   if (subject.type === 'page') {
     const result = await capturePage({ projectRoot: ctx.projectRoot, config: ctx.config, pageId: subject.id, session: ctx.session(), runId: ctx.runId });
+    checkpoint('capture-committed');
     const outputs = [{ kind: 'capture', ref: result.record.id }];
     writeCaptureCache(ctx, task, current, outputs, [result.record], result.record.observedAt);
     return { outputs, warnings: [...warnings, ...result.ready.warnings], actions: 1 };
   }
   const result = await captureTask({ projectRoot: ctx.projectRoot, config: ctx.config, taskId: subject.id, session: ctx.session() });
+  checkpoint('capture-committed');
   const captureIds = result.updatedTask.lastCapture.captureIds;
   const outputs = [
     ...captureIds.map((id) => ({ kind: 'capture', ref: id })),
@@ -327,9 +330,8 @@ function publishDoc(ctx, task) {
   const body = subject.type === 'task' ? prepared.final : prepared.body;
   if (sha256Hex(body) !== stagedDoc.sha256) throw new RuntimeError('run-input-changed', `${subjectKey(subject)} 的文档在校验之后发生了变化，需要重新规划。`);
   const force = !!task.input.force;
-  const published = subject.type === 'task'
-    ? publishTaskFinal({ projectRoot: ctx.projectRoot, config: ctx.config, taskId: subject.id, prepared, force })
-    : publishPageFinal({ projectRoot: ctx.projectRoot, config: ctx.config, prepared, force });
+  const common = { projectRoot: ctx.projectRoot, config: ctx.config, prepared, force, runId: ctx.runId, hooks: publicationHooks() };
+  const published = subject.type === 'task' ? publishTaskFinal({ ...common, taskId: subject.id }) : publishPageFinal(common);
   return { outputs: [{ kind: 'release', ref: `${manualIdFor(subject.type, subject.id)}/${published.release.id}` }] };
 }
 
@@ -347,4 +349,4 @@ const HANDLERS = {
   publish: publishDoc,
 };
 
-module.exports = { HANDLERS, fileRef, writeRunFile };
+module.exports = { HANDLERS, fileRef, writeRunFile, writeCaptureCache, readRecords, currentSubjectInputs };

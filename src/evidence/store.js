@@ -14,6 +14,7 @@
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const { sha256Hex } = require('../util/hash');
@@ -29,6 +30,15 @@ class CaptureStoreError extends Error {
     this.name = 'CaptureStoreError';
     this.code = code;
     Object.assign(this, details);
+  }
+}
+
+function processAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === 'EPERM';
   }
 }
 
@@ -75,7 +85,31 @@ function createCaptureStore({ projectRoot, stateDirAbs }) {
     const captureId = newUuid();
     const stagingDir = path.join(stagingRoot, captureId);
     fs.mkdirSync(stagingDir, { recursive: true });
+    // 记录所属进程：进程被强杀后，恢复时据此回收残留的 staging（见 cleanupStaging）。
+    fs.writeFileSync(path.join(stagingDir, '.owner.json'), JSON.stringify({ pid: process.pid, host: os.hostname(), createdAt: new Date().toISOString() }));
     return { captureId, stagingDir, file: (name) => path.join(stagingDir, name) };
+  }
+
+  /**
+   * 回收残留 staging：所属进程（同一台机器）已退出，或没有归属记录且超过 maxAgeMs。
+   * 其它机器或仍在运行的进程的 staging 不动。只删 staging，不触碰已提交的 Capture。
+   * @returns {string[]} 被删除的 captureId
+   */
+  function cleanupStaging({ now = Date.now(), maxAgeMs = 60 * 60 * 1000 } = {}) {
+    if (!fs.existsSync(stagingRoot)) return [];
+    const removed = [];
+    for (const name of fs.readdirSync(stagingRoot)) {
+      const dir = path.join(stagingRoot, name);
+      let owner = null;
+      try { owner = JSON.parse(fs.readFileSync(path.join(dir, '.owner.json'), 'utf8')); } catch (_) { owner = null; }
+      let stale;
+      if (owner) stale = owner.host === os.hostname() && !processAlive(owner.pid);
+      else {
+        try { stale = now - fs.statSync(dir).mtimeMs > maxAgeMs; } catch (_) { stale = false; }
+      }
+      if (stale) { fs.rmSync(dir, { recursive: true, force: true }); removed.push(name); }
+    }
+    return removed;
   }
 
   function abort(handle) {
@@ -214,7 +248,7 @@ function createCaptureStore({ projectRoot, stateDirAbs }) {
     return { record: full, reused: false };
   }
 
-  return { begin, abort, commit, importRecord, read, list, readLatest, setLatest, evidenceDir, stagingRoot };
+  return { begin, abort, commit, importRecord, read, list, readLatest, setLatest, cleanupStaging, evidenceDir, stagingRoot };
 }
 
 module.exports = { createCaptureStore, CaptureStoreError, sanitizeUrl, imageSize, evidenceDirFor, recordFileFor, CAPTURE_SCHEMA_VERSION };

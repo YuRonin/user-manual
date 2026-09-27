@@ -142,11 +142,11 @@
   - [x] status/resume/run-submit 及兼容 wrapper。
   - [x] JSON/退出码/help/alias 对齐。
   - [x] Skill 将状态/cache/retry 决策交给 Runtime。
-- [ ] **P2-08 中断恢复矩阵**（依赖 P2-01～07）
-  - [ ] 独立子进程故障注入与锁/租约恢复。
-  - [ ] inputHash/output integrity 对账。
-  - [ ] 写操作 outcome_unknown 禁止盲目重放。
-  - [ ] 六个 checkpoint 和全部错误分类恢复验收。
+- [x] **P2-08 中断恢复矩阵**（依赖 P2-01～07）
+  - [x] 独立子进程故障注入与锁/租约恢复。
+  - [x] inputHash/output integrity 对账。
+  - [x] 写操作 outcome_unknown 禁止盲目重放。
+  - [x] 六个 checkpoint 和全部错误分类恢复验收。
 - [ ] **Gate 2：一条 generate 自动补依赖，新进程 resume，缓存理由与验证范围可解释。**
 
 ## Phase 3 — update / live verify / CI
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 进行中（2026-09-27 起），已完成 23 / 32。下一项：P2-08。
+- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 进行中（2026-09-27 起），已完成 24 / 32。下一项：Gate 2 集成验收。
 
 ### 执行记录
 
@@ -746,4 +746,21 @@ Task ID: P2-07
 产物 / commit 引用: 见本任务提交
 剩余风险: 页面 capture 使用 --url / --params / --profile 等覆盖参数时不登记缓存（与规划的缓存输入不一致），之后 generate 会重新采集；兼容三段式仍保留，旧脚本需改用 --draft 触发阶段一。
 下一项可执行任务: P2-08
+```
+
+```text
+Task ID: P2-08
+状态: completed
+开始时基线 commit / dirty files: c5c263e（P2-07）；工作区干净
+实际修改文件: src/runtime/faults.js、src/runtime/recovery.js（新）；src/runtime/runner.js（恢复对账、task-running 检查点、取消时立即关闭浏览器会话）；src/runtime/handlers.js（capture-committed 检查点、发布传 runId 与故障钩子、导出对账所需函数）；src/runtime/model-request.js（rewrite-requested 检查点）；src/evidence/capture-safe.js（raw-captured 检查点）；src/evidence/store.js（staging 记录所属进程，cleanupStaging 回收已退出进程的残留）；src/publication/publisher.js（Run 内事务位于 runs/<runId>/publication/，兼容读取 .manual/publication/）；src/publication/reconcile.js（repairTransaction 单事务对账）；src/generate/task-usecase.js、page-usecase.js（发布透传 runId / hooks）；src/browser/session.js（启动期间 session 已关闭时立即关闭新 Browser）；src/runtime/app.js、src/commands/status.js（status 展示恢复理由）；test/runtime-recovery.test.js、test/runtime-failure-matrix.test.js（新）、test/browser-session.test.js、test/run.js
+契约变更: 无（实现 C07 恢复语义与 C10 事务位置）。补充约定：故障检查点仅在 MANUAL_TEST_FAULTS=1 且 MANUAL_TEST_FAULT=<名称> 时生效；恢复结果以事件 reason=recovery:<reconciled|replay|conflict|outcome-unknown> 记录。Phase 2 的执行器不会执行 write / destructive 动作（停在动作前），因此动作级 before-send / sent / acknowledged 状态不会出现；"写操作结果不明"在任务级由 replay≠safe 的中断统一转为 outcome-unknown 并禁止重放。
+执行命令与结果:
+  - node test/runtime-recovery.test.js：7 passed。真实 Chromium，子进程在六个检查点 exit(137)，由全新进程 resume：task-running → replay 并采集一次；raw-captured → 回收残留 staging 后重采，无半条记录；capture-committed → reconciled，不重新采集；rewrite-requested → 复用同一请求，提交响应后完成；doc-renamed → 按 runs/<runId>/publication 下的 journal 继续，只有一条发布记录；release-committed → 补 current 指针与任务状态，不重复发布，重复 resume 零动作且文档字节不变；SIGINT 中断 CLI → capture 记 interrupted，resume 完成且 staging 为空。
+  - node test/runtime-failure-matrix.test.js：17 passed（浏览器启动失败、登录失效、目标 0 个 / 多个、意外跳转、404、500、超时、截图不稳定、隐私冲突、磁盘满、锁等待超时、发布冲突、输入变化各自的状态 / code / 尝试次数 / 退出码；模型错误只重试 rewrite；用户取消；不能安全重放的中断任务 outcome-unknown 且不重放）。
+  - node test/browser-session.test.js：8 passed（新增：启动期间关闭 session 不残留 Browser）。
+  - npm test：56 个测试文件全部通过（macOS / Node 26.4.0）。
+失败或跳过的验收及原因: 无。实施中发现并修复：取消发生在浏览器启动过程中时，新启动的 Browser 无人关闭，导致 CLI 进程不退出。
+产物 / commit 引用: 见本任务提交
+剩余风险: 跨主机的残留 staging 不自动回收；derive-image 中断后按重放处理（可能多出一条重新派生记录，不影响正确性）。
+下一项可执行任务: Gate 2 集成验收
 ```

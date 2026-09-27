@@ -46,6 +46,7 @@ function run(argv) {
       L.push(`  ${t.id.padEnd(14)} ${t.status.padEnd(13)} ${t.reason || ''}${t.reuse ? `  复用 ${t.reuse.observedAt}` : ''}`);
       if (t.error) L.push(`      ${t.error.code}: ${t.error.message}`);
     }
+    for (const r of result.recovery) L.push(`  恢复 ${r.taskId}: ${r.result}`);
     if (result.events.truncated) L.push('  事件日志末行不完整（已忽略；恢复以任务快照为准）');
   }
   L.push('');

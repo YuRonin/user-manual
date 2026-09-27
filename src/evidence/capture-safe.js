@@ -14,6 +14,7 @@ const { planRedactions } = require('../artifacts/redaction');
 const { layoutAnnotations } = require('../artifacts/annotation');
 const { buildPrivacyRecord } = require('../publication/validate');
 const { deriveImages } = require('./image-pipeline');
+const { checkpoint } = require('../runtime/faults');
 
 const MAX_ATTEMPTS = 3;
 
@@ -42,6 +43,7 @@ async function captureStable(provider, { rawPath, fullPage = false, format = 'pn
     const targets = await resolveTargets();
     const candidates = provider.collectSensitiveElements ? await provider.collectSensitiveElements({ fullPage }) : null;
     const shot = await provider.screenshot({ path: rawPath, fullPage, format });
+    checkpoint('raw-captured');
     const after = provider.collectGeometry ? await provider.collectGeometry({ fullPage }) : null;
     if (!before || sameGeometry(before, after)) {
       const geometry = after

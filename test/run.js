@@ -60,6 +60,8 @@ const FILES = [
   'runtime-runner.test.js',
   'model-handoff.test.js',
   'runtime-cli.test.js',
+  'runtime-recovery.test.js',
+  'runtime-failure-matrix.test.js',
 ];
 
 let failed = 0;

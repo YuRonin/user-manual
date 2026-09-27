@@ -19,6 +19,8 @@
 const { createBrowserSession } = require('../browser/session');
 const { toErrorResult, RuntimeError } = require('./errors');
 const { decideRetry } = require('./retry');
+const { checkpoint } = require('./faults');
+const { reconcileInterrupted } = require('./recovery');
 
 const TASK_TIMEOUT_KIND = { capture: 'scenarioActiveMs', 'derive-image': 'scenarioActiveMs' };
 
@@ -81,18 +83,19 @@ async function runRun({ runStore, runId, handlers, context = {}, signal = null, 
     session: () => { if (!session) session = sessionFactory(); return session; },
   };
   const closeSession = async () => { if (session) { const s = session; session = null; await s.close(); } };
+  // 取消时立即关闭浏览器，让进行中的采集尽快失败；任务随后记 interrupted，结果不当作成功。
+  const onAbort = () => { closeSession().catch(() => {}); };
+  if (signal) signal.addEventListener('abort', onAbort, { once: true });
   const emit = (event) => { if (onEvent) onEvent(event); };
 
   try {
     if (verifyInputs) await verifyInputs(opened.state);
-    // 恢复：上次等待输入的任务重新检查；中断的任务按 replay 策略决定能否直接重放。
+    // 恢复：上次等待输入的任务重新检查；中断的任务先按产物对账（已提交则补记成功），
+    // 否则按 replay 策略决定能否重放（见 recovery.js）。
     for (const task of runStore.read(runId).tasks) {
       if (task.status === 'waiting_input') runStore.transition(runId, task.id, 'pending', { lease, reason: 'resume-recheck' });
-      if (task.status === 'interrupted') {
-        if (task.retry.replay === 'safe') runStore.transition(runId, task.id, 'pending', { lease, reason: 'resume-replay' });
-        else runStore.transition(runId, task.id, 'waiting_input', { lease, error: { code: 'outcome-unknown', phase: task.kind, message: '上次执行在任务完成前中断，且该任务不能安全重放；请核查业务状态后再继续。', policy: 'outcome_unknown', retryable: false, requiresInput: true } });
-      }
     }
+    await reconcileInterrupted({ ctx, runStore, runId, lease });
 
     for (;;) {
       if (signal?.aborted) break;
@@ -104,6 +107,7 @@ async function runRun({ runStore, runId, handlers, context = {}, signal = null, 
       const budget = state.run.budget;
       const consumed = state.run.consumed;
       runStore.transition(runId, ready.id, 'running', { lease });
+      checkpoint('task-running');
       emit({ type: 'task-start', taskId: ready.id, kind: ready.kind });
       if (consumed.activeMs >= budget.runActiveMs || consumed.actions >= budget.maxActions) {
         const error = toErrorResult(new RuntimeError('budget-exceeded', `Run 预算已用尽（活跃 ${consumed.activeMs}ms / 动作 ${consumed.actions} 次）；需要显式追加预算后继续。`), { phase: ready.kind, scope: { taskId: ready.id } });
@@ -164,6 +168,7 @@ async function runRun({ runStore, runId, handlers, context = {}, signal = null, 
       }
     }
   } finally {
+    if (signal) signal.removeEventListener('abort', onAbort);
     clearInterval(heartbeat);
     await closeSession().catch(() => {});
     lease.release();
