@@ -82,4 +82,4 @@ function detectRedactions(candidates, rawPolicy = {}) {
   return { ok: true, redactions };
 }
 
-module.exports = { detectRedactions, classifyCandidate, isAlreadyObscured, normalizePolicy };
+module.exports = { detectRedactions, classifyCandidate, isAlreadyObscured, normalizePolicy, PHONE, EMAIL, CREDENTIAL_LABEL };

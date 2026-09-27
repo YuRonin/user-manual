@@ -6,6 +6,7 @@ const { captureStable, derivePublished } = require('../evidence/capture-safe');
 const { createCaptureStore, sanitizeUrl } = require('../evidence/store');
 const { revisionOf } = require('../util/hash');
 const { validateNavigation, runAssertions, isUrlOnly, DEFAULT_ASSERTION_TIMEOUT_MS } = require('../evidence/validate-page');
+const { errorCode } = require('../runtime/errors');
 
 class TaskExecutionError extends Error {
   constructor(code, message, details = {}) {
@@ -209,7 +210,8 @@ async function executeCapturePlan(plan, provider, options) {
       try { diagnostic = await diagnosticScreenshot(provider, stateDir, plan, activeStep); } catch (_) { /* best effort */ }
     }
     throw new TaskExecutionError(
-      cause.code || cause.reason || 'state-assertion-failed',
+      // 保留原始分类（CaptureError.reason / 定位与断言 code / Playwright 超时）；没有分类的才记 step-failed。
+      errorCode(cause) || 'step-failed',
       `任务 ${plan.taskId} 的步骤 ${activeStep?.id || '(entry)'} 失败: ${cause.message}`,
       {
         task: plan.taskId,
@@ -218,6 +220,7 @@ async function executeCapturePlan(plan, provider, options) {
         target: activeStep?.action?.target || null,
         diagnostic,
         validation: cause.validation || null,
+        hint: cause.hint || null,
         suggestion: '检查目标的可访问名称、页面状态断言以及当前账号权限后重试。',
       }
     );

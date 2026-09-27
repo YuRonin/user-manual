@@ -51,6 +51,8 @@ const FILES = [
   'generate.test.js',
   'gate0.test.js',
   'gate1.test.js',
+  'run-store.test.js',
+  'runtime-errors.test.js',
 ];
 
 let failed = 0;

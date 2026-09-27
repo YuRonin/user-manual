@@ -1,6 +1,6 @@
 # Living User Manual Optimization TODO LIST
 
-> 状态：全部待执行。此文件是实施进度唯一来源；计划已写完不代表下面的工程任务已完成。
+> 状态：Phase 0、Phase 1 已完成，Phase 2 实施中。此文件是实施进度唯一来源；计划已写完不代表下面的工程任务已完成。
 > 总入口：[实施总计划](2026-09-24-living-manual-optimization-plan.md)；接口：[数据与接口契约](2026-09-24-living-manual-contracts.md)。
 
 ## 使用规则
@@ -107,11 +107,11 @@
 
 详细步骤：[Phase 2](2026-09-24-living-manual-phase-2.md)。推荐顺序：01 → 04 → 05 → 02 → 03 → 06 → 07 → 08。
 
-- [ ] **P2-01 Run Store 与统一错误**（依赖 Gate 1）
-  - [ ] Run/Task schema、状态机、attempt/outputRefs。
-  - [ ] task snapshot 为恢复依据，events 为诊断。
-  - [ ] 日志去敏、损坏末行处理和本地产物 ignore。
-  - [ ] 错误 code/scope/retryability 保留完整。
+- [x] **P2-01 Run Store 与统一错误**（依赖 Gate 1）
+  - [x] Run/Task schema、状态机、attempt/outputRefs。
+  - [x] task snapshot 为恢复依据，events 为诊断。
+  - [x] 日志去敏、损坏末行处理和本地产物 ignore。
+  - [x] 错误 code/scope/retryability 保留完整。
 - [ ] **P2-04 BrowserSession**（依赖 P2-01）
   - [ ] Browser ownership 与 Context 创建拆分。
   - [ ] Scenario/角色隔离及 page/popup alias。
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 与 Phase 1 全部完成，共 16 / 32；Gate 0、Gate 1 已通过（2026-09-24）。下一项：P2-01（Phase 2 开始前建议暂停审阅）。
+- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 进行中（2026-09-27 起），已完成 17 / 32。下一项：P2-04。
 
 ### 执行记录
 
@@ -605,4 +605,20 @@ Gate 1 对照: 1 迁移可重复 ✓；2 重跑合法 ✓；3 源码变化保守
 验收中发现并修复: --copy 定稿时说明段落重复提到已有界面名称，会被旧的“UI 名称序列必须与草稿逐项一致”检查误拒（定稿与 verify 两处）。修复：--copy 路径的 UI 名称由 validateCopy 限定，发布记录中的 facts 记录实际发布文档的 UI 名称序列与所采用的文案。
 未覆盖: Linux 环境未运行（P3-07 CI）；SKILL.md / references 的工作流说明尚未同步 --copy、manual migrate、manual publication（留待文档同步）。
 下一项可执行任务: P2-01（建议先审阅 Phase 1 再进入 Phase 2）
+```
+
+```text
+Task ID: P2-01
+状态: completed
+开始时基线 commit / dirty files: 7d39a85；工作区干净。环境：macOS（Darwin 25.4）/ Node 26.4.0；仓库此前只在 Windows 验证，本机先 npm ci + playwright install chromium，基线 npm test 45 个文件全部通过。
+实际修改文件: src/runtime/model.js、src/runtime/store.js、src/runtime/events.js、src/runtime/errors.js（新）；src/model/schema.js（run schemaVersion 1 与 validateRun）；src/store/lock.js（renewLock / inspectLock）；src/config/render.js（runs/、drafts/ 与 mergeStateGitignore）；src/privacy/detector.js（导出 PHONE / EMAIL 供日志去敏）；src/tasks/executor.js（保留原始错误 code）；test/run-store.test.js、test/runtime-errors.test.js（新）、test/run.js
+契约变更: 无（实现 C07 Task 七态与默认预算、C08 ErrorResult）。补充约定：Run 执行租约为 locks/run-<runId>.lock，每次状态写入续期；read() 只读，把租约失效的 running 显示为 effectiveStatus=interrupted，open() 拿到租约后才改写；outputRef kind = file / capture / release / request / value，file 与 request 必须带 sha256。
+执行命令与结果:
+  - node test/run-store.test.js：9 passed（plan / 任务先于 run.json 落盘、run.json 缺失视为未创建；新进程只读还原进度；plan.json 被改报 plan-tampered；非法转换与缺失 / 篡改 / 越界 outputRefs 拒绝；Capture 引用校验图片 hash；重试保留每次 attempt 的错误摘要、超上限 retry-exhausted；子进程持租约 exit(137) 后新进程 open() 转 interrupted、租约有效时 run-busy、释放后写入报 lease-lost；events 损坏末行跳过、删除不影响读取、URL 查询 / 邮箱 / 手机号 / 凭据被去敏；.gitignore 补齐且保留用户行、幂等；预算累计）。
+  - node test/runtime-errors.test.js：6 passed。先红：执行器改动前“保留原始 code”用例失败（TimeoutError → state-assertion-failed），改动后通过。
+  - npm test：47 个测试文件全部通过（macOS / Node 26.4.0）。
+失败或跳过的验收及原因: 无。run-store / runtime-errors 两个新文件是先写实现再补测试，仅执行器行为按先红流程验证。
+产物 / commit 引用: 见本任务提交
+剩余风险: 租约续期依赖状态写入或调用方显式 renew()，单个任务执行超过租约（30s）时需要 runner 心跳（P2-03 实现）；已有项目的 .gitignore 只在创建 Run 时补齐。
+下一项可执行任务: P2-04
 ```

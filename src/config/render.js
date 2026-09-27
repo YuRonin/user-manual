@@ -200,21 +200,41 @@ function renderConfigYaml(config, meta = {}) {
  * 浏览器会话、缓存、备份是本机中间产物，不入库。
  * （截图不在这里——它们在文档目录下，跟手册一起入库。）
  */
+const STATE_IGNORES = [
+  'session/',
+  'cache/',
+  'screenshots/',
+  'artifacts/',
+  'locks/',
+  'evidence/staging/',
+  'publication/',
+  // Run 状态、事件日志、模型交接文件（可能含业务文案）和草稿都是本机产物；分享用去敏导出。
+  'runs/',
+  'drafts/',
+  '*.bak',
+];
+
 function renderStateGitignore() {
   return [
     '# 由 manual init 生成。',
     '# config.yaml / project.yaml / pages/ / tasks/ / snapshots/ / current.json 应当入库；',
-    '# 下面这些是本机中间产物（锁、采集中的临时目录、原始截图等）。',
-    'session/',
-    'cache/',
-    'screenshots/',
-    'artifacts/',
-    'locks/',
-    'evidence/staging/',
-    'publication/',
-    '*.bak',
+    '# 下面这些是本机中间产物（锁、采集中的临时目录、原始截图、Run 状态等）。',
+    ...STATE_IGNORES,
     '',
   ].join('\n');
 }
 
-module.exports = { renderConfigYaml, renderStateGitignore, scalar };
+/**
+ * 给已有的 .manual/.gitignore 补齐缺失条目，保留用户自己加的行。
+ * @returns {string|null} 需要写入的新内容；已齐全返回 null。
+ */
+function mergeStateGitignore(existing) {
+  if (existing === null || existing === undefined) return renderStateGitignore();
+  const present = new Set(existing.split(/\r?\n/).map((line) => line.trim()));
+  const missing = STATE_IGNORES.filter((entry) => !present.has(entry));
+  if (missing.length === 0) return null;
+  const base = existing.endsWith('\n') || existing === '' ? existing : `${existing}\n`;
+  return `${base}# 由 manual 补充的本机产物条目。\n${missing.join('\n')}\n`;
+}
+
+module.exports = { renderConfigYaml, renderStateGitignore, mergeStateGitignore, STATE_IGNORES, scalar };

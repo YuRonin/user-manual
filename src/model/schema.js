@@ -16,7 +16,7 @@
 
 const { isSafeId, isUuid, isAssertionRef } = require('./ids');
 
-const SCHEMA_VERSIONS = { config: 2, page: 2, userTask: 2, scenario: 1, capture: 1, release: 1 };
+const SCHEMA_VERSIONS = { config: 2, page: 2, userTask: 2, scenario: 1, capture: 1, release: 1, run: 1 };
 
 const ACTION_TYPES = ['click', 'fill', 'select', 'check', 'uncheck', 'inspect'];
 const ASSERTION_TYPES = ['url', 'visible', 'hidden', 'editable'];
@@ -440,6 +440,27 @@ function validateRelease(release) {
   return c.result({ version: version.version });
 }
 
+function validateRun(run) {
+  const c = collector();
+  if (!isObject(run)) { c.error('$', 'invalid-type', 'Run 需要是对象。'); return c.result(); }
+  const version = checkSchemaVersion('run', run);
+  if (!version.ok) { c.error(version.path, version.code, version.message); return c.result(); }
+  // 延迟加载，避免 model ↔ runtime 之间的加载顺序耦合。
+  const { RUN_STATUSES } = require('../runtime/model');
+  if (!isUuid(run.id)) c.error('id', 'invalid-id', 'Run id 需要是 UUID。');
+  if (!nonEmpty(run.command)) c.error('command', 'required', 'command 必填。');
+  if (typeof run.planHash !== 'string' || !SHA256_RE.test(run.planHash)) c.error('planHash', 'invalid-hash', 'planHash 需要是 sha256。');
+  if (!RUN_STATUSES.includes(run.status)) c.error('status', 'invalid-status', `未知 Run 状态: ${run.status}`);
+  if (!Array.isArray(run.taskOrder) || run.taskOrder.some((id) => !isSafeId(id))) c.error('taskOrder', 'invalid-id', 'taskOrder 需要是任务 id 数组。');
+  if (run.predecessor !== null && run.predecessor !== undefined && !isUuid(run.predecessor)) c.error('predecessor', 'invalid-id', 'predecessor 需要是 Run id。');
+  if (!isObject(run.budget)) c.error('budget', 'required', 'budget 必填。');
+  if (!isObject(run.consumed)) c.error('consumed', 'required', 'consumed 必填。');
+  for (const field of ['createdAt', 'updatedAt']) {
+    if (!nonEmpty(run[field]) || Number.isNaN(Date.parse(run[field]))) c.error(field, 'required', `${field} 需要是 ISO 时间。`);
+  }
+  return c.result({ version: version.version });
+}
+
 // ---------------------------------------------------------------- 旧版本只读兼容
 
 /**
@@ -495,4 +516,5 @@ module.exports = {
   validateScenario,
   validateCapture,
   validateRelease,
+  validateRun,
 };

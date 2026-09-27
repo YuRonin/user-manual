@@ -15,6 +15,8 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 
+const { writeFileAtomic } = require('../util/atomic-write');
+
 const DEFAULT_LEASE_MS = 30000;
 const DEFAULT_TIMEOUT_MS = 10000;
 const POLL_MS = 50;
@@ -113,6 +115,21 @@ function releaseLock(file, token) {
   return true;
 }
 
+/** 续期：只有持有者能延长租约（长时间运行的 Run 租约用）；token 不符返回 false。 */
+function renewLock(file, token, leaseMs = DEFAULT_LEASE_MS) {
+  const owner = readOwner(file);
+  if (!owner || owner.token !== token) return false;
+  writeFileAtomic(file, JSON.stringify({ ...owner, leaseUntil: new Date(Date.now() + leaseMs).toISOString() }));
+  return true;
+}
+
+/** 只读判断锁状态：{ held: false } 或 { held: true, stale, owner }。 */
+function inspectLock(file, now = Date.now()) {
+  if (!fs.existsSync(file)) return { held: false };
+  const owner = readOwner(file);
+  return { held: true, stale: isStale(owner, file, now), owner };
+}
+
 function withLock(stateDirAbs, fn, options) {
   const lock = acquireLock(stateDirAbs, options);
   try {
@@ -122,4 +139,4 @@ function withLock(stateDirAbs, fn, options) {
   }
 }
 
-module.exports = { acquireLock, releaseLock, withLock, lockFileFor, isStale, LockError, DEFAULT_LEASE_MS };
+module.exports = { acquireLock, releaseLock, renewLock, inspectLock, withLock, lockFileFor, isStale, LockError, DEFAULT_LEASE_MS };
