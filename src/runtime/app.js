@@ -81,32 +81,32 @@ function cancellation() {
   return { signal: controller.signal, dispose: () => { process.removeListener('SIGINT', onSignal); process.removeListener('SIGTERM', onSignal); } };
 }
 
-async function execute({ projectRoot, project, runId, mode, verifyInputs = null }) {
+async function execute({ projectRoot, project, runId, mode, verifyInputs = null, sessionFactory = undefined }) {
   const cancel = cancellation();
   try {
-    return await runRun({ runStore: project.runStore, runId, handlers: HANDLERS, context: contextFor(projectRoot, project, mode), signal: cancel.signal, verifyInputs });
+    return await runRun({ runStore: project.runStore, runId, handlers: HANDLERS, context: contextFor(projectRoot, project, mode), signal: cancel.signal, verifyInputs, ...(sessionFactory ? { sessionFactory } : {}) });
   } finally {
     cancel.dispose();
   }
 }
 
 /** 规划并执行。规划有错误时不创建 Run。 */
-async function startRun({ projectRoot, command, targets, flags = {}, copy, acceptReview = false, force = false, predecessor = null }) {
+async function startRun({ projectRoot, command, targets, flags = {}, copy, acceptReview = false, force = false, predecessor = null, sessionFactory = undefined }) {
   const planned = planTargets({ projectRoot, command, targets, flags, copy, acceptReview, force });
   if (planned.errors.length) {
     throw new RuntimeError(/^([a-z][a-z0-9-]+):/.exec(planned.errors[0])?.[1] || 'invalid-plan', planned.errors.join('；'), { errors: planned.errors, plan: planned.plan });
   }
-  return executePlanned({ projectRoot, project: planned.project, command, targets, planned, predecessor });
+  return executePlanned({ projectRoot, project: planned.project, command, targets, planned, predecessor, sessionFactory });
 }
 
 /** 执行已经规划好的计划（update 先做影响分析再规划，之后走同一条执行路径）。 */
-async function executePlanned({ projectRoot, project, command, targets, planned, predecessor = null }) {
+async function executePlanned({ projectRoot, project, command, targets, planned, predecessor = null, sessionFactory = undefined }) {
   const { snapshot } = planned;
   const { run } = project.runStore.create({
     command, target: targets.join(' '), projectId: snapshot.projectId, modelRevision: snapshot.modelRevision, plan: planned.plan,
     budget: project.config.runtime?.budget || {}, predecessor,
   });
-  const summary = await execute({ projectRoot, project, runId: run.id, mode: planned.mode });
+  const summary = await execute({ projectRoot, project, runId: run.id, mode: planned.mode, sessionFactory });
   return { runId: run.id, plan: planned.plan, planHash: planned.planHash, summary };
 }
 

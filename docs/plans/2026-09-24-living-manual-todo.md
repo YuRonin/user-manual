@@ -184,10 +184,10 @@
   - [x] simulated provenance 和 cache 隔离。
   - [x] 生产拒绝、角色隔离、清理失败报告测试通过。
 - [ ] **P3-07 CI / 安装 / 性能**（依赖 P3-02/03/04/05/06）
-  - [ ] Windows/Linux、固定 Node/browser/fonts。
-  - [ ] 干净安装 smoke 和私有诊断 artifact 策略。
-  - [ ] 冷/热/局部更新调用数与耗时报表。
-  - [ ] 全量回归在矩阵环境通过。
+  - [x] Windows/Linux、固定 Node/browser/fonts。
+  - [x] 干净安装 smoke 和私有诊断 artifact 策略。
+  - [x] 冷/热/局部更新调用数与耗时报表。
+  - [ ] 全量回归在矩阵环境通过。（待推送后由 GitHub Actions 运行；本地 macOS 已全部通过）
 - [ ] **P3-08 保留策略和文档收尾**（依赖 P3-01～07）
   - [ ] 引用图 roots、gc dry-run/apply 再校验。
   - [ ] 已引用资源保留、raw 清理后重采集说明。
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 全部完成，Gate 2 已通过（2026-09-28）。Phase 3 进行中，共 30 / 32。下一项：P3-07。
+- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 全部完成，Gate 2 已通过（2026-09-28）。Phase 3 进行中，共 30 / 32（P3-07 除矩阵实际运行外已完成）。下一项：P3-08。
 
 ### 执行记录
 
@@ -820,7 +820,7 @@ Task ID: P3-02
 执行命令与结果:
   - node test/update-cli.test.js：6 passed（参数错误退出码 2；无变化时 --plan 与执行都零写入、不创建 Run；--plan 列出目标、原因链、缓存决策、analyze 复核、文档人工修改且不写任何文件；删除页面给出 pending-retirement 建议、不删文档、经过它的任务阻塞；无发布记录 no-baseline 并提示 generate；只改 docs / README 不触发）。
   - node test/incremental-update.test.js：6 passed（真实 Chromium：三页发布后无变化零写入；改共享组件只规划 chat / login，执行先停在分析复核（退出码 3）且首页不变；复核后 update 只重新发布 chat / login，不复用源码变化前的截图，首页 bytes / mtime 不变；update 写出的文档不触发下一轮；chat 人工说明在 update 中保留，login 采集失败时保留旧文档并报告 stale，chat 照常发布）。
-  - npm test：63 个测试文件全部通过（macOS / Node 26.4.0）。
+  - npm test：62 个测试文件全部通过（macOS / Node 26.4.0）。
 失败或跳过的验收及原因: 无。
 产物 / commit 引用: 见本任务提交
 剩余风险: 显式 --base 的分析对所有已发布手册统一比较；等待复核后的第二次 update 会复用第一次按新源码采集的截图（在同一源码指纹下是正确的）；update 目前每个目标一套 generate 节点，同 Scenario 的采集由 captureKey 去重。
@@ -836,7 +836,7 @@ Task ID: P3-03
 执行命令与结果:
   - node test/live-verify.test.js：9 passed（真实 Chromium：artifacts 与 --all 离线通过且 onlineChecked=false；live 通过时 claim 逐条（editor-opened passed / saved not_run）、写步骤停止边界与覆盖、章节结果、不新增 Capture、报告落盘；重复验证生成新报告且旧报告字节不变；Git 无变化下按钮改名 → ui-changed 退出码 4（artifacts 仍通过）；权限收回被发现、恢复后通过；页面 404 → page-not-found，--all 汇总失败；服务关闭 → inconclusive 退出码 1；分类表）。
   - node test/runtime-failure-matrix.test.js：17 passed；node test/task-first-e2e.test.js：2 passed；gate0 / gate1 / task-rerun（verify 旧用法）通过。
-  - npm test：64 个测试文件全部通过（macOS / Node 26.4.0）。
+  - npm test：63 个测试文件全部通过（macOS / Node 26.4.0）。
 失败或跳过的验收及原因: 无。
 产物 / commit 引用: 见本任务提交
 剩余风险: 在线验证只回放安全步骤；多角色（不同 authProfile 的 Scenario）的实际身份切换依赖 P3-05；live 失败时不保存诊断截图（避免未脱敏图像落盘）。
@@ -852,7 +852,7 @@ Task ID: P3-04
 执行命令与结果:
   - node test/drift-report.test.js：10 passed（单元：语义摘要白名单与去敏、多重集比较；图像比较的阈值 / mask / 尺寸变化 / 关键区域拒绝 mask / 环境逐项比较。真实 Chromium：Capture 记录语义与环境；无变化 none；按钮改名 content-changed 退出码 4 并列出新增 / 消失的名称；布局下移 visual-only 退出码 0，差异比例、包围盒、差异图存在且临时原图已删除；时钟区域未声明时 visual-only、声明 dynamicRegions 后被 mask 为 none；mask 与标题断言重叠被拒绝并警告；视口变化 environment-incompatible 不比较；多次发现差异后发布记录与 Capture 数量不变）。
   - node test/live-verify.test.js：9 passed。
-  - npm test：65 个测试文件全部通过（macOS / Node 26.4.0）。
+  - npm test：64 个测试文件全部通过（macOS / Node 26.4.0）。
 失败或跳过的验收及原因: 无。
 产物 / commit 引用: 见本任务提交
 剩余风险: 漂移比较目前只对页面手册做（任务手册的漂移分类只来自行为断言）；P3-04 之前的 Capture 没有语义摘要 / 环境，比较结果为 inconclusive / environment-incompatible，重新采集后可比较；字体差异只能通过平台与浏览器版本间接体现。
@@ -868,9 +868,27 @@ Task ID: P3-05
 执行命令与结果:
   - node test/scenario-fixtures.test.js：11 passed（单元：定义校验、环境策略五种拒绝、数据 revision 与命名空间；真实 Chromium：mock Fixture 空状态 Scenario 标 simulated、不替换页面默认截图；fixture 采集缓存只由自己命中、定义变化使其失效；生产 / 未登记环境规划即拒绝且没有写测试数据；hook Fixture setup → capture → cleanup，数据清理、secret 不出现在 .manual；采集失败 cleanup 仍执行；清理失败 fixture-cleanup-required 等待输入（退出码 3）且数据保留，resume 后清理、重复 resume 幂等；成员 / 匿名 Scenario 身份隔离）。
   - node test/live-verify.test.js：9 passed；node test/runtime-recovery.test.js：7 passed。
-  - npm test：66 个测试文件全部通过（macOS / Node 26.4.0）。
+  - npm test：65 个测试文件全部通过（macOS / Node 26.4.0）。
 失败或跳过的验收及原因: 无。设计取舍：Scenario 变体只用于 capture（与既有 scenario 目标规则一致），页面手册仍基于默认 Scenario；setup 中断按 replay=unsafe 进入 outcome-unknown，cleanup 按命名空间幂等可重放。
 产物 / commit 引用: 见本任务提交
 剩余风险: 页面手册暂不渲染多个 Scenario 的截图（变体证据可被后续章节模型引用）；hook 模块在 CLI 进程内执行，只能来自 .manual/fixtures 中登记的文件，模块本身的安全由项目维护者负责。
 下一项可执行任务: P3-07
+```
+
+```text
+Task ID: P3-07
+状态: in_progress（本地可验证的部分已完成；"全量回归在矩阵环境通过"需要推送到 GitHub 后由 Actions 实际运行，尚未执行，因此主项不勾选）
+开始时基线 commit / dirty files: d9b50f7（P3-05）；工作区干净
+实际修改文件: .github/workflows/manual-tests.yml、test/install-smoke.test.js、test/performance.test.js、test/ci-workflow.test.js（新）；test/run.js（unit / browser 分组、--list，导出分组供校验）；package.json（test:unit / test:browser）；src/browser/session.js（navigations / screenshots 调用计数）；src/runtime/app.js（startRun / executePlanned 可注入 sessionFactory）；src/commands/doctor.js（中文字体检查：Linux 用 fc-list，缺失 warn）；test/doctor.test.js；README.md（测试分组、性能与安装冒烟、CI 策略）；本文件（更正 P3-02～P3-05 记录中多算 1 的测试文件数）
+契约变更: 无。
+执行命令与结果:
+  - node test/ci-workflow.test.js：5 passed（push / pull_request 触发、只读权限、无 pull_request_target / secrets；Ubuntu + Windows × Node 20.19.0 / 22.14.0 精确固定且满足 engines；npm ci、固定 Chromium、Linux 中文字体、doctor、unit / browser 分组；只上传 test-results/、保留 7 天，不上传原图 / trace / 认证缓存 / .manual；run.js 覆盖全部测试文件且启动浏览器的文件都在 browser 组）。
+  - node test/install-smoke.test.js：3 passed（npm pack 不含 .manual / node_modules / test-results；解包到临时目录、HOME 指向空目录后 doctor 通过且不引用 gstack；init → inspect → describe → generate → update --plan 成功，不在 HOME 写项目状态）。
+  - node test/performance.test.js：5 passed，本机报告 {"cold":{"ms":4965,"launches":1,"contexts":2,"navigations":2,"screenshots":2},"warm":{"launches":0,"navigations":0,"medianMs":948,"p90Ms":954,"samples":3},"templateOnly":{"launches":0,"navigations":0},"sharedChange":{"launches":1,"contexts":1,"navigations":1,"screenshots":1}}。
+  - node test/doctor.test.js：9 passed。
+  - npm test：68 个测试文件全部通过（unit 42 / browser 26；macOS 26.4 / Node 26.4.0 / npm 11.17.0 / Playwright 1.63.0），总耗时约 9 分 26 秒。
+失败或跳过的验收及原因: Windows / Linux 矩阵尚未实际运行（本地无法执行 GitHub Actions，工作流只经过静态校验）；耗时阈值按计划不锁定，首次 CI 基线建立后再定。
+产物 / commit 引用: 见本任务提交
+剩余风险: 矩阵首次运行可能暴露平台差异（路径、字体、Windows 文件占用）；性能耗时受 runner 负载影响，仅作报告。
+下一项可执行任务: P3-08（P3-07 的矩阵验收在推送后补记）
 ```

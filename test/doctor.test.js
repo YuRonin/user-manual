@@ -187,6 +187,14 @@ async function main() {
     }
   });
 
+  await test('中文字体：Linux 上 fc-list 找不到时 warn（不阻止运行），其他平台跳过', () => {
+    const { checkFonts } = require('../src/commands/doctor');
+    assert.strictEqual(checkFonts({ platform: 'darwin' }).status, 'skip');
+    assert.strictEqual(checkFonts({ platform: 'linux', execFileSyncImpl: () => 'Noto Sans CJK SC,Noto Sans CJK SC Regular\n' }).status, 'ok');
+    assert.strictEqual(checkFonts({ platform: 'linux', execFileSyncImpl: () => '' }).status, 'warn');
+    assert.strictEqual(checkFonts({ platform: 'linux', execFileSyncImpl: () => { throw new Error('ENOENT'); } }).status, 'warn');
+  });
+
   process.stdout.write(`\n${passed} passed, ${failures.length} failed\n`);
   if (failures.length > 0) process.exitCode = 1;
 }

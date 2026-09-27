@@ -193,18 +193,27 @@ capture 和 generate 会读取正索引：capture 使用索引中的当前路由
 ## 测试
 
 ```bash
-npm test          # 129 项单元与端到端测试
-npm run test:init
-npm run test:inspect
-npm run test:capture
-npm run test:generate
+npm test               # 全部测试文件（node test/run.js）
+npm run test:unit      # 不启动浏览器的测试（秒级到数十秒）
+npm run test:browser   # 真实 Chromium + 本地测试服务器的集成测试
+node test/run.js --list --group browser   # 查看分组
 ```
 
-全程真实：真 spawn CLI、真 HTTP 服务器、真 Chromium、真 PNG。覆盖配置校验与幂等、15 个错误用例、
-Next.js 两套路由的扫描与全部跳过规则、动态路由转换、重扫不覆盖分析结果、stale 标记、prune、
-中文长文本 YAML 往返、截图像素尺寸与可重复性、7 类截图失败路径、10 类事实越界拦截、零侵入校验。
+全程真实：真 spawn CLI、真 HTTP 服务器、真 Chromium、真 PNG。测试服务器提供运行态开关（按钮改名、权限收回、
+页面 404、布局偏移、时钟区域），用来证明 `verify --live` 在源码没有变化时也能发现线上变化。
 
-capture 与 generate 测试会真的启动 Chromium，跑完约需 3-4 分钟。
+- `test/performance.test.js` 断言调用次数：冷启动 1 次 Browser 启动、每个 Scenario 一个 Context；无变化再生成不启动
+  Browser、不新增截图；只改模板不启动 Browser；改共享组件只重新导航受影响的页面。耗时只报告中位数 / p90
+  （设 `MANUAL_PERF_REPORT_DIR` 时写入 `performance.json`），不设硬阈值。
+- `test/install-smoke.test.js` 把 `npm pack` 的包解到临时目录，HOME 指向空目录，依次执行 doctor / init / inspect /
+  describe / generate / update，证明安装后的工具不依赖仓库外的个人工具目录。
+
+### CI
+
+`.github/workflows/manual-tests.yml`：Ubuntu 与 Windows × Node 20.19.0 / 22.14.0（精确固定），`npm ci` 后安装固定版本的
+Chromium（Linux 另装 `fonts-noto-cjk`），先跑 doctor，再依次跑 unit 与 browser 两组。
+只上传 `test-results/`（测试日志、doctor 与性能报告，已去敏，保留 7 天）；原图、trace 与认证缓存留在 runner 临时目录，
+从不上传；工作流只有只读权限，不使用 secrets，不部署、不合并、不自动接受视觉基线。
 
 ## 设计
 

@@ -19,6 +19,8 @@
   "scripts": {
     "install:compat": "node bin/install-compat.js",
     "test": "node test/run.js",
+    "test:unit": "node test/run.js --group unit",
+    "test:browser": "node test/run.js --group browser",
     "test:init": "node test/init.test.js",
     "test:inspect": "node test/inspect.test.js",
     "test:capture": "node test/capture.test.js",

@@ -22,7 +22,8 @@ const { refreshAuth } = require('../auth/runtime');
 
 function createBrowserSession({ browserType = null, launcher = launchBrowser } = {}) {
   const pool = new Map();
-  const stats = { launches: 0, contexts: 0, contextCloses: 0, browserCloses: 0, crashes: 0 };
+  // navigations / screenshots：性能验收用的调用计数（P3-07），不影响行为
+  const stats = { launches: 0, contexts: 0, contextCloses: 0, browserCloses: 0, crashes: 0, navigations: 0, screenshots: 0 };
   let closed = false;
 
   async function browserFor(providerConfig) {
@@ -67,6 +68,11 @@ function createBrowserSession({ browserType = null, launcher = launchBrowser } =
     });
     const warnings = [];
     stats.contexts += 1;
+    for (const [method, counter] of [['open', 'navigations'], ['screenshot', 'screenshots']]) {
+      if (typeof provider[method] !== 'function') continue;
+      const original = provider[method].bind(provider);
+      provider[method] = (...args) => { stats[counter] += 1; return original(...args); };
+    }
     try {
       const value = await fn(provider);
       if (entry.crashed) throw new RuntimeError('browser-crashed', '浏览器进程在 Scenario 执行期间退出。');

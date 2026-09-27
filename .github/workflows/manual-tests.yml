@@ -1,0 +1,80 @@
+# Living User Manual 工具自身的测试（P3-07）。
+# 只测试本工具；不部署业务站点、不自动合并 PR、不自动接受视觉基线或发布旧证据。
+#
+# 产物策略：失败时只上传 test-results/（测试日志与性能报告，内容已去敏），保留 7 天；
+# 原图 / trace / 认证缓存留在 runner 的临时目录里随任务销毁，从不上传；工作流不使用任何 secrets。
+name: manual-tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: manual-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / Node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        # engines.node >= 20.9.0：覆盖最低支持的 LTS 与当前 LTS，版本精确固定
+        node: ['20.19.0', '22.14.0']
+    env:
+      MANUAL_PERF_REPORT_DIR: test-results
+      # 认证缓存放在 runner 临时目录，不写用户目录，不进入产物
+      MANUAL_AUTH_CACHE_DIR: ${{ runner.temp }}/manual-auth
+      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: 安装依赖（锁文件固定版本）
+        run: npm ci
+
+      - name: 中文字体（Linux）
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+          fc-cache -f
+
+      - name: 安装固定版本的 Chromium
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then npx playwright install --with-deps chromium; else npx playwright install chromium; fi
+
+      - name: 环境诊断
+        run: |
+          mkdir -p test-results
+          node bin/manual.js doctor --json | tee test-results/doctor.json
+
+      - name: 单元测试（不启动浏览器）
+        run: npm run test:unit 2>&1 | tee test-results/unit.log
+
+      - name: 浏览器集成测试
+        run: npm run test:browser 2>&1 | tee test-results/browser.log
+
+      - name: 上传测试日志与性能报告（去敏，短保留）
+        if: failure() || success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}-node${{ matrix.node }}
+          path: test-results/
+          retention-days: 7
+          if-no-files-found: ignore

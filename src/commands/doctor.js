@@ -219,6 +219,22 @@ function checkAuthState(loaded, env, root) {
 /**
  * 收集全部检查项。依赖可注入，便于测试。
  */
+/**
+ * 中文字体（P3-07）：截图与视觉比较依赖字体。Linux 上缺 CJK 字体会渲染成方块，
+ * 视觉基线因平台字体不同而不可比较；只读检查（fc-list），缺失时 warn，不阻止运行。
+ */
+function checkFonts({ platform = process.platform, execFileSyncImpl = require('child_process').execFileSync } = {}) {
+  if (platform !== 'linux') return check('fonts:cjk', 'skip', `${platform} 自带中文字体，不检查。`);
+  try {
+    const out = execFileSyncImpl('fc-list', [':lang=zh', 'family'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 });
+    const families = [...new Set(String(out).split('\n').map((l) => l.split(',')[0].trim()).filter(Boolean))];
+    if (families.length) return check('fonts:cjk', 'ok', `找到中文字体：${families.slice(0, 3).join('、')}${families.length > 3 ? ' 等' : ''}`);
+  } catch (_) {
+    return check('fonts:cjk', 'warn', '无法运行 fc-list，未确认中文字体。', { hint: '安装 fontconfig 与中文字体，例如 apt-get install fonts-noto-cjk。' });
+  }
+  return check('fonts:cjk', 'warn', '没有找到中文字体：截图中的中文会显示为方块，视觉比较不可靠。', { hint: 'apt-get install fonts-noto-cjk 后运行 fc-cache -f。' });
+}
+
 function collectChecks({
   projectRoot,
   env = process.env,
@@ -226,12 +242,14 @@ function collectChecks({
   requireImpl = require,
   resolvePlaywrightImpl = require('../browser/playwright').resolvePlaywright,
   existsSync = fs.existsSync,
+  platform = process.platform,
 } = {}) {
   const checks = [
     check('tool', 'ok', `${pkg.name} ${pkg.version}`, { version: pkg.version }),
     checkNode(nodeVersion),
     ...checkDependencies(requireImpl),
     ...checkBrowser({ env, resolvePlaywrightImpl, existsSync }),
+    checkFonts({ platform }),
   ];
   const project = checkProject(projectRoot);
   checks.push(...project.checks, ...checkAuth(project.loaded, env));
@@ -262,4 +280,4 @@ function run(argv) {
   return report.ok ? 0 : 1;
 }
 
-module.exports = { run, HELP, KNOWN_FLAGS, collectChecks, versionAtLeast, checkAuthPermissions };
+module.exports = { run, HELP, KNOWN_FLAGS, collectChecks, versionAtLeast, checkAuthPermissions, checkFonts };
