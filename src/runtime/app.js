@@ -96,7 +96,12 @@ async function startRun({ projectRoot, command, targets, flags = {}, copy, accep
   if (planned.errors.length) {
     throw new RuntimeError(/^([a-z][a-z0-9-]+):/.exec(planned.errors[0])?.[1] || 'invalid-plan', planned.errors.join('；'), { errors: planned.errors, plan: planned.plan });
   }
-  const { project, snapshot } = planned;
+  return executePlanned({ projectRoot, project: planned.project, command, targets, planned, predecessor });
+}
+
+/** 执行已经规划好的计划（update 先做影响分析再规划，之后走同一条执行路径）。 */
+async function executePlanned({ projectRoot, project, command, targets, planned, predecessor = null }) {
+  const { snapshot } = planned;
   const { run } = project.runStore.create({
     command, target: targets.join(' '), projectId: snapshot.projectId, modelRevision: snapshot.modelRevision, plan: planned.plan,
     budget: project.config.runtime?.budget || {}, predecessor,
@@ -213,4 +218,4 @@ function recordCapture({ projectRoot, subject, captureIds, extraRefs = [], obser
   }
 }
 
-module.exports = { openProject, copyPolicy, planTargets, startRun, resumeRun, runStatus, recordCapture, changedInputs };
+module.exports = { openProject, copyPolicy, planTargets, startRun, executePlanned, resumeRun, runStatus, recordCapture, changedInputs };

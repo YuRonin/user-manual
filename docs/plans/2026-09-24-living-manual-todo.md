@@ -163,11 +163,11 @@
   - [x] 旧/当前/新三方比较和自由编辑保护。
   - [x] 冲突保存 proposed diff、等待输入。
   - [x] 文档移动/手工删除不静默覆盖。
-- [ ] **P3-02 update CLI**（依赖 P3-01/06）
-  - [ ] --plan 只读，执行复用 Runtime。
-  - [ ] 仅更新受影响 section/文件，失败保留旧版。
-  - [ ] retired 提案、无变化零写入、避免自触发。
-  - [ ] 增量端到端测试通过。
+- [x] **P3-02 update CLI**（依赖 P3-01/06）
+  - [x] --plan 只读，执行复用 Runtime。
+  - [x] 仅更新受影响 section/文件，失败保留旧版。
+  - [x] retired 提案、无变化零写入、避免自触发。
+  - [x] 增量端到端测试通过。
 - [ ] **P3-03 live verify**（依赖 P3-01）
   - [ ] artifact/live 范围分开，新验证记录不可变。
   - [ ] 每次 live 真实导航，按 claim/Scenario 回放。
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 全部完成，Gate 2 已通过（2026-09-28）。Phase 3 进行中，共 26 / 32。下一项：P3-02。
+- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 全部完成，Gate 2 已通过（2026-09-28）。Phase 3 进行中，共 27 / 32。下一项：P3-03。
 
 ### 执行记录
 
@@ -809,4 +809,20 @@ Task ID: P3-06
 产物 / commit 引用: 见本任务提交
 剩余风险: 人工在块外插入的图片不在 facts.images 中，任务文档会因"截图引用发生变化"被拒（安全但限制了自由图片）；块外内容以"前一个块"为锚点，锚点块被新生成删除时接到更早的块之后。
 下一项可执行任务: P3-02
+```
+
+```text
+Task ID: P3-02
+状态: completed
+开始时基线 commit / dirty files: 60065ca（P3-06）；工作区干净
+实际修改文件: src/commands/update.js、src/update/plan.js、src/inspect/refresh.js（新）；src/commands/inspect.js（核心逻辑移入 refreshModel，行为不变）；src/runtime/planner.js（COMMANDS 增加 update，复用 generate 节点）；src/runtime/app.js（executePlanned：执行预先规划的计划）；src/cli/commands.js、bin/manual.js（update 从"计划中"改为正式命令）；src/cli/run-report.js（printRun 可附加字段与说明；merge-conflict / document-missing 的下一步提示）；src/update/impact.js（无基线提示改为 manual generate）；test/update-cli.test.js、test/incremental-update.test.js（新）、test/init.test.js（未实现命令用例改为未知命令）、test/run.js
+契约变更: 无接口变化。约定：update 执行前做一次与 inspect 相同的定义提交（刷新源码指纹），因此源码变化会让受影响页面的语义分析变为 stale 并在 Run 中等待复核（与 P1-05 规则一致）；src/publication/publisher.js、src/cache/policy.js、src/compat/aliases.js 无需改动（别名由命令注册表自动生成）。
+执行命令与结果:
+  - node test/update-cli.test.js：6 passed（参数错误退出码 2；无变化时 --plan 与执行都零写入、不创建 Run；--plan 列出目标、原因链、缓存决策、analyze 复核、文档人工修改且不写任何文件；删除页面给出 pending-retirement 建议、不删文档、经过它的任务阻塞；无发布记录 no-baseline 并提示 generate；只改 docs / README 不触发）。
+  - node test/incremental-update.test.js：6 passed（真实 Chromium：三页发布后无变化零写入；改共享组件只规划 chat / login，执行先停在分析复核（退出码 3）且首页不变；复核后 update 只重新发布 chat / login，不复用源码变化前的截图，首页 bytes / mtime 不变；update 写出的文档不触发下一轮；chat 人工说明在 update 中保留，login 采集失败时保留旧文档并报告 stale，chat 照常发布）。
+  - npm test：63 个测试文件全部通过（macOS / Node 26.4.0）。
+失败或跳过的验收及原因: 无。
+产物 / commit 引用: 见本任务提交
+剩余风险: 显式 --base 的分析对所有已发布手册统一比较；等待复核后的第二次 update 会复用第一次按新源码采集的截图（在同一源码指纹下是正确的）；update 目前每个目标一套 generate 节点，同 Scenario 的采集由 captureKey 去重。
+下一项可执行任务: P3-03
 ```

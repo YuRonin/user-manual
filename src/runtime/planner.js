@@ -32,7 +32,8 @@ const { resolveTarget } = require('./resolve-target');
 const { RuntimeError } = require('./errors');
 
 const PLAN_VERSION = 1;
-const COMMANDS = ['generate', 'capture'];
+// update 复用 generate 的节点（采集 → 草稿 → 文案 → 门槛 → 发布），目标集合由影响分析给出。
+const COMMANDS = ['generate', 'capture', 'update'];
 const CAPTURE_CAPABILITIES = ['capture', 'assertions', 'privacyGeometry'];
 const TASK_CAPABILITIES = [...CAPTURE_CAPABILITIES, 'semanticActions'];
 
@@ -218,7 +219,7 @@ function plan(snapshot, policy) {
   snapshot.targets.forEach((target, index) => {
     const s = snapshot.subjects[subjectKey(target)];
     const subject = s.subject;
-    if (command === 'generate' && target.scenarioId) errors.push(`scenario 目标只用于 capture：${target.ref}`);
+    if (command !== 'capture' && target.scenarioId) errors.push(`scenario 目标只用于 capture：${target.ref}`);
     errors.push(...s.planErrors);
     const needed = subject.type === 'task' ? TASK_CAPABILITIES : CAPTURE_CAPABILITIES;
     const missing = missingCapabilities(snapshot.capabilities, needed);

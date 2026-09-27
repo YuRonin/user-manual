@@ -314,10 +314,10 @@ test('init --help 退出码 0 且列出预设', (root) => {
   assert.match(r.stdout, /playwright-headed/);
 });
 
-test('未实现的子命令给出明确提示（退出码 2）', () => {
-  const r = spawnSync(process.execPath, [CLI, 'update'], { encoding: 'utf8' });
+test('未知子命令给出明确提示（退出码 2）', () => {
+  const r = spawnSync(process.execPath, [CLI, 'no-such-command'], { encoding: 'utf8' });
   assert.strictEqual(r.status, 2);
-  assert.match(r.stderr, /尚未实现/);
+  assert.match(r.stderr, /未知命令/);
 });
 
 test('init 写入稳定 project.id；--force 保留原身份；cacheKey 不受影响', (root) => {

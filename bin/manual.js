@@ -21,10 +21,7 @@ manual —— Living User Manual (v${pkg.version})
 命令:
 ${COMMANDS.map((c) => `  ${c.name.padEnd(10)} ${c.summary}`).join('\n')}
 
-尚未实现（后续版本）:
-${PLANNED.map((c) => `  ${c.name.padEnd(10)} ${c.summary}`).join('\n')}
-
-全局选项:
+${PLANNED.length ? `尚未实现（后续版本）:\n${PLANNED.map((c) => `  ${c.name.padEnd(10)} ${c.summary}`).join('\n')}\n\n` : ''}全局选项:
   --help      显示帮助（manual <命令> --help 查看子命令用法）
   --version   显示版本
 

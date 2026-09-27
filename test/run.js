@@ -66,6 +66,8 @@ const FILES = [
   'git-changes.test.js',
   'impact-analysis.test.js',
   'manual-merge.test.js',
+  'update-cli.test.js',
+  'incremental-update.test.js',
 ];
 
 let failed = 0;

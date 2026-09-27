@@ -12,6 +12,7 @@ const COMMANDS = [
   { name: 'describe', module: 'describe', summary: '把页面的源码分析结果（标题/用途/操作）写回页面模型' },
   { name: 'capture', module: 'capture', summary: '用真实浏览器采集页面或任务证据（只推进到证据提交）' },
   { name: 'generate', module: 'generate', summary: '规划并执行：按需采集 → 事实草稿 → 文案 → 发布门槛 → 发布（可 --plan 预览）' },
+  { name: 'update', module: 'update', summary: '根据源码变化增量更新已发布手册（可 --plan 预览影响与原因）' },
   { name: 'status', module: 'status', summary: '查看 Run 的任务状态、等待原因、失败与缓存命中说明（只读）' },
   { name: 'resume', module: 'resume', summary: '从任务快照继续执行 Run；输入变化时用 --replan 创建新 Run' },
   { name: 'run-submit', module: 'run-submit', summary: '提交宿主模型对交接请求的响应，解除等待' },
@@ -28,9 +29,7 @@ const COMMANDS = [
 ];
 
 // 已规划但尚未实现的子命令：命中时给出明确说明，而不是「未知命令」
-const PLANNED = [
-  { name: 'update', summary: '根据代码变化增量更新手册' },
-];
+const PLANNED = [];
 
 function findCommand(name) {
   return COMMANDS.find((command) => command.name === name) || null;

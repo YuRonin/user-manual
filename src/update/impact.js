@@ -310,7 +310,7 @@ function analyzeProject({ projectRoot, config, base = null }) {
   }
   const fallbackGroups = groups.filter((g) => g.report.fallback).flatMap((g) => g.manualIds);
   const rebuild = [...new Set([...missing, ...fallbackGroups])].sort();
-  if (published.length === 0) return { ...fullRebuild('no-baseline', '还没有任何发布记录，没有可比较的基线：需要全量生成。'), currentGraph, model };
+  if (published.length === 0) return { ...fullRebuild('no-baseline', '还没有任何发布记录，没有可比较的基线：先用 manual generate <目标> 生成手册。'), currentGraph, model };
   const conservative = groups.some((g) => g.report.confidence === CONFIDENCE.CONSERVATIVE) || rebuild.length > 0;
   return {
     ok: true,
