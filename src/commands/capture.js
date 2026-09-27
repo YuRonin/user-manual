@@ -14,23 +14,11 @@ const path = require('path');
 
 const { parseArgs } = require('../cli/args');
 const { loadConfig } = require('../config/load');
-const { createProvider } = require('../browser');
-const { CaptureError, REASON } = require('../browser/errors');
+const { CaptureError } = require('../browser/errors');
 const { DEFAULT_READY_OPTIONS } = require('../browser/provider');
-const { CONFIDENCE, ANALYSIS, normalizePage, isActivePage } = require('../inspect/model');
-const { resolveRouteTemplate, derivePageScenario } = require('../scenarios/model');
-const store = require('../inspect/store');
-const { readIndexes, findForwardPage } = require('../inspect/index-store');
 const { displayPath } = require('../util/fsx');
-const { prepareAuth, classifyAuthFailure, refreshAuth } = require('../auth/runtime');
-const { validateNavigation, runAssertions } = require('../evidence/validate-page');
-const { captureStable, derivePublished } = require('../evidence/capture-safe');
-const { createProjectStore } = require('../store/project');
-const { createCaptureStore, sanitizeUrl } = require('../evidence/store');
-const { definitionRevision } = require('../model/revision');
-const { revisionOf } = require('../util/hash');
-
-const REASON_CODES = new Set(Object.values(REASON));
+const { validateNavigation } = require('../evidence/validate-page');
+const { capturePage, parseParams, resolveRoute, joinUrl } = require('../evidence/capture-page');
 
 const KNOWN_FLAGS = new Set([
   'projectRoot', 'params', 'url', 'waitFor', 'timeout', 'quietMs', 'settleMs',
@@ -110,35 +98,6 @@ function fail(error, { json }) {
   return 1;
 }
 
-/** 解析 `--params "id=123;tab=a"`。 */
-function parseParams(raw) {
-  const out = {};
-  if (!raw) return out;
-  for (const pair of String(raw).split(';')) {
-    const trimmed = pair.trim();
-    if (!trimmed) continue;
-    const eq = trimmed.indexOf('=');
-    if (eq === -1) continue;
-    out[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim();
-  }
-  return out;
-}
-
-/**
- * 把 `/artifact/:id` 这类模板换成具体路径（catch-all 参数按 / 拆段后逐段编码）。
- * @returns {{ ok: true, route } | { ok: false, missing: string[] }}
- */
-function resolveRoute(route, params) {
-  const resolved = resolveRouteTemplate(route, params);
-  return resolved.ok ? resolved : { ok: false, missing: [...resolved.missing, ...resolved.invalid] };
-}
-
-function joinUrl(baseUrl, route) {
-  const base = String(baseUrl).replace(/\/$/, '');
-  const suffix = route === '/' ? '/' : (route.startsWith('/') ? route : `/${route}`);
-  return base + suffix;
-}
-
 /**
  * 兼容旧接口：根据 HTTP 状态与页面事实判断这次打开是否真的成功。
  * 实际规则在 evidence/validate-page，与任务入口共用。
@@ -205,258 +164,28 @@ async function run(argv) {
   if (!loaded.ok) return fail(loaded.errors, { json });
   const { config } = loaded;
 
-  const stateDirAbs = path.join(projectRoot, config.artifacts.stateDir);
-  // 读取已提交模型（必要时导入手工修改 / 修复半写入）；浏览器工作在锁外进行，最后只提交这一页的观察投影
-  const projectStore = createProjectStore({ stateDirAbs, docsOutputDir: config.docs.outputDir });
-  let base;
+  let result;
   try {
-    base = projectStore.load();
-  } catch (e) {
-    return fail(['已有的页面文件解析失败：', ...(e.errors || [e.message]).map((x) => `  ${x}`)], { json });
-  }
-  const existing = { pages: base.model.pages };
-  if (existing.pages.length === 0) {
-    return fail(['.manual/pages/ 里还没有页面。先运行 `manual inspect` 扫描项目。'], { json });
-  }
-
-  const page = normalizePage(existing.pages.find((p) => p.id === pageId));
-  if (!page) {
-    const ids = existing.pages.map((p) => p.id).join(', ');
-    return fail([`找不到页面 "${pageId}"。已有: ${ids}`], { json });
-  }
-  if (!isActivePage(page)) {
-    return fail([
-      `page-not-active: 页面 "${pageId}" 当前是 ${page.lifecycle}，不能采集（定义与历史证据仍保留）。`,
-      page.lifecycle === 'missing' ? '如果只是改了路由，在页面文件里声明 routeBindings 后重跑 `manual inspect`。' : '需要恢复时把 lifecycle 改回 active。',
-    ], { json });
-  }
-  const indexes = readIndexes(stateDirAbs);
-  const indexedPage = indexes.ok
-    ? findForwardPage(indexes.forward, { id: page.id, route: page.route })
-    : null;
-  const effectiveRoute = typeof indexedPage?.route === 'string' ? indexedPage.route : page.route;
-
-  // ---- 解析截图规格与 provider
-  const profileId = values.profile || config.capture.activeProfile;
-  const profile = config.capture.profiles[profileId];
-  if (!profile) {
-    return fail([`截图规格 "${profileId}" 不在 config 的 capture.profiles 里。`], { json });
-  }
-
-  const providerId = values.provider || config.browser.activeProvider;
-  const providerConfig = config.browser.providers[providerId];
-  if (!providerConfig) {
-    return fail([`Browser Provider "${providerId}" 不在 config 的 browser.providers 里。`], { json });
-  }
-
-  // ---- 拼出要打开的地址
-  let url;
-  if (values.url) {
-    url = values.url;
-  } else {
-    const params = parseParams(values.params);
-    const resolved = resolveRoute(effectiveRoute, params);
-    if (!resolved.ok) {
-      return fail(
-        [
-          `"${pageId}" 是动态路由 ${effectiveRoute}，需要具体参数值才能打开。`,
-          `缺少: ${resolved.missing.join(', ')}`,
-          `补上即可，例如: manual capture ${pageId} --params "${resolved.missing.map((m) => `${m}=<值>`).join(';')}"`,
-        ],
-        { json }
-      );
-    }
-    url = joinUrl(config.project.baseUrl, resolved.route);
-  }
-
-  // ---- 输出路径：先写本次 Capture 的私有 staging，提交后按内容寻址安装；--out 只额外导出一份原图副本
-  const captureStore = createCaptureStore({ projectRoot, stateDirAbs });
-  const format = config.artifacts.format || 'png';
-  const outPath = values.out ? path.resolve(projectRoot, values.out) : null;
-
-  // ---- 真正干活
-  const readyOptions = {
-    timeout: values.timeout ? Number(values.timeout) : DEFAULT_READY_OPTIONS.timeout,
-    quietMs: values.quietMs ? Number(values.quietMs) : DEFAULT_READY_OPTIONS.quietMs,
-    settleMs: values.settleMs ? Number(values.settleMs) : DEFAULT_READY_OPTIONS.settleMs,
-    freezeAnimations: values.noFreezeAnimations !== true,
-    waitFor: values.waitFor || null,
-  };
-
-  let auth;
-  try {
-    auth = prepareAuth(config);
-  } catch (e) {
-    return fail(e, { json });
-  }
-
-  let provider;
-  try {
-    provider = createProvider({ id: providerId, providerConfig, profile, storageState: auth.storageState });
-  } catch (e) {
-    return fail(e, { json });
-  }
-
-  let shot;
-  let ready;
-  let safe = null;
-  let navigation;
-  const staging = captureStore.begin();
-  const stagedRaw = staging.file(`raw.${format}`);
-  const stagedSanitized = staging.file('sanitized.png');
-  const stagedPublished = staging.file('published.png');
-  let identity = 'url-only';
-  const identityAssertions = (page.states?.default?.assertions || []).filter((a) => a && a.type !== 'url');
-  try {
-    const openResult = await provider.open(url, { timeout: readyOptions.timeout });
-    ready = await provider.waitUntilReady(readyOptions);
-    // 等待结束后重新读取 URL 与页面事实：SPA 延迟跳转以截图时的地址为准。
-    const observation = provider.currentObservation
-      ? await provider.currentObservation()
-      : await provider.probe();
-
-    // 先判断这次打开到底算不算成功，再决定要不要落盘。顺序不能反。
-    navigation = validateNavigation({ requestedUrl: url, openResult, observation });
-    ready.warnings.push(...navigation.warnings);
-    // 页面身份：只有非 URL 断言能证明"打开的是这一页"；只有 URL 的旧模型记为 url-only。
-    if (!values.url && identityAssertions.length > 0) {
-      try {
-        navigation.validations.push(...await runAssertions(provider, identityAssertions, {
-          scope: 'page-identity', idPrefix: 'default', timeoutMs: Math.min(readyOptions.timeout, 10000),
-        }));
-        identity = 'verified';
-      } catch (error) {
-        throw new CaptureError(REASON.PAGE_IDENTITY_FAILED, `${url} 的页面身份断言未通过: ${error.message}`, {
-          url, finalUrl: navigation.finalUrl, assertionId: error.validation?.assertionId || null,
-        });
-      }
-    }
-
-    // 稳定截图 + 离线派生：原图只留在 rawDir，发布图由同一份原图遮罩后写入 annotatedDir。
-    const captured = await captureStable(provider, {
-      rawPath: stagedRaw,
-      fullPage: values.fullPage === true,
-      format,
-    });
-    shot = captured.shot;
-    safe = await derivePublished({
-      captured,
-      rawPath: stagedRaw,
-      sanitizedPath: stagedSanitized,
-      publishedPath: stagedPublished,
-      theme: config.annotation.themes[config.annotation.activeTheme],
-      redactionRules: config.privacy || {},
-    });
-    if (!safe.published) ready.warnings.push(`页面隐私检测未通过（${safe.privacy.unresolved.length} 项无法定位），未生成发布图；手册只能出文字版。`);
-    const refreshed = await refreshAuth(provider, auth);
-    if (refreshed.warning) ready.warnings.push(refreshed.warning);
-  } catch (e) {
-    captureStore.abort(staging);
-    await provider.close();
-    const normalized = e instanceof CaptureError
-      ? e
-      : new CaptureError(e.code && REASON_CODES.has(e.code) ? e.code : REASON.NAVIGATION_FAILED, String(e.message || e), { url });
-    return fail(classifyAuthFailure(normalized, auth), { json });
-  } finally {
-    await provider.close();
-  }
-
-  // ---- 提交不可变 Capture：产物安装 → 记录可见 → latest 引用 → 页面投影
-  const capturedAt = new Date().toISOString();
-  const spec = {
-    viewport: shot.meta.viewport,
-    dpr: shot.meta.deviceScaleFactor,
-    fullPage: !!shot.meta.fullPage,
-    profile: profileId,
-    provider: providerId,
-  };
-  const finalUrl = sanitizeUrl(shot.meta.url);
-  const modelRevision = definitionRevision('page', page);
-  const scenario = derivePageScenario(page, config, { params: parseParams(values.params) });
-  let record;
-  try {
-    const artifacts = [
-      { kind: 'raw', file: stagedRaw, dir: config.artifacts.rawDir, prefix: pageId },
-      { kind: 'sanitized', file: stagedSanitized, dir: `${config.artifacts.sanitizedDir}/pages`, prefix: pageId },
-    ];
-    if (safe.published) artifacts.push({ kind: 'published', file: stagedPublished, dir: config.artifacts.annotatedDir, prefix: `page--${pageId}` });
-    record = captureStore.commit(staging, {
-      record: {
-        kind: 'page',
-        subject: { pageId },
-        runId: null,
-        scenarioId: scenario.id,
-        checkpointId: 'default',
-        inputHash: revisionOf({ pageId, modelRevision, scenarioRevision: scenario.revision, url: sanitizeUrl(url), spec }),
-        modelRevision,
-        // 截图时的源码指纹：之后源码变化时据此判断这张图已过期（记录本身不改，只是不再适用）
-        sourceFingerprint: page.analysis?.sourceRevision || null,
-        observedAt: capturedAt,
-        finalUrl,
-        actualRoute: navigation.actualRoute,
-        identity,
-        spec,
-        validations: navigation.validations,
-        privacy: safe.privacy,
-        redactions: safe.redactions.map(({ kind, rect, result }) => ({ kind, rect, result })),
-        provenance: {
-          mode: 'live',
-          derivedFromRawHash: safe.derived.rawHash,
-          geometryHash: safe.derived.geometryHash,
-          rendererVersion: safe.derived.rendererVersion,
-        },
+    result = await capturePage({
+      projectRoot,
+      config,
+      pageId,
+      options: {
+        profile: values.profile, provider: values.provider, url: values.url, params: values.params,
+        fullPage: values.fullPage === true, timeout: values.timeout, quietMs: values.quietMs, settleMs: values.settleMs,
+        noFreezeAnimations: values.noFreezeAnimations === true, waitFor: values.waitFor,
       },
-      artifacts,
     });
-    captureStore.setLatest({ [`page:${pageId}`]: record.id });
   } catch (e) {
-    captureStore.abort(staging);
-    return fail([`${e.code || 'capture-commit-failed'}: ${e.message}`], { json });
+    return fail(e instanceof CaptureError ? e : (e.errors || [e.message]), { json });
   }
-  const artifactOf = (kind) => record.artifacts.find((a) => a.kind === kind) || null;
-  const screenshotRelative = artifactOf('raw').path;
-  const publishedArtifact = artifactOf('published');
-  // 页面投影只是指向记录的便捷字段；可信度以 Capture 记录的 validations 为准。
-  const published = publishedArtifact ? {
-    captureId: record.id,
-    artifactPath: publishedArtifact.path,
-    sha256: publishedArtifact.sha256,
-    privacy: safe.privacy,
-    derivedFromRawHash: safe.derived.rawHash,
-    geometryHash: safe.derived.geometryHash,
-    rendererVersion: safe.derived.rendererVersion,
-  } : null;
+  const { page, updatedPage, record, shot, ready, navigation, identity, safe, url, effectiveRoute, profileId, profile, providerId, capturedAt, screenshotRelative, published } = result;
+
+  // --out 只额外导出一份原图副本；权威产物是内容寻址安装的 Capture。
+  const outPath = values.out ? path.resolve(projectRoot, values.out) : null;
   if (outPath) {
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
     fs.copyFileSync(path.join(projectRoot, screenshotRelative), outPath);
-  }
-
-  const updatedPage = {
-    ...page,
-    browser: {
-      verified: true,
-      latestCaptureId: record.id,
-      lastCapture: capturedAt,
-      screenshot: screenshotRelative,
-      url: shot.meta.url,
-      actualRoute: navigation.actualRoute,
-      identity,
-      viewport: `${shot.meta.viewport.width}x${shot.meta.viewport.height}`,
-      deviceScaleFactor: shot.meta.deviceScaleFactor,
-      provider: providerId,
-      published,
-    },
-  };
-  // 源码分析也做完了的话，这一页就从「推断」升级成「验证过」
-  if (page.status?.sourceAnalysis === ANALYSIS.COMPLETED) {
-    updatedPage.confidence = CONFIDENCE.VERIFIED;
-  }
-
-  // 观察提交：只改这一页的 browser 投影与可信度，不重写其它页面、不覆盖同时发生的定义修改
-  try {
-    projectStore.commit({ base, kind: 'observation', changes: { pages: [updatedPage] } });
-  } catch (e) {
-    return fail([`${e.code || 'model-commit-failed'}: ${e.message}（Capture ${record.id} 已提交，可重新运行以更新页面投影）`], { json });
   }
 
   if (json) {
@@ -483,7 +212,7 @@ async function run(argv) {
           actualRoute: navigation.actualRoute,
           published,
           // 只含类型与区域，不含敏感原文
-          redactions: safe ? safe.redactions.map(({ kind, rect, result }) => ({ kind, rect, result })) : [],
+          redactions: safe ? safe.redactions.map(({ kind, rect, result: r }) => ({ kind, rect, result: r })) : [],
           validations: navigation.validations,
           warnings: ready.warnings,
           confidence: updatedPage.confidence,

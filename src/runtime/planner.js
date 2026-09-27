@@ -173,6 +173,7 @@ function collectPlanningInputs({ projectRoot, config, base, targets, mode, cache
       subject: { type: target.type, id: target.id },
       scenario: { id: scenario.id, revision: scenario.revision, authProfile: scenario.authProfile, explicit: scenarioResult.explicit },
       captureKey: keyInfo.key,
+      captureKeyInput: keyInfo.input,
       captureUncertainty: keyInfo.uncertainty,
       cache,
       ...details,

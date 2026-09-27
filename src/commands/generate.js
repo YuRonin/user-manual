@@ -18,26 +18,9 @@ const path = require('path');
 
 const { parseArgs } = require('../cli/args');
 const { loadConfig } = require('../config/load');
-const { ANALYSIS, normalizePage, isActivePage } = require('../inspect/model');
-const store = require('../inspect/store');
-const { readIndexes, findForwardPage } = require('../inspect/index-store');
-const { buildDraft } = require('../generate/draft');
-const { extractFacts, compareFacts, formatViolations } = require('../generate/facts');
-const { buildPageFactPack } = require('../generate/fact-pack');
-const { renderPage } = require('../generate/render');
-const { publish } = require('../publication/publisher');
-const { manualIdFor } = require('../publication/release-store');
-const { definitionRevision } = require('../model/revision');
-const { validateCopy, checkPolishedMarkdown, formatFindings } = require('../generate/markdown-validate');
-const { writeText, displayPath } = require('../util/fsx');
-const { toMarkdownHref } = require('../publication/paths');
-const { validateArtifact, validatePublication, formatIssues } = require('../publication/validate');
-const { createCaptureStore } = require('../evidence/store');
-const { verifyCaptureRecord, describeProblems } = require('../evidence/integrity');
-
-function draftFactsPath(stateDirAbs, pageId) {
-  return path.join(stateDirAbs, 'drafts', `${pageId}.facts.json`);
-}
+const { extractFacts, formatViolations } = require('../generate/facts');
+const { displayPath } = require('../util/fsx');
+const { draftPage, preparePageFinal, publishPageFinal } = require('../generate/page-usecase');
 
 const KNOWN_FLAGS = new Set([
   'projectRoot', 'finalize', 'copy', 'acceptReview', 'noScreenshot', 'fallbackDraft', 'force', 'json', 'help',
@@ -97,137 +80,16 @@ function fail(errors, { json }) {
   return 1;
 }
 
-/** 读取页面模型并做 generate 需要的前置检查。 */
-function loadPage(projectRoot, config, pageId) {
-  const stateDirAbs = path.join(projectRoot, config.artifacts.stateDir);
-  const existing = store.readExistingPages(stateDirAbs);
-
-  if (existing.errors.length > 0) {
-    return { ok: false, errors: ['已有的页面文件解析失败：', ...existing.errors.map((e) => `  ${e}`)] };
-  }
-  if (existing.pages.length === 0) {
-    return { ok: false, errors: ['.manual/pages/ 里还没有页面。先运行 `manual inspect` 扫描项目。'] };
-  }
-
-  const found = existing.pages.find((p) => p.id === pageId);
-  if (!found) {
-    return {
-      ok: false,
-      errors: [`找不到页面 "${pageId}"。已有: ${existing.pages.map((p) => p.id).join(', ')}`],
-    };
-  }
-
-  const page = normalizePage(found);
-  const indexes = readIndexes(stateDirAbs);
-  const indexContext = indexes.ok
-    ? findForwardPage(indexes.forward, { id: page.id, route: page.route })
-    : null;
-
-  return { ok: true, page, stateDirAbs, indexContext };
-}
-
 // ---------------------------------------------------------------- 阶段一：草稿
 
-/** 从已提交的 Capture 记录取页面发布图；记录缺失、无发布图或产物被改动都拒绝。 */
-function publishedFromRecord({ projectRoot, stateDirAbs, captureId, sourceRevision = null }) {
-  let record;
-  try {
-    record = createCaptureStore({ projectRoot, stateDirAbs }).read(captureId);
-  } catch (error) {
-    return { ok: false, errors: [`${error.code || 'invalid-capture-record'}: ${error.message}`] };
-  }
-  if (!record) return { ok: false, errors: [`capture-record-missing: 页面引用的 Capture ${captureId} 不存在。`] };
-  const artifact = (record.artifacts || []).find((a) => a.kind === 'published');
-  if (!artifact) return { ok: false, errors: [`unsafe-page-artifact: Capture ${captureId} 没有通过隐私检测的发布图。`] };
-  // 截图之后源码变了：记录仍是真实的历史观察，但不再适用于当前页面
-  if (record.sourceFingerprint && sourceRevision && record.sourceFingerprint !== sourceRevision) {
-    return { ok: false, errors: [`evidence-stale: 页面源码在截图（${record.observedAt}）之后发生了变化，截图不再适用。`] };
-  }
-  const integrity = verifyCaptureRecord(projectRoot, record, { kinds: ['published'] });
-  if (!integrity.ok) return { ok: false, errors: describeProblems(integrity.problems) };
-  return { ok: true, artifactPath: artifact.path, sha256: artifact.sha256, privacy: record.privacy, captureId: record.id };
-}
-
-function runDraft({ projectRoot, config, page, stateDirAbs, skillRoot, indexContext, noScreenshot, json }) {
-  const errors = [];
-
-  // 事实优先级第一条：没有真实截图就没有可信的手册
-  if (!page.browser?.screenshot && !noScreenshot) {
-    errors.push(
-      `"${page.id}" 还没有截图，生成的手册会缺少界面。先运行 \`manual capture ${page.id}\`。`,
-      '确实要出纯文字版的话，加 --no-screenshot。'
-    );
-  }
-  if (page.status?.sourceAnalysis !== ANALYSIS.COMPLETED) {
-    errors.push(
-      `"${page.id}" 还没完成源码分析（当前 ${page.status?.sourceAnalysis || '未知'}），缺少标题或用途。`,
-      `先用 \`manual describe --id ${page.id} --title ... --purpose ...\` 补上。`
-    );
-  }
-  if (!isActivePage(page)) {
-    errors.push(`page-not-active: "${page.id}" 当前是 ${page.lifecycle}，不能生成当前手册（历史发布仍保留）。`);
-  }
-  if (page.includeInManual === false) {
-    errors.push(`"${page.id}" 标记为 includeInManual: false，不在手册范围内。`);
-  }
-  if (errors.length > 0) return fail(errors, { json });
-
-  const finalPath = path.join(projectRoot, config.docs.outputDir, `${page.id}.md`);
-
-  // 手册只能引用经过发布门槛的页面发布图（page.browser.published）；原图不能直接进文档。
-  let image = null;
-  if (!noScreenshot) {
-    const published = page.browser?.published;
-    if (!published) {
-      return fail(
-        [
-          `unsafe-page-artifact: "${page.id}" 只有未经隐私处理的原始截图（${page.browser.screenshot}），不能进入手册。`,
-          '当前版本尚未为页面截图生成经隐私检测的发布图；需要文字版手册可以加 --no-screenshot。',
-        ],
-        { json }
-      );
-    }
-    // 有 Capture 记录时以记录为准（页面 browser 块只是投影）；旧项目没有记录时沿用投影并由发布门槛核对 hash。
-    const source = page.browser?.latestCaptureId
-      ? publishedFromRecord({ projectRoot, stateDirAbs, captureId: page.browser.latestCaptureId, sourceRevision: page.analysis?.sourceRevision || null })
-      : { ok: true, artifactPath: published.artifactPath, sha256: published.sha256 || null, privacy: published.privacy || null, captureId: null };
-    if (!source.ok) return fail([...source.errors, `重新截一张: \`manual capture ${page.id}\``], { json });
-    const artifactFile = path.resolve(projectRoot, source.artifactPath);
-    // 截图记录在模型里但文件被删了——这属于事实缺失，必须说出来而不是生成一个坏链接
-    if (!fs.existsSync(artifactFile)) {
-      return fail([`页面模型记录的截图不存在: ${source.artifactPath}`, `重新截一张: \`manual capture ${page.id}\``], { json });
-    }
-    image = {
-      artifactPath: source.artifactPath,
-      markdownHref: toMarkdownHref({ manualFile: finalPath, artifactFile }),
-      sha256: source.sha256,
-      privacy: source.privacy,
-      ...(source.captureId ? { captureId: source.captureId } : {}),
-    };
-    const issues = validateArtifact(image, { projectRoot, config });
-    if (issues.length > 0) return fail(formatIssues(issues), { json });
-  }
-
+function runDraft({ projectRoot, config, pageId, skillRoot, noScreenshot, json }) {
   let built;
   try {
-    built = buildDraft(page, {
-      docsOutputDir: config.docs.outputDir,
-      pageFilePath: `.manual/pages/${page.id}.yaml`,
-      includeScreenshot: !noScreenshot,
-      indexContext,
-      image,
-      language: config.docs.language,
-    });
+    built = draftPage({ projectRoot, config, pageId, noScreenshot });
   } catch (error) {
-    return fail([error.message], { json });
+    return fail(error.errors || [error.message], { json });
   }
-  const { markdown, facts, pack } = built;
-
-  const draftPath = path.join(stateDirAbs, 'drafts', `${page.id}.md`);
-  writeText(draftPath, markdown);
-  // 发布事实与草稿一起落盘：finalize 用它核对图片 hash 与隐私记录，而不是信任润色稿。
-  writeText(draftFactsPath(stateDirAbs, page.id), JSON.stringify({ pageId: page.id, images: image ? [image] : [], factPack: pack, factsHash: pack.factsHash }, null, 2) + '\n');
-
+  const { page, draftPath, finalPath, markdown, facts, image, indexContext } = built;
   const draftFacts = extractFacts(markdown);
   const styleGuidePath = path.join(skillRoot, STYLE_GUIDE_RELATIVE);
 
@@ -285,48 +147,14 @@ function runDraft({ projectRoot, config, page, stateDirAbs, skillRoot, indexCont
 
 // ---------------------------------------------------------------- 阶段三：定稿
 
-/** 草稿之后页面定义、源码指纹、截图记录或模板变了：旧草稿不能再发布。 */
-function pageDraftStale(page, pack, language) {
-  if (!pack) return null;
-  const current = buildPageFactPack({ page, image: pack.artifacts[0] ? { ...pack.artifacts[0], captureId: page.browser?.latestCaptureId ?? pack.artifacts[0].captureId ?? null } : null, language, headerComments: pack.headerComments });
-  const changed = ['inputRevision', 'templateRevision', 'language'].filter((key) => current[key] !== pack[key]);
-  return changed.length ? `draft-stale: 草稿之后事实发生变化（${changed.join(', ')}），重新运行 \`manual generate ${page.id}\` 生成草稿。` : null;
-}
-
-function reviewFailure(findings, acceptReview) {
-  if (findings.blocked.length) return formatFindings(findings.blocked, '拒绝');
-  if (findings.review.length && !acceptReview) return ['review-required:', ...formatFindings(findings.review, '需确认'), '确认这些内容属实后加 --accept-review 重新运行。'];
-  return null;
-}
-
-function runFinalize({ projectRoot, config, page, stateDirAbs, finalizeInput, copyInput, acceptReview, fallbackDraft, force, json }) {
-  const draftPath = path.join(stateDirAbs, 'drafts', `${page.id}.md`);
-  if (!fs.existsSync(draftPath)) {
-    return fail(
-      [`找不到事实草稿: ${displayPath(draftPath, projectRoot)}`, `先运行 \`manual generate ${page.id}\`。`],
-      { json }
-    );
-  }
-
-  const factsFileEarly = draftFactsPath(stateDirAbs, page.id);
-  const draftFactsEarly = fs.existsSync(factsFileEarly) ? JSON.parse(fs.readFileSync(factsFileEarly, 'utf8')) : {};
-  const pack = draftFactsEarly.factPack || null;
-  let stale;
-  try { stale = pageDraftStale(page, pack, config.docs.language); } catch (error) { return fail([error.message], { json }); }
-  if (stale) return fail([stale], { json });
-
-  let polished;
+function runFinalize({ projectRoot, config, pageId, finalizeInput, copyInput, acceptReview, fallbackDraft, force, json }) {
+  let copy = null;
+  let markdown = null;
   if (copyInput) {
-    // 推荐路径：只接收文案块，正文由事实包确定性渲染
-    if (!pack) return fail(['旧版草稿没有事实包，重新运行 `manual generate` 生成草稿后再用 --copy。'], { json });
-    let copy;
     try { copy = JSON.parse(fs.readFileSync(path.resolve(copyInput), 'utf8')); } catch (error) { return fail([`--copy 读取失败: ${error.message}`], { json }); }
-    const failure = reviewFailure(validateCopy(pack, copy), acceptReview);
-    if (failure) return fail(failure, { json });
-    polished = renderPage(pack, copy);
   } else if (finalizeInput === '-') {
     try {
-      polished = fs.readFileSync(0, 'utf8');
+      markdown = fs.readFileSync(0, 'utf8');
     } catch (e) {
       return fail([`从 stdin 读取失败: ${e.message}`], { json });
     }
@@ -335,41 +163,27 @@ function runFinalize({ projectRoot, config, page, stateDirAbs, finalizeInput, co
     // 按 projectRoot 解析会让「从别处指定 --project-root」的用法很意外。
     const inputAbs = path.resolve(finalizeInput);
     if (!fs.existsSync(inputAbs)) return fail([`--finalize 文件不存在: ${inputAbs}`], { json });
-    polished = fs.readFileSync(inputAbs, 'utf8');
+    markdown = fs.readFileSync(inputAbs, 'utf8');
   }
 
-  if (!polished.trim()) return fail(['润色后的内容是空的。'], { json });
-
-  const draftMarkdown = fs.readFileSync(draftPath, 'utf8');
-  // --copy：正文由事实包渲染、文案已由 validateCopy 检查，不再做草稿逐项比对
-  const result = copyInput ? { ok: true, violations: [] } : compareFacts(extractFacts(draftMarkdown), extractFacts(polished));
-  if (!copyInput && result.ok) {
-    // 结构之外的正文检查：否定事实动作直接拒绝；新数字 / 单位与业务承诺需要人确认
-    const failure = reviewFailure(checkPolishedMarkdown(draftMarkdown, polished, pack), acceptReview);
-    if (failure) return fail(failure, { json });
-  }
-
-  const finalPath = path.join(projectRoot, config.docs.outputDir, `${page.id}.md`);
-  if (fs.existsSync(finalPath) && !force) {
-    return fail(
-      [`正式文档已存在: ${displayPath(finalPath, projectRoot)}`, '加 --force 覆盖。'],
-      { json }
-    );
-  }
-
-  // 事实校验没过：默认拒绝落盘，让润色重来。
-  // --fallback-draft 则按「事实优先」兜底——宁可文字生硬，也不能让手册说假话。
-  if (!result.ok && !fallbackDraft) {
+  let prepared;
+  let published;
+  try {
+    prepared = preparePageFinal({ projectRoot, config, pageId, copy, markdown, acceptReview, fallbackDraft, force });
+    published = publishPageFinal({ projectRoot, config, prepared, force });
+  } catch (error) {
+    if (error.code !== 'fact-mismatch') return fail(error.errors || [error.message], { json });
+    // 事实校验没过：默认拒绝落盘，让润色重来。
     if (json) {
       process.stdout.write(
         JSON.stringify(
           {
             ok: false,
             stage: 'finalize',
-            pageId: page.id,
+            pageId: error.pageId,
             reason: 'fact-mismatch',
-            violations: result.violations,
-            draftPath,
+            violations: error.violations,
+            draftPath: error.draftPath,
             hint: '润色只能改句式与语序。按 violations 修正后重新 --finalize，或加 --fallback-draft 用草稿原文定稿。',
           },
           null,
@@ -378,7 +192,7 @@ function runFinalize({ projectRoot, config, page, stateDirAbs, finalizeInput, co
       );
     } else {
       process.stderr.write('\n[manual generate] 事实校验未通过，没有输出正式文档：\n\n');
-      process.stderr.write(formatViolations(result.violations) + '\n');
+      process.stderr.write(formatViolations(error.violations) + '\n');
       process.stderr.write('\n  润色阶段只能改句式、语序、冗余表达、翻译腔、AI 套话。\n');
       process.stderr.write('  按上面各条修正后重新 --finalize；\n');
       process.stderr.write('  或者加 --fallback-draft，用事实草稿原文定稿（保事实、丢润色）。\n\n');
@@ -386,40 +200,7 @@ function runFinalize({ projectRoot, config, page, stateDirAbs, finalizeInput, co
     return 1;
   }
 
-  const content = result.ok ? polished : draftMarkdown;
-  const body = content.replace(/\s*$/, '') + '\n';
-
-  // 统一发布门槛（含 --fallback-draft）：图片引用、hash、产物位置与隐私记录都以草稿 facts 为准。
-  const factsFile = draftFactsPath(stateDirAbs, page.id);
-  if (!fs.existsSync(factsFile)) {
-    return fail([`缺少草稿事实文件: ${displayPath(factsFile, projectRoot)}`, `重新运行 \`manual generate ${page.id}\`。`], { json });
-  }
-  const draftFacts = JSON.parse(fs.readFileSync(factsFile, 'utf8'));
-  const draftImages = draftFacts.images || [];
-  const gate = validatePublication({ projectRoot, manualFile: finalPath, markdown: body, images: draftImages, config });
-  if (!gate.ok) return fail(formatIssues(gate.errors), { json });
-  // 所有检查都已在写入前完成；原子替换失败（如文件被占用）时旧文档保持不变。
-  let published;
-  try {
-    // 发布事务：文档 + 不可变发布记录（含 facts 与 Capture 引用）+ current 指针，可对账
-    published = publish({
-      projectRoot,
-      stateDirAbs,
-      manualId: manualIdFor('page', page.id),
-      documentFile: finalPath,
-      markdown: body,
-      facts: draftFacts,
-      captureIds: draftImages.map((image) => image.captureId).filter(Boolean),
-      definitionRevisions: { [page.id]: definitionRevision('page', page) },
-      force,
-    });
-  } catch (error) {
-    const hint = error.transactionId && !['file-busy', 'write-failed'].includes(error.code)
-      ? `（事务 ${error.transactionId}，运行 manual publication repair 对账）`
-      : '正式文档未改变。';
-    return fail([`${error.code || 'write-failed'}: ${error.message}${hint}`], { json });
-  }
-
+  const { page, body, finalPath, draftPath, factCheck, violations } = prepared;
   if (json) {
     process.stdout.write(
       JSON.stringify(
@@ -429,9 +210,9 @@ function runFinalize({ projectRoot, config, page, stateDirAbs, finalizeInput, co
           pageId: page.id,
           finalPath,
           draftPath,
-          factCheck: result.ok ? 'passed' : 'failed-used-draft',
+          factCheck,
           releaseId: published.release.id,
-          violations: result.violations,
+          violations,
           bytes: Buffer.byteLength(body, 'utf8'),
         },
         null,
@@ -440,12 +221,12 @@ function runFinalize({ projectRoot, config, page, stateDirAbs, finalizeInput, co
     );
   } else {
     const L = [''];
-    if (result.ok) {
+    if (factCheck === 'passed') {
       L.push('[manual generate] 事实校验通过，已输出正式文档。');
     } else {
       L.push('[manual generate] 事实校验未通过，已按 --fallback-draft 用草稿原文定稿。');
       L.push('');
-      L.push(formatViolations(result.violations));
+      L.push(formatViolations(violations));
     }
     L.push('');
     L.push(`  页面        ${page.id}  ${page.title}`);
@@ -490,17 +271,13 @@ function run(argv) {
   if (!loaded.ok) return fail(loaded.errors, { json });
   const { config } = loaded;
 
-  const pageResult = loadPage(projectRoot, config, pageId);
-  if (!pageResult.ok) return fail(pageResult.errors, { json });
-  const { page, stateDirAbs, indexContext } = pageResult;
-
   const skillRoot = path.resolve(__dirname, '..', '..');
 
   const finalizeInput = values.finalize;
   if (values.copy && finalizeInput) return fail(['--finalize 与 --copy 只能选一个。'], { json });
   if (values.copy || (finalizeInput !== undefined && finalizeInput !== '')) {
     return runFinalize({
-      projectRoot, config, page, stateDirAbs, finalizeInput,
+      projectRoot, config, pageId, finalizeInput,
       copyInput: values.copy || null,
       acceptReview: values.acceptReview === true,
       fallbackDraft: values.fallbackDraft === true,
@@ -513,7 +290,7 @@ function run(argv) {
   }
 
   return runDraft({
-    projectRoot, config, page, stateDirAbs, skillRoot, indexContext,
+    projectRoot, config, pageId, skillRoot,
     noScreenshot: values.noScreenshot === true,
     json,
   });

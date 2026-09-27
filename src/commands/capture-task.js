@@ -3,14 +3,7 @@
 const path = require('path');
 const { parseArgs } = require('../cli/args');
 const { loadConfig } = require('../config/load');
-const { createProvider } = require('../browser');
-const { createProjectStore } = require('../store/project');
-const { scopeHash, pageRevisionsFor } = require('../model/approval');
-const { deriveTaskScenario } = require('../scenarios/model');
-const { resolveScenario } = require('../scenarios/store');
-const { buildCapturePlan, writeCapturePlan } = require('../tasks/capture-plan');
-const { executeCapturePlan } = require('../tasks/executor');
-const { prepareAuth, authRuntimeFor } = require('../auth/runtime');
+const { captureTask } = require('../tasks/capture-usecase');
 
 const KNOWN_FLAGS = new Set(['projectRoot', 'json', 'help']);
 const HELP = 'manual capture-task <task-id> [--project-root <路径>] [--json]';
@@ -30,64 +23,20 @@ async function run(argv) {
   const projectRoot = path.resolve(values.projectRoot || process.cwd());
   const loaded = loadConfig(projectRoot);
   if (!loaded.ok) return fail(loaded.errors, json);
-  const { config } = loaded;
-  const stateDir = path.join(projectRoot, config.artifacts.stateDir);
-  const projectStore = createProjectStore({ stateDirAbs: stateDir, docsOutputDir: config.docs.outputDir });
-  let base;
-  try { base = projectStore.load(); } catch (error) { return fail(error.errors || [error.message], json); }
-  const task = base.model.tasks.find((t) => t.id === positional[0]);
-  if (!task) return fail(`找不到任务: ${positional[0]}`, json);
-  const pages = { pages: base.model.pages };
-  const derived = deriveTaskScenario(task, pages.pages, config);
-  const scenario = resolveScenario(stateDir, derived, { stepIds: (task.steps || []).map((step) => step.id) });
-  if (!scenario.ok) return fail(scenario.errors, json);
-  const built = buildCapturePlan(task, pages.pages, { scenario: scenario.scenario });
-  if (!built.ok) return fail(built.errors, json);
-  const planFile = writeCapturePlan(stateDir, built.plan);
-
-  const profileId = config.capture.activeProfile;
-  const providerId = config.browser.activeProvider;
-  let auth;
-  try { auth = prepareAuth(config); }
-  catch (error) { return fail([{ code: error.reason || error.code, message: error.message, hint: error.hint }], json); }
-  const provider = createProvider({
-    id: providerId,
-    profile: config.capture.profiles[profileId],
-    providerConfig: config.browser.providers[providerId],
-    storageState: auth.storageState,
-  });
+  let result;
   try {
-    const theme = config.annotation.themes[config.annotation.activeTheme];
-    const evidence = await executeCapturePlan(built.plan, provider, {
-      baseUrl: config.project.baseUrl,
-      stateDir,
-      projectRoot,
-      annotatedDir: config.artifacts.annotatedDir,
-      theme,
-      redactionRules: config.privacy || {},
-      authRuntime: authRuntimeFor(auth),
-    });
-    // 采集可以重复执行：记录这次观察所依据的输入，新鲜度之后由它与当前定义比较得出。
-    // status 只是兼容投影，不再参与"能否执行"的判断；旧的 stale 标记被新观察清除。
-    const { stale: _cleared, ...rest } = task;
-    const lastCapture = {
-      capturedAt: evidence.capturedAt,
-      captureIds: evidence.canonicalCaptureRefs,
-      scopeHash: scopeHash(task, pages.pages),
-      modelRevision: built.plan.modelRevision,
-      pageRevisions: pageRevisionsFor(task, pages.pages),
-      scenarioId: scenario.scenario.id,
-      scenarioRevision: scenario.scenario.revision,
-    };
-    // 观察提交：浏览器执行期间不持有项目锁；只写本任务的采集投影，不覆盖同时发生的定义修改
-    projectStore.commit({ base, kind: 'observation', changes: { tasks: [{ ...rest, status: 'captured', lastCapture, captureIds: evidence.canonicalCaptureRefs, evidenceManifest: path.relative(projectRoot, evidence.manifestFile).replace(/\\/g, '/') }] } });
-    const output = { ok: true, taskId: task.id, status: 'captured', planFile, evidence };
-    if (json) process.stdout.write(JSON.stringify(output, null, 2) + '\n');
-    else process.stdout.write(`[manual capture-task] ${task.title} 已完成安全采集。\n`);
-    return 0;
+    result = await captureTask({ projectRoot, config: loaded.config, taskId: positional[0] });
   } catch (error) {
-    return fail([{ code: error.code || 'capture-task-failed', message: error.message, task: error.task, step: error.step, pageState: error.pageState, target: error.target, diagnostic: error.diagnostic, suggestion: error.suggestion }], json);
+    if (error.errors) return fail(error.errors, json);
+    if (error.name === 'TaskExecutionError') {
+      return fail([{ code: error.code || 'capture-task-failed', message: error.message, task: error.task, step: error.step, pageState: error.pageState, target: error.target, diagnostic: error.diagnostic, suggestion: error.suggestion }], json);
+    }
+    return fail([{ code: error.reason || error.code || 'capture-task-failed', message: error.message, hint: error.hint }], json);
   }
+  const output = { ok: true, taskId: result.task.id, status: 'captured', planFile: result.planFile, evidence: result.evidence };
+  if (json) process.stdout.write(JSON.stringify(output, null, 2) + '\n');
+  else process.stdout.write(`[manual capture-task] ${result.task.title} 已完成安全采集。\n`);
+  return 0;
 }
 
 module.exports = { run, HELP, KNOWN_FLAGS };

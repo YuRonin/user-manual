@@ -1,12 +1,15 @@
 'use strict';
 
+const fs = require('fs');
 const path = require('path');
 const { writeText } = require('../util/fsx');
+const { sha256Hex } = require('../util/hash');
 const { captureStable, derivePublished } = require('../evidence/capture-safe');
 const { createCaptureStore, sanitizeUrl } = require('../evidence/store');
 const { revisionOf } = require('../util/hash');
 const { validateNavigation, runAssertions, isUrlOnly, DEFAULT_ASSERTION_TIMEOUT_MS } = require('../evidence/validate-page');
 const { errorCode } = require('../runtime/errors');
+const { derivationSidecar } = require('../evidence/capture-page');
 
 class TaskExecutionError extends Error {
   constructor(code, message, details = {}) {
@@ -67,6 +70,9 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
     const artifacts = [{ kind: 'raw', file: rawPath, dir: `${stateRelative}/artifacts/raw`, prefix }];
     let safe = null;
     if (publish) {
+      // 派生输入私有保存：隐私规则 / 主题变化时可从同一份 raw 重新派生，不必重新执行任务。
+      fs.writeFileSync(staging.file('derivation.json'), derivationSidecar(captured));
+      artifacts.push({ kind: 'derivation', file: staging.file('derivation.json'), dir: `${stateRelative}/artifacts/derivation`, prefix });
       safe = await derivePublished({
         captured, rawPath, sanitizedPath: staging.file('sanitized.png'), publishedPath: staging.file('published.png'),
         theme: options.theme, redactionRules: options.redactionRules || {},
@@ -196,8 +202,11 @@ async function executeCapturePlan(plan, provider, options) {
     // 旧 evidence manifest 仅作兼容视图：每张截图条目都由对应 Capture 记录生成，
     // canonicalCaptureRefs 是权威引用，不能与记录各自维护。
     result.canonicalCaptureRefs = result.steps.flatMap((s) => s.screenshots.map((shot) => shot.captureId)).filter(Boolean);
-    const manifestFile = path.join(stateDir, 'artifacts', 'manifests', `${plan.taskId}--evidence.json`);
-    writeText(manifestFile, JSON.stringify(result, null, 2) + '\n');
+    const manifestText = JSON.stringify(result, null, 2) + '\n';
+    writeText(path.join(stateDir, 'artifacts', 'manifests', `${plan.taskId}--evidence.json`), manifestText);
+    // 不可变副本（内容寻址）：任务投影与缓存引用它，之后的采集不会覆盖这次的证据清单。
+    const manifestFile = path.join(stateDir, 'artifacts', 'manifests', `${plan.taskId}--evidence--${sha256Hex(manifestText).slice(0, 16)}.json`);
+    if (!fs.existsSync(manifestFile)) writeText(manifestFile, manifestText);
     if (options.authRuntime?.refresh) {
       const refreshed = await options.authRuntime.refresh(provider);
       if (refreshed?.warning) result.warnings = [...(result.warnings || []), refreshed.warning];

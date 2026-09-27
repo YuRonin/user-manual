@@ -127,11 +127,11 @@
   - [x] 缺口→节点、共享去重、拓扑检查。
   - [x] plan 固定 scope/revision，gate 处理已有授权。
   - [x] 同输入同计划，--plan 零业务副作用。
-- [ ] **P2-03 Runner**（依赖 P2-01/02/04）
-  - [ ] 命令拆应用用例，handler 不 spawn 子 CLI。
-  - [ ] 持久状态→执行→产物校验→成功。
-  - [ ] 有界 retry/time/action budget、cancel 和 waiting_input。
-  - [ ] 失败不重跑已提交依赖、不越过发布门槛。
+- [x] **P2-03 Runner**（依赖 P2-01/02/04）
+  - [x] 命令拆应用用例，handler 不 spawn 子 CLI。
+  - [x] 持久状态→执行→产物校验→成功。
+  - [x] 有界 retry/time/action budget、cancel 和 waiting_input。
+  - [x] 失败不重跑已提交依赖、不越过发布门槛。
 - [ ] **P2-06 模型文件交接**（依赖 P2-01/03）
   - [ ] request/response schema 和 inputHash 绑定。
   - [ ] 文案字段约束，语义结果保持 source/model 来源。
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 进行中（2026-09-27 起），已完成 20 / 32。下一项：P2-03。
+- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 进行中（2026-09-27 起），已完成 21 / 32。下一项：P2-06。
 
 ### 执行记录
 
@@ -677,4 +677,31 @@ Task ID: P2-02
 产物 / commit 引用: 见本任务提交
 剩余风险: 缓存 key 中的 deployedBuild 目前只能来自 config.runtime.deployedBuild（缺省 unknown → live 软 TTL）；derive-image 与各节点 handler 在 P2-03 实现。
 下一项可执行任务: P2-03
+```
+
+```text
+Task ID: P2-03
+状态: completed
+开始时基线 commit / dirty files: d64afa5（P2-02）；工作区干净
+实际修改文件:
+  - 新增用例：src/evidence/capture-page.js（页面采集）、src/tasks/capture-usecase.js（任务采集）、src/generate/task-usecase.js（任务草稿 / 定稿检查 / 发布）、src/generate/page-usecase.js（页面草稿 / 定稿检查 / 发布）、src/evidence/rederive.js（从 raw 重新派生发布图）
+  - 新增 Runtime：src/runtime/runner.js、src/runtime/handlers.js、src/runtime/retry.js
+  - 命令只做参数与输出：src/commands/capture.js、capture-task.js、generate.js、generate-task.js
+  - src/tasks/executor.js（derivation 私有派生输入、不可变证据清单副本 <task>--evidence--<sha16>.json）；src/runtime/model.js（任务保留 reuse / reason）；src/runtime/store.js（只有失败 / 中断的尝试计入重试上限）；src/runtime/planner.js（导出 captureKeyInput）
+  - test/runtime-runner.test.js（新）、test/run.js
+契约变更: 无（实现 C07 runner.run 与 handler 注册）。补充约定：
+  - handler 返回 { outputs, warnings, actions } 或 { waiting: { code, message } }；失败抛带 code 的错误，由 runner 映射 ErrorResult。
+  - Capture 新增 derivation 产物（几何 / 标注目标 / 敏感元素候选，位于 .manual/artifacts/derivation，已被 gitignore）；重新派生产生新记录 provenance.mode=rederived、derivedFrom=原记录、observedAt 沿用原观察。
+  - validate 把待发布文档与文案写入 runs/<runId>/staged/；publish 发布前按当前事实重新渲染，必须与 staged 逐字节一致，否则 run-input-changed。
+  - 页面文档已存在且与当前发布记录一致（无人工修改）时，Runtime 重新发布不需要 --force；人工修改仍由发布 journal 报 publication-conflict。
+  - resume 时 waiting_input 任务回到 pending 重新检查（不计重试次数）；interrupted 且 replay=safe 的重放，其余转 waiting_input（outcome-unknown）。
+  - inspect 命令未拆分用例：本阶段没有 inspect 节点（见 P2-02 记录）。
+执行命令与结果:
+  - node test/runtime-runner.test.js：11 passed。假 handler：依赖顺序与“先 running 后执行”；不可重试失败阻止后续、独立目标继续、无效产物记 failed；瞬时故障按 1000 / 3000ms 退避重试 3 次、requires-input 不重试；模型错误只重试 rewrite 三次，采集只执行一次且 resume 不重跑；等待输入 4 次 resume 不耗尽重试、结束时关闭会话并释放租约；动作预算与单任务超时 budget-exceeded 并关闭会话；取消记 interrupted 后可继续；输入校验失败不改 Run。真实 Chromium：任务 generate 采集 → 草稿 → 校验 → 发布，第二次 cache-hit 不新增 Capture 且 outputRefs 相同；页面 generate 等待模型文案 → 以文案文件新建 Run 完成（复用采集）；改隐私遮罩样式后只插入 derive-image，新增 rederived 记录，之后不再重新派生。
+  - 回归：capture 34、capture-task 1、task-first-e2e 2、task-rerun 8、generate 36、generate-task 8、finalize-safety 8（2 个 Windows 专用跳过，与基线一致）、publication-gates 11、publication-recovery 11、gate0 6、gate1 8 全部通过。
+  - npm test：52 个测试文件全部通过（macOS / Node 26.4.0）。
+失败或跳过的验收及原因: 无。实施中发现并修复：Run Store 规范化任务定义时丢掉了 planner 的 reuse 标记，导致缓存命中后仍重新采集。
+产物 / commit 引用: 见本任务提交
+剩余风险: 单任务超时通过关闭浏览器会话中断进行中的调用，非浏览器的长时间文件操作只受外层超时约束；模型交接（请求 / 响应文件）在 P2-06 实现，本阶段 rewrite / analyze 只返回 waiting_input。
+下一项可执行任务: P2-06
 ```

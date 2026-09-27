@@ -85,6 +85,9 @@ function normalizeTaskDefinitions(definitions) {
       dependsOn: Array.isArray(def?.dependsOn) ? [...def.dependsOn] : [],
       inputHash: def?.inputHash,
       input: def?.input === undefined ? null : def.input,
+      // 规划期的复用候选与依赖原因：执行前仍会重新校验，这里只是随任务保存的说明。
+      reuse: def?.reuse || null,
+      reason: typeof def?.reason === 'string' ? def.reason : null,
       retry,
       status: 'pending',
       attempt: 0,

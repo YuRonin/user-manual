@@ -3,17 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { parseArgs } = require('../cli/args');
 const { loadConfig } = require('../config/load');
-const { createProjectStore } = require('../store/project');
-const { checkEvidenceUsable } = require('../model/approval');
-const { buildTaskDraft } = require('../generate/task-draft');
-const { publish } = require('../publication/publisher');
-const { manualIdFor } = require('../publication/release-store');
-const { definitionRevision } = require('../model/revision');
-const { validateTaskFinal } = require('../generate/task-facts');
-const { renderTask } = require('../generate/render');
-const { diffPacks } = require('../generate/fact-pack');
-const { validateCopy, checkPolishedMarkdown, formatFindings } = require('../generate/markdown-validate');
-const { validatePublication, validateArtifact, summarizePrivacy, formatIssues } = require('../publication/validate');
+const { draftTask, prepareTaskFinal, publishTaskFinal } = require('../generate/task-usecase');
 
 const KNOWN_FLAGS = new Set(['projectRoot', 'finalize', 'copy', 'acceptReview', 'force', 'json', 'help']);
 const HELP = `
@@ -27,181 +17,58 @@ manual generate-task <task-id> --finalize <markdown> [--accept-review] [--json]
 新出现的数字 / 单位或业务承诺需要人工确认（review-required），确认无误后加 --accept-review。
 `.trim();
 
-function fail(e, j) {
+function fail(e, j, extra = {}) {
   const a = Array.isArray(e) ? e : [e];
-  if (j) process.stdout.write(JSON.stringify({ ok: false, errors: a }, null, 2) + '\n');
+  if (j) process.stdout.write(JSON.stringify({ ok: false, ...extra, errors: a }, null, 2) + '\n');
   else a.forEach((x) => process.stderr.write(`[manual generate-task] ${x}\n`));
   return 1;
 }
 
-function manualFileFor(root, config, taskId) {
-  return path.join(root, config.docs.outputDir, 'tasks', `${taskId}.md`);
+/** 用例错误 → 旧输出形状：审查类与部分提交带 code（及 committed），其余只有 errors。 */
+function failWith(error, json) {
+  const errors = error.errors || [error.message];
+  if (error.code === 'partial-commit') return fail(errors, json, { code: error.code, committed: error.committed || [] });
+  if (['review-required', 'copy-blocked'].includes(error.code)) return fail(errors, json, { code: error.code });
+  return fail(errors, json);
 }
 
-/** 读取定稿输入与草稿事实。 */
-function loadFinalize({ factsFile, finalizeInput }) {
-  if (!fs.existsSync(factsFile)) return { ok: false, errors: ['缺少任务事实文件，请先生成草稿。'] };
-  const inputFile = path.resolve(finalizeInput);
-  if (!fs.existsSync(inputFile)) return { ok: false, errors: [`--finalize 文件不存在: ${inputFile}`] };
-  return { ok: true, final: fs.readFileSync(inputFile, 'utf8'), facts: JSON.parse(fs.readFileSync(factsFile, 'utf8')) };
+function readInput(file, label) {
+  const abs = path.resolve(file);
+  if (!fs.existsSync(abs)) return { ok: false, error: `${label} 文件不存在: ${abs}` };
+  return { ok: true, text: fs.readFileSync(abs, 'utf8') };
 }
 
-/**
- * 写任何正式文件之前完成全部检查：状态流转、结构事实、发布门槛。
- * 任一项不通过都不触碰正式文档。
- */
-function validateFinalize({ root, config, task, pages, final, facts, renderedFromPack = false }) {
-  const usable = checkEvidenceUsable(task, pages);
-  if (!usable.ok) return { ok: false, errors: usable.errors };
-  // 草稿必须基于任务当前这次采集：之后重新采集过，草稿里的图与结论就不再对应。
-  if (task.lastCapture && JSON.stringify(facts.evidence?.captureIds || null) !== JSON.stringify(task.lastCapture.captureIds || [])) {
-    return { ok: false, errors: [`draft-stale: 草稿基于较早的采集，重新运行 manual generate-task ${task.id} 生成草稿后再定稿。`] };
-  }
-  // 定稿可以重复执行（重新生成已发布文档）；status 只记录最近完成的操作。
-  const nextTask = { ...task, status: 'generated' };
-  const checked = validateTaskFinal(final, facts, { renderedFromPack });
-  if (!checked.ok) return { ok: false, errors: checked.errors };
-  const manualFile = manualFileFor(root, config, task.id);
-  const gate = validatePublication({ projectRoot: root, manualFile, markdown: final, images: facts.images, config });
-  if (!gate.ok) return { ok: false, errors: formatIssues(gate.errors) };
-  return { ok: true, nextTask, manualFile };
-}
-
-/**
- * 提交：先原子替换正式文档，再写任务状态。两者不是一个事务——
- * 文档已替换而状态写入失败时明确报告 partial-commit，交给后续对账（P1-07），不伪称成功。
- */
-function commitFinalize({ root, config, projectStore, base, manualFile, final, facts, task, force, nextTask }) {
-  try {
-    // 发布事务：文档、发布记录（含 facts 与 Capture）、current 指针，按 journal 推进，可对账
-    publish({
-      projectRoot: root,
-      stateDirAbs: path.join(root, config.artifacts.stateDir),
-      manualId: manualIdFor('task', task.id),
-      documentFile: manualFile,
-      markdown: final,
-      facts,
-      captureIds: task.lastCapture?.captureIds || task.captureIds || (facts.images || []).map((image) => image.captureId),
-      definitionRevisions: { [task.id]: definitionRevision('userTask', task) },
-      force,
-    });
-  } catch (error) {
-    if (error.transactionId && error.code !== 'publication-conflict' && !['file-busy', 'write-failed'].includes(error.code)) {
-      return { ok: false, code: error.code || 'publication-failed', errors: [`${error.code || 'publication-failed'}: ${error.message}（事务 ${error.transactionId}，运行 manual publication repair 对账）`] };
-    }
-    return { ok: false, code: error.code || 'write-failed', errors: [`${error.code || 'write-failed'}: 正式文档未改变。${error.message}`] };
-  }
-  try {
-    projectStore.commit({ base, kind: 'observation', changes: { tasks: [nextTask] } });
-  } catch (error) {
-    return {
-      ok: false,
-      code: 'partial-commit',
-      committed: [path.relative(root, manualFile).replace(/\\/g, '/')],
-      errors: [`partial-commit: 正式文档已更新，但任务状态写入失败（${error.code || error.message}）。重新运行 finalize 前请确认文档内容。`],
-    };
-  }
-  return { ok: true };
-}
-
-/** 按当前任务与证据重新构建事实包（草稿与定稿共用）。 */
-function buildCurrent({ root, config, task }) {
-  if (!task.evidenceManifest) return { ok: false, errors: ['任务缺少 evidenceManifest。'] };
-  const evidenceFile = path.join(root, task.evidenceManifest);
-  if (!fs.existsSync(evidenceFile)) return { ok: false, errors: [`证据清单不存在: ${evidenceFile}`] };
-  const evidence = JSON.parse(fs.readFileSync(evidenceFile, 'utf8'));
-  try {
-    return buildTaskDraft(task, evidence, {
-      projectRoot: root, stateDir: path.join(root, config.artifacts.stateDir), finalPath: manualFileFor(root, config, task.id), language: config.docs.language,
-    });
-  } catch (error) {
-    return { ok: false, errors: [error.message] };
-  }
-}
-
-/** 草稿之后事实（任务定义、证据、图片内容、模板）变了：旧草稿不能再发布。 */
-function checkDraftFresh({ root, config, task, facts }) {
-  if (!facts.factPack) return { ok: true, legacy: true };
-  const current = buildCurrent({ root, config, task });
-  if (!current.ok) return current;
-  if (current.pack.factsHash !== facts.factsHash) {
-    return { ok: false, errors: [`draft-stale: 草稿之后事实发生变化（${diffPacks(facts.factPack, current.pack).join(', ')}），重新运行 manual generate-task ${task.id} 生成草稿。`] };
-  }
-  return { ok: true };
-}
-
-/** 文案审查结论：blocked 直接拒绝；review-required 需要 --accept-review。 */
-function reviewGate(findings, acceptReview) {
-  if (findings.blocked.length) return { ok: false, code: 'copy-blocked', errors: formatFindings(findings.blocked, '拒绝') };
-  if (findings.review.length && !acceptReview) {
-    return { ok: false, code: 'review-required', errors: [...formatFindings(findings.review, '需确认'), '确认这些内容属实后加 --accept-review 重新运行。'] };
-  }
-  return { ok: true, accepted: findings.review };
-}
-
-function runFinalize({ root, config, projectStore, base, task, pages, factsFile, draftFile, finalizeInput, copyInput, acceptReview, force = false, json }) {
-  if (!fs.existsSync(factsFile)) return fail('缺少任务事实文件，请先生成草稿。', json);
-  let facts = JSON.parse(fs.readFileSync(factsFile, 'utf8'));
-  const fresh = checkDraftFresh({ root, config, task, facts });
-  if (!fresh.ok) return fail(fresh.errors, json);
-  let final;
-  let review;
+function runFinalize({ root, config, taskId, finalizeInput, copyInput, acceptReview, force = false, json }) {
+  let copy = null;
+  let markdown = null;
   if (copyInput) {
-    if (!facts.factPack) return fail('旧版草稿没有事实包，重新运行 generate-task 生成草稿后再用 --copy。', json);
-    const copyFile = path.resolve(copyInput);
-    if (!fs.existsSync(copyFile)) return fail(`--copy 文件不存在: ${copyFile}`, json);
-    let copy;
-    try { copy = JSON.parse(fs.readFileSync(copyFile, 'utf8')); } catch (error) { return fail(`--copy 不是合法 JSON: ${error.message}`, json); }
-    review = reviewGate(validateCopy(facts.factPack, copy), acceptReview);
-    final = renderTask(facts.factPack, copy);
-    // 发布记录中的 facts 描述实际发布的文档：UI 名称序列取自渲染结果，并记录采用的文案
-    facts = { ...facts, uiTexts: [...final.matchAll(/「([^」]+)」/g)].map((m) => m[1]), copy };
+    const read = readInput(copyInput, '--copy');
+    if (!read.ok) return fail(read.error, json);
+    try { copy = JSON.parse(read.text); } catch (error) { return fail(`--copy 不是合法 JSON: ${error.message}`, json); }
   } else {
-    const loaded = loadFinalize({ factsFile, finalizeInput });
-    if (!loaded.ok) return fail(loaded.errors, json);
-    final = loaded.final;
-    const draftMarkdown = fs.existsSync(draftFile) ? fs.readFileSync(draftFile, 'utf8') : '';
-    review = reviewGate(checkPolishedMarkdown(draftMarkdown, final, facts.factPack), acceptReview);
+    const read = readInput(finalizeInput, '--finalize');
+    if (!read.ok) return fail(read.error, json);
+    markdown = read.text;
   }
-  if (!review.ok) {
-    if (json) process.stdout.write(JSON.stringify({ ok: false, code: review.code, errors: review.errors }, null, 2) + '\n');
-    else review.errors.forEach((x) => process.stderr.write(`[manual generate-task] ${x}\n`));
-    return 1;
+  let manualFile;
+  try {
+    const prepared = prepareTaskFinal({ projectRoot: root, config, taskId, copy, markdown, acceptReview });
+    ({ manualFile } = publishTaskFinal({ projectRoot: root, config, taskId, prepared, force }));
+  } catch (error) {
+    return failWith(error, json);
   }
-  const loaded = { final, facts };
-  const checked = validateFinalize({ root, config, task, pages, final: loaded.final, facts: loaded.facts, renderedFromPack: Boolean(copyInput) });
-  if (!checked.ok) return fail(checked.errors, json);
-  const committed = commitFinalize({ root, config, projectStore, base, manualFile: checked.manualFile, final: loaded.final, facts: loaded.facts, task, force, nextTask: checked.nextTask });
-  if (!committed.ok) {
-    if (json) process.stdout.write(JSON.stringify({ ok: false, code: committed.code, committed: committed.committed || [], errors: committed.errors }, null, 2) + '\n');
-    else committed.errors.forEach((x) => process.stderr.write(`[manual generate-task] ${x}\n`));
-    return 1;
-  }
-  if (json) process.stdout.write(JSON.stringify({ ok: true, status: 'generated', manual: checked.manualFile }, null, 2) + '\n');
+  if (json) process.stdout.write(JSON.stringify({ ok: true, status: 'generated', manual: manualFile }, null, 2) + '\n');
   return 0;
 }
 
-function runDraft({ root, config, task, pages, draftDir, draftFile, factsFile, json }) {
-  const usable = checkEvidenceUsable(task, pages);
-  if (!usable.ok) return fail(usable.errors, json);
-  const built = buildCurrent({ root, config, task });
-  if (!built.ok) return fail(built.errors, json);
-  // 草稿阶段就执行同一产物门槛：隐私未知或位置非法时不给出可定稿的草稿。
-  const issues = built.facts.images.flatMap((image) => validateArtifact(image, { projectRoot: root, config }));
-  if (issues.length) return fail(formatIssues(issues), json);
-  // 草稿绑定的采集：定稿时据此判断草稿是否已被更新的采集取代。
-  built.facts.evidence = task.lastCapture
-    ? { captureIds: task.lastCapture.captureIds || [], scopeHash: task.lastCapture.scopeHash, capturedAt: task.lastCapture.capturedAt }
-    : { captureIds: null, legacy: true };
-  built.facts.publication = { audience: config.privacy?.audience || 'public', ...summarizePrivacy(built.facts.images.map((image) => image.privacy)) };
-  fs.mkdirSync(draftDir, { recursive: true });
-  fs.writeFileSync(draftFile, built.markdown, 'utf8');
-  fs.writeFileSync(factsFile, JSON.stringify(built.facts, null, 2) + '\n', 'utf8');
+function runDraft({ root, config, taskId, json }) {
+  let built;
+  try { built = draftTask({ projectRoot: root, config, taskId }); } catch (error) { return failWith(error, json); }
   if (json) {
     process.stdout.write(JSON.stringify({
-      ok: true, status: 'draft', draftFile, factsFile, factsHash: built.pack.factsHash,
+      ok: true, status: 'draft', draftFile: built.draftFile, factsFile: built.factsFile, factsHash: built.factsHash,
       // 模型可以填写的文案块及其默认文字；其余内容由程序渲染
-      copyBlocks: Object.fromEntries(Object.entries(built.pack.blocks).map(([id, block]) => [id, block.default])),
+      copyBlocks: built.copyBlocks,
       protected: built.facts,
     }, null, 2) + '\n');
   }
@@ -219,23 +86,13 @@ function run(argv) {
   const loaded = loadConfig(root);
   if (!loaded.ok) return fail(loaded.errors, json);
   const config = loaded.config;
-  const state = path.join(root, config.artifacts.stateDir);
-  const projectStore = createProjectStore({ stateDirAbs: state, docsOutputDir: config.docs.outputDir });
-  let base;
-  try { base = projectStore.load(); } catch (error) { return fail(error.errors || [error.message], json); }
-  const task = base.model.tasks.find((t) => t.id === positional[0]);
-  if (!task) return fail(`找不到任务: ${positional[0]}`, json);
-  const pages = base.model.pages;
-  const draftDir = path.join(state, 'drafts', 'tasks');
-  const draftFile = path.join(draftDir, `${task.id}.md`);
-  const factsFile = path.join(draftDir, `${task.id}.facts.json`);
   if (values.finalize || values.copy) {
     return runFinalize({
-      root, config, projectStore, base, task, pages, factsFile, draftFile,
+      root, config, taskId: positional[0],
       finalizeInput: values.finalize, copyInput: values.copy, acceptReview: values.acceptReview === true, force: values.force === true, json,
     });
   }
-  return runDraft({ root, config, task, pages, draftDir, draftFile, factsFile, json });
+  return runDraft({ root, config, taskId: positional[0], json });
 }
 
 module.exports = { run, KNOWN_FLAGS };

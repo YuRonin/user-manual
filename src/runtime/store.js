@@ -225,8 +225,10 @@ function createRunStore({ projectRoot, stateDirAbs, now = () => Date.now(), leas
     const at = iso();
     const current = task.attempts[task.attempts.length - 1];
     if (to === 'running') {
-      if (task.attempt >= task.retry.maxAttempts) {
-        throw new RuntimeError('retry-exhausted', `任务 ${taskId} 已尝试 ${task.attempt} 次，达到上限 ${task.retry.maxAttempts}。`);
+      // 只有失败 / 中断的尝试计入重试上限；等待输入后的重新检查不消耗重试次数。
+      const spent = task.attempts.filter((a) => a.status === 'failed' || a.status === 'interrupted').length;
+      if (spent >= task.retry.maxAttempts) {
+        throw new RuntimeError('retry-exhausted', `任务 ${taskId} 已失败 ${spent} 次，达到上限 ${task.retry.maxAttempts}。`);
       }
       task.attempt += 1;
       task.attempts.push({ n: task.attempt, startedAt: at, endedAt: null, status: 'running', error: null });
