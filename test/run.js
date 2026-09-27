@@ -68,6 +68,7 @@ const FILES = [
   'manual-merge.test.js',
   'update-cli.test.js',
   'incremental-update.test.js',
+  'live-verify.test.js',
 ];
 
 let failed = 0;

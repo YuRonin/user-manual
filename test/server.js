@@ -37,10 +37,22 @@ ${body}
 </html>`;
 }
 
-const PAGES = {
-  '/task-profile': html(`
+/*
+ * 运行态开关（P3-03 / P3-04）：不改源码、只改服务器行为，模拟"Git 无变化但线上变了"。
+ *   editLabel   任务页"编辑资料"按钮的可访问名称（按钮改名）
+ *   canEdit     权限接口 /api/permissions 与任务页是否提供编辑按钮（权限变化）
+ *   benefit     当前权益文字（接口数据变化）
+ *   clock       仪表盘时钟区域的文字（动态区域）
+ *   shift       仪表盘主内容向下偏移的像素（布局移动）
+ *   exportLabel 仪表盘导出按钮名称
+ *   missing     返回 404 的路径（页面被下线）
+ */
+const DEFAULT_STATE = { editLabel: '编辑资料', canEdit: true, benefit: '教师版', clock: '09:00', shift: 0, exportLabel: '导出报表', missing: [] };
+
+const DYNAMIC = {
+  '/task-profile': (state) => html(`
 <h1>个人中心</h1>
-<button aria-label="编辑资料" onclick="document.getElementById('editor').hidden=false">编辑资料</button>
+${state.canEdit ? `<button aria-label="${state.editLabel}" onclick="document.getElementById('editor').hidden=false">${state.editLabel}</button>` : ''}
 <button aria-label="学校权益" onclick="document.getElementById('benefits').hidden=false">学校权益</button>
 <section id="editor" role="dialog" aria-label="编辑资料" hidden>
   <label for="nickname">昵称</label><input id="nickname" value="星河老师">
@@ -51,11 +63,21 @@ const PAGES = {
 </section>
 <section id="benefits" role="dialog" aria-label="学校权益" hidden>
   <label for="school">学校</label><input id="school" aria-label="学校" value="星海中学">
-  <p>当前权益：教师版</p>
+  <p>当前权益：${state.benefit}</p>
   <label for="benefit-option">可用选项</label><select id="benefit-option"><option>教师版</option><option>学校专业版</option></select>
   <p>不可切换原因：需要管理员授权</p>
   <button aria-label="切换权益">切换权益</button>
 </section>`),
+  '/dashboard': (state) => html(`
+<div style="margin-top:${Number(state.shift) || 0}px">
+<h1>数据看板</h1>
+<p>本周新增用户 128 人。</p>
+<button aria-label="${state.exportLabel}" style="padding:12px 24px;background:#2563eb;color:#fff;border:0;border-radius:6px">${state.exportLabel}</button>
+</div>
+<div id="clock" data-dynamic style="position:absolute;right:40px;top:40px;width:120px;height:40px;background:#e2e8f0;font-size:24px;text-align:center">${state.clock}</div>`),
+};
+
+const PAGES = {
   '/': html('<h1>首页</h1><p>Home</p>'),
 
   // 典型页面：有异步内容、有慢图片、有无限动画——三样都是截图不稳定的来源
@@ -127,9 +149,26 @@ ${'<p>设置项说明文字，用来把正文长度撑过登录页判据的阈�
  * @returns {Promise<{ port, baseUrl, close }>}
  */
 function startServer() {
+  const state = { ...DEFAULT_STATE };
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
     const pathname = url.pathname;
+
+    if ((state.missing || []).includes(pathname)) {
+      res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(html('<h1>404 Not Found</h1>'));
+      return;
+    }
+    if (pathname === '/api/permissions') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ canEdit: state.canEdit }));
+      return;
+    }
+    if (Object.prototype.hasOwnProperty.call(DYNAMIC, pathname)) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(DYNAMIC[pathname](state));
+      return;
+    }
 
     if (pathname === '/img/fast.png') {
       res.writeHead(200, { 'Content-Type': 'image/png' });
@@ -198,7 +237,11 @@ function startServer() {
       resolve({
         port,
         baseUrl: `http://127.0.0.1:${port}`,
-        close: () => new Promise((done) => server.close(done)),
+        /** 修改运行态（不改源码）；reset() 恢复默认。 */
+        set: (patch) => Object.assign(state, patch),
+        reset: () => Object.assign(state, DEFAULT_STATE, { missing: [] }),
+        state,
+        close: () => new Promise((done) => { server.closeAllConnections?.(); server.close(done); }),
       });
     });
   });

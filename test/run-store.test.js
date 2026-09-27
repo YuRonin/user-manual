@@ -199,10 +199,10 @@ test('事件日志：损坏末行被跳过；删除日志不影响恢复；白�
   const store = storeOf(root);
   const { run } = store.create({ command: 'generate', plan: plan() });
   const { lease } = store.open(run.id);
-  store.transition(run.id, 'capture-dashboard', 'running', { lease, reason: 'open https://app.test/p?token=abc user@example.com 13800138000 password=hunter2' });
+  store.transition(run.id, 'capture-dashboard', 'running', { lease, reason: 'open https://app.test/p?token=tok-secret-zq user@example.com 13800138000 password=hunter2' });
   const eventsFile = path.join(store.runDirFor(run.id), 'events.jsonl');
   const text = fs.readFileSync(eventsFile, 'utf8');
-  assert.ok(!/abc|hunter2|user@example|13800138000/.test(text), text);
+  assert.ok(!/tok-secret-zq|hunter2|user@example|13800138000/.test(text), text);
   assert.match(text, /https:\/\/app\.test\/p/);
 
   fs.appendFileSync(eventsFile, '{"type":"task-trans');

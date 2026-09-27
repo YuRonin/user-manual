@@ -168,11 +168,11 @@
   - [x] 仅更新受影响 section/文件，失败保留旧版。
   - [x] retired 提案、无变化零写入、避免自触发。
   - [x] 增量端到端测试通过。
-- [ ] **P3-03 live verify**（依赖 P3-01）
-  - [ ] artifact/live 范围分开，新验证记录不可变。
-  - [ ] 每次 live 真实导航，按 claim/Scenario 回放。
-  - [ ] 风险边界和未验证覆盖明确报告。
-  - [ ] 无 Git diff 的 API/权限变化检测通过。
+- [x] **P3-03 live verify**（依赖 P3-01）
+  - [x] artifact/live 范围分开，新验证记录不可变。
+  - [x] 每次 live 真实导航，按 claim/Scenario 回放。
+  - [x] 风险边界和未验证覆盖明确报告。
+  - [x] 无 Git diff 的 API/权限变化检测通过。
 - [ ] **P3-04 语义/视觉漂移**（依赖 P3-03）
   - [ ] 安全文本摘要及可比较环境检查。
   - [ ] 像素差异、动态区域和分类报告。
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 全部完成，Gate 2 已通过（2026-09-28）。Phase 3 进行中，共 27 / 32。下一项：P3-03。
+- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 全部完成，Gate 2 已通过（2026-09-28）。Phase 3 进行中，共 28 / 32。下一项：P3-04。
 
 ### 执行记录
 
@@ -825,4 +825,20 @@ Task ID: P3-02
 产物 / commit 引用: 见本任务提交
 剩余风险: 显式 --base 的分析对所有已发布手册统一比较；等待复核后的第二次 update 会复用第一次按新源码采集的截图（在同一源码指纹下是正确的）；update 目前每个目标一套 generate 节点，同 Scenario 的采集由 captureKey 去重。
 下一项可执行任务: P3-03
+```
+
+```text
+Task ID: P3-03
+状态: completed
+开始时基线 commit / dirty files: 552da21（P3-02）；工作区干净
+实际修改文件: src/verify/artifacts.js、src/verify/live.js、src/verify/report.js（新）；src/commands/verify.js（--artifacts 默认 / --live / --all；page / task / manual 目标；每次写不可变报告）；test/server.js（运行态开关 set/reset：按钮名、权限、权益文字、404 路径、仪表盘时钟 / 偏移 / 导出按钮，/api/permissions，/dashboard）；test/live-verify.test.js（新）；test/run-store.test.js（修复既有的偶发失败：断言的秘密值 "abc" 可能出现在随机 Run UUID 中，改为不会碰撞的值）；test/run.js
+契约变更: 新增验证报告 .manual/verifications/<id>.json（kind live / artifacts，checks / claims / sections / coverage / result，不可变）。结果与退出码：passed 0；failed（与手册不一致）4；需要登录 3；inconclusive（网络 / 超时 / 浏览器）1。规范中"在 planner / BrowserSession / evidence store 中增加 live 节点"未采用：在线验证只读、无需恢复，直接用一个 BrowserSession（复用 Browser、每个 Scenario 独立 Context）顺序回放；不写 Capture，故 src/evidence/store.js、src/runtime/planner.js、src/browser/session.js 无需修改。
+执行命令与结果:
+  - node test/live-verify.test.js：9 passed（真实 Chromium：artifacts 与 --all 离线通过且 onlineChecked=false；live 通过时 claim 逐条（editor-opened passed / saved not_run）、写步骤停止边界与覆盖、章节结果、不新增 Capture、报告落盘；重复验证生成新报告且旧报告字节不变；Git 无变化下按钮改名 → ui-changed 退出码 4（artifacts 仍通过）；权限收回被发现、恢复后通过；页面 404 → page-not-found，--all 汇总失败；服务关闭 → inconclusive 退出码 1；分类表）。
+  - node test/runtime-failure-matrix.test.js：17 passed；node test/task-first-e2e.test.js：2 passed；gate0 / gate1 / task-rerun（verify 旧用法）通过。
+  - npm test：64 个测试文件全部通过（macOS / Node 26.4.0）。
+失败或跳过的验收及原因: 无。
+产物 / commit 引用: 见本任务提交
+剩余风险: 在线验证只回放安全步骤；多角色（不同 authProfile 的 Scenario）的实际身份切换依赖 P3-05；live 失败时不保存诊断截图（避免未脱敏图像落盘）。
+下一项可执行任务: P3-04
 ```

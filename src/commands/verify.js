@@ -1,97 +1,183 @@
 'use strict';
+
+/*
+ * `manual verify` —— 检查已发布的手册。两个范围严格分开：
+ *
+ *   --artifacts（默认）离线产物验证：文档与发布记录一致、图片 hash、隐私与发布门槛、结构事实。
+ *   --live              在线验证：真实导航并逐条回放页面身份、任务步骤与完成声明；
+ *                       写 / 破坏性步骤不执行，报告验证覆盖与停止边界。
+ *
+ * 每次验证都写一份新的不可变报告（.manual/verifications/<id>.json）；不改历史 Capture 与发布记录。
+ */
+
 const fs = require('fs');
 const path = require('path');
+
 const { parseArgs } = require('../cli/args');
 const { exitCodeFor, usageExit } = require('../cli/output');
 const { loadConfig } = require('../config/load');
-const { createProjectStore } = require('../store/project');
-const { readCurrentRelease, manualIdFor } = require('../publication/release-store');
-const { fileHash } = require('../publication/publisher');
-const { checkEvidenceUsable } = require('../model/approval');
-const { validateTaskFinal } = require('../generate/task-facts');
-const { validatePublication, formatIssues } = require('../publication/validate');
+const { createBrowserSession } = require('../browser/session');
+const { publishedManualIds } = require('../update/baseline');
+const { loadVerify, prepareVerify, verifyPageArtifacts, checksFromErrors } = require('../verify/artifacts');
+const { verifyLive } = require('../verify/live');
+const { writeReport, exitCodeForReports } = require('../verify/report');
+const releases = require('../publication/release-store');
+
+const KNOWN_FLAGS = new Set(['projectRoot', 'live', 'artifacts', 'all', 'json', 'help']);
 
 const HELP = `
-manual verify <task-id> [--json]
-    离线产物验证（artifact scope）：正式文档与发布记录一致、图片存在且 hash 相符、隐私与发布门槛通过、
-    结构化事实与证据一致。它不访问浏览器——通过只说明"文档与当时的证据一致"，不代表当前网页行为未变。
-    --live（真实导航与断言回放）计划在 Phase 3 提供。
+manual verify —— 检查已发布的手册
+
+用法:
+  manual verify <目标> [--artifacts | --live] [--json]
+  manual verify --all [--artifacts | --live] [--json]
+      目标：task:<id> / page:<id> / manual:<manualId> / 无前缀 id（先按任务、再按页面解析）
+
+范围:
+  --artifacts   （默认）离线产物验证：正式文档与发布记录一致、图片存在且 hash 相符、隐私与发布门槛通过、
+                结构化事实与证据一致。不访问浏览器——通过只说明"文档与发布时的证据一致"，不代表当前网页行为未变。
+  --live        在线验证：每次都真实打开页面，按手册的章节回放页面身份、任务步骤与完成声明的断言；
+                不从旧截图或缓存返回结果。写 / 破坏性步骤不执行，对应声明报告为 not_run，并给出验证覆盖与停止边界。
+                失败分类：page-not-found / ui-changed / state-changed / role-mismatch / redirected /
+                verification-inconclusive（网络、超时——不能证明产品回归）。
+
+输出:
+  每次验证写入新的不可变报告 .manual/verifications/<id>.json（基线发布、观察时间、输入 revision、逐条检查与结果）。
+
+退出码: 0 通过；4 与手册不一致（failed）；3 需要登录 / 身份不符；1 无法下结论（inconclusive）或其它失败；2 参数错误。
 `.trim();
 
-/** 读取任务、正式文档与事实文件。 */
-function loadVerify(root, config, taskId) {
+function resolveTargets(root, config, raw, all) {
   const state = path.join(root, config.artifacts.stateDir);
-  const projectStore = createProjectStore({ stateDirAbs: state, docsOutputDir: config.docs.outputDir });
-  let base;
-  try { base = projectStore.load(); } catch (error) { return { ok: false, errors: error.errors || [error.message] }; }
-  const task = base.model.tasks.find((t) => t.id === taskId);
-  if (!task) return { ok: false, errors: ['找不到任务。'] };
-  const manual = path.join(root, config.docs.outputDir, 'tasks', `${task.id}.md`);
-  // 以当前发布记录中的 facts 为准（草稿可变，可能已删除）；没有发布记录的旧项目才回退草稿 facts
-  const release = readCurrentRelease(state, manualIdFor('task', task.id));
-  const factsFile = path.join(state, 'drafts', 'tasks', `${task.id}.facts.json`);
-  if (!fs.existsSync(manual)) return { ok: false, errors: ['正式文档不存在。'] };
-  if (!release && !fs.existsSync(factsFile)) return { ok: false, errors: ['正式文档或事实文件不存在（也没有发布记录）。'] };
-  const facts = release ? release.facts : JSON.parse(fs.readFileSync(factsFile, 'utf8'));
-  return { ok: true, state, projectStore, base, task, pages: base.model.pages, manual, release, markdown: fs.readFileSync(manual, 'utf8'), facts };
+  if (all) {
+    return publishedManualIds(state).map((manualId) => {
+      const match = /^(page|task)-(.+)$/.exec(manualId);
+      return match ? { type: match[1], id: match[2] } : null;
+    }).filter(Boolean);
+  }
+  const text = String(raw);
+  const prefixed = /^(page|task):(.+)$/.exec(text);
+  if (prefixed) return [{ type: prefixed[1], id: prefixed[2] }];
+  const manual = /^manual:(page|task)-(.+)$/.exec(text);
+  if (manual) return [{ type: manual[1], id: manual[2] }];
+  // 无前缀：兼容旧用法（任务 id），其次页面
+  if (releases.readCurrentRelease(state, `task-${text}`) || fs.existsSync(path.join(state, 'tasks', `${text}.yaml`))) return [{ type: 'task', id: text }];
+  if (releases.readCurrentRelease(state, `page-${text}`)) return [{ type: 'page', id: text }];
+  return [{ type: 'task', id: text }];
 }
 
-/** 只读检查（可重复执行，不改变任何文件）：审批与证据新鲜度、结构事实、发布门槛。 */
-function prepareVerify({ root, config, task, pages = [], manual, markdown, facts, release = null }) {
-  const usable = checkEvidenceUsable(task, pages);
-  if (!usable.ok) return { ok: false, errors: usable.errors };
-  const releaseErrors = [];
-  if (release && fileHash(manual) !== release.documentHash) {
-    releaseErrors.push(`document-modified: ${release.documentPath} 与当前发布记录 ${release.id} 不一致（发布后被修改），重新生成并定稿。`);
+/** 离线产物验证单个目标；任务沿用旧的状态投影提交。 */
+function artifactsFor(root, config, target) {
+  const startedAt = new Date().toISOString();
+  const state = path.join(root, config.artifacts.stateDir);
+  const manualId = releases.manualIdFor(target.type, target.id);
+  let errors = [];
+  let extra = {};
+  if (target.type === 'page') {
+    const result = verifyPageArtifacts({ root, config, pageId: target.id });
+    if (!result.ok) errors = result.errors;
+    else extra = { manual: result.manual, images: result.images };
+  } else {
+    const input = loadVerify(root, config, target.id);
+    if (!input.ok) errors = input.errors;
+    else {
+      const prepared = prepareVerify({ root, config, ...input });
+      if (!prepared.ok) errors = prepared.errors;
+      else {
+        try {
+          input.projectStore.commit({ base: input.base, kind: 'observation', changes: { tasks: [prepared.nextTask] } });
+        } catch (error) {
+          errors = [`${error.code || 'write-failed'}: 验证通过，但任务状态写入失败。${error.message}`];
+        }
+        extra = { manual: input.manual, images: (input.facts.images || []).map((image) => image.artifactPath) };
+      }
+    }
   }
-  if (task.lastCapture && JSON.stringify(facts.evidence?.captureIds || null) !== JSON.stringify(task.lastCapture.captureIds || [])) {
-    return { ok: false, errors: [`document-stale: 正式文档基于较早的采集，重新生成并定稿后再验证。`] };
-  }
-  // 验证可以重复执行；status 与 lastVerification 只记录最近一次结果。
-  const nextTask = { ...task, status: 'verified', lastVerification: { at: new Date().toISOString(), result: 'passed' } };
-  const checked = validateTaskFinal(markdown, facts);
-  if (!checked.ok) return { ok: false, errors: [...releaseErrors, ...checked.errors] };
-  // 图片按正式文档所在目录解析，核对产物位置、hash 与隐私记录（与 finalize 同一门槛）。
-  const gate = validatePublication({ projectRoot: root, manualFile: manual, markdown, images: facts.images, config });
-  if (!gate.ok) return { ok: false, errors: [...releaseErrors, ...formatIssues(gate.errors)] };
-  if (releaseErrors.length) return { ok: false, errors: releaseErrors };
-  return { ok: true, nextTask, releaseId: release?.id || null };
+  const release = releases.readCurrentRelease(state, manualId);
+  const checks = checksFromErrors(errors);
+  const report = {
+    kind: 'artifacts', manualId, releaseId: release?.id || null, target: `${target.type}:${target.id}`,
+    startedAt, finishedAt: new Date().toISOString(), onlineChecked: false,
+    checks, result: errors.length ? 'failed' : 'passed',
+  };
+  let written = null;
+  if (release) written = writeReport(state, report);
+  return { report: written?.report || report, file: written?.file || null, errors, extra };
 }
 
 async function run(argv) {
-  const { values, positional, unknownFlags } = parseArgs(argv, { known: new Set(['projectRoot', 'live', 'json', 'help']), booleans: ['live'] });
+  const { values, positional, unknownFlags } = parseArgs(argv, { known: KNOWN_FLAGS, booleans: ['live', 'artifacts', 'all'] });
   const json = values.json === true;
   if (values.help) { process.stdout.write(HELP + '\n'); return 0; }
-  if (values.live) {
-    process.stderr.write('[manual verify] --live（真实导航并逐条回放断言）计划在 Phase 3 提供；当前只做离线产物验证。\n');
-    return usageExit();
-  }
-  if (unknownFlags.length) {
-    process.stderr.write(`[manual verify] 未知参数: ${unknownFlags.join(', ')}\n`);
-    return usageExit();
-  }
-  const root = path.resolve(values.projectRoot || process.cwd());
   const fail = (e) => {
     const a = Array.isArray(e) ? e : [e];
     if (json) process.stdout.write(JSON.stringify({ ok: false, errors: a }, null, 2) + '\n');
     else a.forEach((x) => process.stderr.write(`[manual verify] ${x}\n`));
     return exitCodeFor(a);
   };
+  if (unknownFlags.length) return usageExit(fail(`未知参数: ${unknownFlags.join(', ')}`));
+  if (values.live && values.artifacts) return usageExit(fail('--live 与 --artifacts 只能选一个。'));
+  if (values.all ? positional.length !== 0 : positional.length !== 1) return usageExit(fail('需要一个目标（task:<id> / page:<id>），或用 --all 验证全部已发布手册。'));
+  const root = path.resolve(values.projectRoot || process.cwd());
   const loaded = loadConfig(root);
   if (!loaded.ok) return fail(loaded.errors);
-  if (positional.length !== 1) return usageExit(fail('需要一个 task-id。'));
   const config = loaded.config;
-  const input = loadVerify(root, config, positional[0]);
-  if (!input.ok) return fail(input.errors);
-  const prepared = prepareVerify({ root, config, ...input });
-  if (!prepared.ok) return fail(prepared.errors);
-  try {
-    input.projectStore.commit({ base: input.base, kind: 'observation', changes: { tasks: [prepared.nextTask] } });
-  } catch (error) {
-    return fail(`${error.code || 'write-failed'}: 验证通过，但任务状态写入失败。${error.message}`);
+  const targets = resolveTargets(root, config, positional[0], values.all === true);
+  if (targets.length === 0) return fail('not-published: 还没有已发布的手册。');
+
+  if (!values.live) {
+    const results = targets.map((target) => artifactsFor(root, config, target));
+    if (!values.all) {
+      const [only] = results;
+      if (only.errors.length) return fail(only.errors);
+      if (json) process.stdout.write(JSON.stringify({ ok: true, status: 'verified', scope: 'artifacts', onlineChecked: false, verificationId: only.report.id || null, ...only.extra }, null, 2) + '\n');
+      else process.stdout.write(`[manual verify] ${only.report.target} 产物验证通过（离线：不代表当前网页行为未变，在线检查用 --live）。\n`);
+      return 0;
+    }
+    const body = { ok: results.every((r) => !r.errors.length), scope: 'artifacts', onlineChecked: false, reports: results.map((r) => ({ target: r.report.target, result: r.report.result, verificationId: r.report.id || null, errors: r.errors })) };
+    if (json) process.stdout.write(JSON.stringify(body, null, 2) + '\n');
+    else for (const r of body.reports) process.stdout.write(`[manual verify] ${r.target}: ${r.result}${r.errors.length ? `（${r.errors[0]}）` : ''}\n`);
+    return body.ok ? 0 : exitCodeFor(results.flatMap((r) => r.errors));
   }
-  if (json) process.stdout.write(JSON.stringify({ ok: true, status: 'verified', manual: input.manual, images: input.facts.images.map((image) => image.artifactPath) }, null, 2) + '\n');
-  return 0;
+
+  // ---- --live：同一次验证复用一个 Browser，每个 Scenario 独立 Context
+  const session = createBrowserSession();
+  const reports = [];
+  const errors = [];
+  try {
+    for (const target of targets) {
+      try {
+        const report = await verifyLive({ projectRoot: root, config, target, session });
+        reports.push(writeReport(path.join(root, config.artifacts.stateDir), report).report);
+      } catch (error) {
+        errors.push(`${error.code || 'verify-failed'}: ${error.message}`);
+      }
+    }
+  } finally {
+    await session.close().catch(() => {});
+  }
+  const body = {
+    ok: errors.length === 0 && reports.every((r) => r.result === 'passed'),
+    scope: 'live',
+    onlineChecked: true,
+    reports: reports.map((r) => ({
+      verificationId: r.id, target: r.target, releaseId: r.releaseId, result: r.result, coverage: r.coverage,
+      failures: r.checks.filter((c) => c.outcome !== 'passed').map(({ id, scope, outcome, code, category, message, stepId }) => ({ id, scope, outcome, code, category, message, stepId })),
+      claims: r.claims, sections: r.sections,
+    })),
+    errors,
+  };
+  if (json) process.stdout.write(JSON.stringify(body, null, 2) + '\n');
+  else {
+    for (const r of body.reports) {
+      process.stdout.write(`[manual verify --live] ${r.target}: ${r.result}（声明 ${r.coverage.claims.verified}/${r.coverage.claims.total} 已验证，步骤 ${r.coverage.steps.executed}/${r.coverage.steps.total} 已执行${r.coverage.stoppedAt ? `，在 ${r.coverage.stoppedAt.stepId} 前停止（${r.coverage.stoppedAt.reason}）` : ''}）\n`);
+      for (const f of r.failures) process.stdout.write(`    ${f.outcome} ${f.category || ''} ${f.id}: ${f.message || ''}\n`);
+    }
+    for (const e of errors) process.stderr.write(`[manual verify] ${e}\n`);
+  }
+  if (errors.length && reports.length === 0) return exitCodeFor(errors);
+  const code = exitCodeForReports(reports);
+  return code || (errors.length ? exitCodeFor(errors) : 0);
 }
 
-module.exports = { run, prepareVerify };
+module.exports = { run, HELP, prepareVerify };
