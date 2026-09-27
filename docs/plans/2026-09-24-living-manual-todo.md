@@ -153,11 +153,11 @@
 
 详细步骤：[Phase 3](2026-09-24-living-manual-phase-3.md)。推荐顺序：01 → 06 → 02 → 03 → 04 → 05 → 07 → 08。
 
-- [ ] **P3-01 Git changes / impact**（依赖 Gate 2）
-  - [ ] NUL Git 输出、rename old/new、dirty/untracked。
-  - [ ] 旧新图 union 与全局依赖保守扩散。
-  - [ ] Page→Scenario→Section 可解释影响路径。
-  - [ ] 非 Git/无基线/不完整依赖明确回退。
+- [x] **P3-01 Git changes / impact**（依赖 Gate 2）
+  - [x] NUL Git 输出、rename old/new、dirty/untracked。
+  - [x] 旧新图 union 与全局依赖保守扩散。
+  - [x] Page→Scenario→Section 可解释影响路径。
+  - [x] 非 Git/无基线/不完整依赖明确回退。
 - [ ] **P3-06 ManualSection / 编辑保护**（依赖 Gate 2）
   - [ ] 稳定 section/block ID 与 ownership。
   - [ ] 旧/当前/新三方比较和自由编辑保护。
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 全部完成，Gate 2 已通过（2026-09-28），共 24 / 32。下一项：P3-01（Phase 3 开始前建议暂停审阅）。
+- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 全部完成，Gate 2 已通过（2026-09-28）。Phase 3 进行中，共 25 / 32。下一项：P3-06。
 
 ### 执行记录
 
@@ -776,4 +776,21 @@ Task ID: Gate 2
 Gate 2 对照: 1 ✓；2 ✓；3 ✓（member / admin 身份隔离由 P2-04 真实浏览器用例覆盖）；4 ✓；5 ✓；6 ✓；7 ✓。
 未覆盖: Windows / Linux 未在本阶段运行（P3-07 CI 矩阵）；一个 Run 目前由 CLI 接受单个目标，多目标只经应用层 API 使用。
 下一项可执行任务: P3-01（建议先审阅 Phase 2 再进入 Phase 3）
+```
+
+```text
+Task ID: P3-01
+状态: completed
+开始时基线 commit / dirty files: ed47807（Gate 2）；工作区干净
+实际修改文件: src/update/git-changes.js、src/update/impact.js、src/update/baseline.js、src/inspect/source-graph.js（新）；src/inspect/index-store.js（不可变源码图快照 .manual/index/graphs/<hex>.json）；src/commands/inspect.js（复用 scanSource、写图快照、指纹变化的文件传给任务 stale 标记）；src/inspect/index-builder.js（任务页面统一用 step.pageId ?? step.page，导出 taskPageIds）；src/publication/publisher.js（release 记录 sourceBaseline）；src/model/schema.js（校验 sourceBaseline）；test/git-changes.test.js、test/impact-analysis.test.js（新）、test/fixtures.js（Git 夹具）、test/run.js
+契约变更: C10 发布记录新增可选字段 sourceBaseline = { graphRevision, gitCommit, gitDirty }；旧记录缺该字段按"无基线"处理（full-rebuild-required），不需要迁移。规范中 src/inspect/fingerprint.js、src/tasks/staleness.js 的接口保持不变（impactReport / changeReasons 原样复用，staleness 已支持 files 参数，inspect 开始传入）。
+执行命令与结果:
+  - node test/git-changes.test.js：11 passed（NUL 解析；A/M/D/R、空格与中文路径、staged / unstaged / untracked；多提交；orphan 无共同祖先；子目录项目根；--base 非法 / 非 Git 明确报错且拒绝以 - 开头的 ref；非 Git 按图快照内容比较；基线提交被 rebase 掉时降级并警告；发布时 dirty 后被还原的修改由快照补充发现；排除规则与显式依赖保留；gitState）。
+  - node test/impact-analysis.test.js：14 passed（共享组件只影响 chat / skills / 经过 chat 的任务且 reasonPath 为 [文件, 页面, Scenario, 手册]；删除与 rename 依赖通过旧图 union 找到；package.json 全局保守扩散；layout 精确扩散；无法归属的新源码只保守纳入依赖不完整页面；docs / .manual 修改不算源码变化；删除页面 → retirement / 任务 brokenReference；不同发布基线分组；显式 --base；无基线 full-rebuild-required；非 Git；内容二次确认）。
+  - node test/source-fingerprint.test.js：13 passed；inspect / index-builder / staleness / publication-recovery / model-schema 均通过。
+  - npm test：59 个测试文件全部通过（macOS / Node 26.4.0，git 2.x）。
+失败或跳过的验收及原因: 无。
+产物 / commit 引用: 见本任务提交
+剩余风险: 显式 --base 没有与该提交同时刻的源码图，删除 / rename 的归属按最近一次 inspect 的图 ∪ 当前图判断，不做内容二次确认（宁可多报）；Git 调用受 .gitignore 影响，被忽略但被页面依赖的文件只能靠图快照内容比较发现。
+下一项可执行任务: P3-06
 ```

@@ -63,6 +63,8 @@ const FILES = [
   'runtime-recovery.test.js',
   'runtime-failure-matrix.test.js',
   'gate2.test.js',
+  'git-changes.test.js',
+  'impact-analysis.test.js',
 ];
 
 let failed = 0;

@@ -16,12 +16,10 @@ const path = require('path');
 const { parseArgs } = require('../cli/args');
 const { exitCodeFor, usageExit } = require('../cli/output');
 const { loadConfig } = require('../config/load');
-const { detectFramework } = require('../inspect/detect');
-const { scanNextjs } = require('../inspect/nextjs');
-const { buildImportGraph } = require('../inspect/import-graph');
-const { frameworkDependencies } = require('../inspect/framework-dependencies');
 const { applyFingerprints, impactReport } = require('../inspect/fingerprint');
 const { reconcile, ANALYSIS } = require('../inspect/model');
+const { scanSource } = require('../inspect/source-graph');
+const { writeGraphSnapshot } = require('../inspect/index-store');
 const store = require('../inspect/store');
 const { createProjectStore } = require('../store/project');
 const { displayPath, writeText } = require('../util/fsx');
@@ -191,20 +189,9 @@ function run(argv) {
   if (!loaded.ok) return fail(loaded.errors, { json });
   const { config } = loaded;
 
-  const detected = detectFramework(projectRoot);
-  if (!detected.ok) return fail(detected.errors, { json });
-
-  const scan = scanNextjs(projectRoot, { appDir: detected.appDir, pagesDir: detected.pagesDir });
-  const dependencyWarnings = [];
-  scan.pages = scan.pages.map((page) => {
-    // 框架约定文件（祖先 layout、_app 等）与页面一起渲染：作为 scope 依赖一并遍历
-    const scope = frameworkDependencies(projectRoot, page, detected);
-    const graph = buildImportGraph(projectRoot, [page.entry, ...scope]);
-    for (const unresolved of graph.unresolved) {
-      dependencyWarnings.push(`${page.route}: 无法解析依赖 ${unresolved}`);
-    }
-    return { ...page, dependencies: { ...graph, scope } };
-  });
+  const scanned = scanSource(projectRoot);
+  if (!scanned.ok) return fail(scanned.errors, { json });
+  const { detected, scan, dependencyWarnings } = scanned;
 
   const stateDirAbs = path.join(projectRoot, config.artifacts.stateDir);
   const projectStore = createProjectStore({ stateDirAbs, docsOutputDir: config.docs.outputDir });
@@ -257,6 +244,10 @@ function run(argv) {
   const staleTasks = markAffectedTasks(base.model.tasks, {
     // 只有这次新变化的页面才标记；已经是 missing 的页面不会每次 inspect 都重复打标
     pageIds: [...result.stale, ...result.newlyMissing].map((page) => page.id),
+    // 指纹变化原因里的具体文件：任务 evidence 直接引用的源码变了也要标 stale
+    files: fingerprinted.changed.flatMap((change) => change.reasons)
+      .filter((reason) => /^(content-changed|dependency-removed|dependency-added):/.test(reason))
+      .map((reason) => reason.slice(reason.indexOf(':') + 1)),
   });
 
   // 一次定义提交：页面、被 prune 的页面、受影响任务的 stale 标记、项目元信息。
@@ -284,6 +275,8 @@ function run(argv) {
   ];
   if (previousGraph) writeText(path.join(store.indexDirFor(stateDirAbs), 'graph.previous.json'), JSON.stringify(previousGraph, null, 2) + '\n');
   writeText(graphFile, JSON.stringify(fingerprinted.graph, null, 2) + '\n');
+  // 不可变快照：release 记录 graphRevision，update 据此取回发布时的依赖图
+  const graphRevision = writeGraphSnapshot(stateDirAbs, fingerprinted.graph);
   const worklist = buildWorklist(result.pages);
 
   if (json) {
@@ -326,6 +319,7 @@ function run(argv) {
           renameCandidates: result.renameCandidates,
           // 源码影响清单：changed / uncertain（覆盖不完整，不能视为零影响）/ added / removed / unchanged
           impact,
+          graphRevision,
           sourceChanges: fingerprinted.changed,
           skipped: scan.skipped,
           conflicts: scan.conflicts,

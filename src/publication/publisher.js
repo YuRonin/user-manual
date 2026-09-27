@@ -21,6 +21,7 @@ const { writeFileAtomic } = require('../util/atomic-write');
 const { newUuid } = require('../model/ids');
 const releases = require('./release-store');
 const { validateRelease } = require('../model/schema');
+const { currentSourceBaseline } = require('../update/baseline');
 
 const STATES = ['prepared', 'assets-installed', 'document-installed', 'release-committed', 'completed'];
 
@@ -153,7 +154,7 @@ function advance(projectRoot, stateDirAbs, journal, hooks = {}) {
  * @param {object} [p.hooks]           故障注入：after:<state>
  * @param {string} [p.runId]           Run 内发布时事务目录放在 runs/<runId>/publication/
  */
-function publish({ projectRoot, stateDirAbs, manualId, documentFile, markdown, facts, captureIds = [], definitionRevisions = {}, force = false, hooks = {}, runId = null }) {
+function publish({ projectRoot, stateDirAbs, manualId, documentFile, markdown, facts, captureIds = [], definitionRevisions = {}, force = false, hooks = {}, runId = null, sourceBaseline = null }) {
   const documentPath = toPosix(path.relative(projectRoot, documentFile));
   const oldDocHash = fileHash(documentFile);
   const newDocHash = hashOf(markdown);
@@ -182,6 +183,8 @@ function publish({ projectRoot, stateDirAbs, manualId, documentFile, markdown, f
     artifacts: (facts.images || []).map((image) => ({ kind: 'published', path: image.artifactPath, sha256: String(image.sha256).replace(/^sha256:/, '') })),
     previousReleaseId: previous?.id || null,
     createdAt: new Date().toISOString(),
+    // 源码基线：update 据此找出"发布之后改了什么"（P3-01）
+    sourceBaseline: sourceBaseline || currentSourceBaseline(projectRoot, stateDirAbs),
     facts,
   };
   // 记录不完整（如旧 facts 没有图片 hash）必须在写任何文件之前发现

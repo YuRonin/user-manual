@@ -129,6 +129,35 @@ function nextNoRoutesFixture() {
   return root;
 }
 
+/* Git 夹具（P3-01）：固定作者与时间，不读用户的全局 Git 配置。 */
+const GIT_ENV = {
+  GIT_AUTHOR_NAME: 'fixture', GIT_AUTHOR_EMAIL: 'fixture@example.test',
+  GIT_COMMITTER_NAME: 'fixture', GIT_COMMITTER_EMAIL: 'fixture@example.test',
+  GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+};
+
+function git(root, args) {
+  const { execFileSync } = require('child_process');
+  return execFileSync('git', args, { cwd: root, env: { ...process.env, ...GIT_ENV }, stdio: ['ignore', 'pipe', 'pipe'] }).toString('utf8').trim();
+}
+
+function hasGit() {
+  try { require('child_process').execFileSync('git', ['--version'], { stdio: 'ignore' }); return true; } catch (_) { return false; }
+}
+
+/** 初始化仓库并提交当前全部文件，返回提交 id。 */
+function gitInit(root) {
+  git(root, ['init', '-q', '-b', 'main']);
+  git(root, ['config', 'core.autocrlf', 'false']);
+  return gitCommit(root, 'init');
+}
+
+function gitCommit(root, message = 'change') {
+  git(root, ['add', '-A']);
+  git(root, ['commit', '-q', '--allow-empty', '-m', message]);
+  return git(root, ['rev-parse', 'HEAD']);
+}
+
 function cleanup(root) {
   fs.rmSync(root, { recursive: true, force: true });
 }
@@ -144,4 +173,8 @@ module.exports = {
   vueFixture,
   nextNoRoutesFixture,
   cleanup,
+  git,
+  hasGit,
+  gitInit,
+  gitCommit,
 };

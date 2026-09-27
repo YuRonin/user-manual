@@ -437,6 +437,15 @@ function validateRelease(release) {
   if (!isObject(release.definitionRevisions)) c.error('definitionRevisions', 'required', 'definitionRevisions 必填。');
   if (!nonEmpty(release.createdAt) || Number.isNaN(Date.parse(release.createdAt))) c.error('createdAt', 'required', 'createdAt 需要是 ISO 时间。');
   if (release.artifacts !== undefined) validateArtifactRefs(c, release.artifacts, 'artifacts');
+  // 源码基线（P3-01）：旧发布记录没有该字段，按"无基线"处理（update 回退全量重建）
+  if (release.sourceBaseline !== undefined && release.sourceBaseline !== null) {
+    const b = release.sourceBaseline;
+    if (!isObject(b)) c.error('sourceBaseline', 'invalid-type', 'sourceBaseline 需要是对象。');
+    else {
+      if (b.graphRevision !== null && b.graphRevision !== undefined && !SHA256_RE.test(String(b.graphRevision))) c.error('sourceBaseline.graphRevision', 'invalid-hash', 'graphRevision 需要是 sha256。');
+      if (b.gitCommit !== null && b.gitCommit !== undefined && !/^[a-f0-9]{40}([a-f0-9]{24})?$/.test(String(b.gitCommit))) c.error('sourceBaseline.gitCommit', 'invalid-commit', 'gitCommit 需要是完整提交 id。');
+    }
+  }
   return c.result({ version: version.version });
 }
 

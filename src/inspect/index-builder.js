@@ -19,12 +19,17 @@ function isHook(file) {
   return /(^|\/)hooks?\//i.test(file) || /^use[A-Z0-9]/.test(base);
 }
 
+/** 任务涉及的页面：入口页 + 每个步骤所在页（新字段 pageId 优先，兼容旧字段 page）。 */
+function taskPageIds(task) {
+  return [task.entryPage, ...(task.steps || []).map((step) => step.pageId ?? step.page)].filter(Boolean);
+}
+
 function buildForwardIndex(pages, { docsOutputDir = 'docs/manual', tasks } = {}) {
   const forward = {};
   const taskIdsByPage = new Map();
   if (Array.isArray(tasks)) {
     for (const task of tasks) {
-      const pagesForTask = new Set([task.entryPage, ...(task.steps || []).map((step) => step.page)]);
+      const pagesForTask = new Set(taskPageIds(task));
       for (const pageId of pagesForTask) {
         if (!taskIdsByPage.has(pageId)) taskIdsByPage.set(pageId, new Set());
         taskIdsByPage.get(pageId).add(task.id);
@@ -78,14 +83,14 @@ function buildTaskIndexes(tasks, pages, forward, { docsOutputDir = 'docs/manual'
   const tasksByFile = new Map();
 
   for (const task of [...tasks].sort((a, b) => String(a.id).localeCompare(String(b.id)))) {
-    const pageIds = uniqueSorted([task.entryPage, ...(task.steps || []).map((step) => step.page)]);
+    const pageIds = uniqueSorted(taskPageIds(task));
     const files = uniqueSorted(pageIds.flatMap((pageId) => {
       const page = pageById.get(pageId);
       return page ? (forward[page.route]?.files || []) : [];
     }).concat((task.evidence || []).map((item) => item?.file)));
     const steps = (task.steps || []).map((step) => ({
       id: step.id,
-      page: step.page,
+      page: step.pageId ?? step.page,
       stateBefore: step.stateBefore ?? null,
       stateAfter: step.stateAfter ?? null,
       screenshots: Array.isArray(step.screenshots) ? step.screenshots : [],
@@ -128,4 +133,5 @@ module.exports = {
   buildIndexes,
   buildTaskIndexes,
   normalizePath,
+  taskPageIds,
 };
