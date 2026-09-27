@@ -169,7 +169,7 @@ test('--copy 需审阅：同数字换单位、业务承诺 → review-required�
   prepared(root);
   const file = copyFile(root, { intro: '设置会在 3 分钟内自动保存，保证不丢失。' });
   let r = cli(root, ['generate-task', 't', '--copy', file, '--json']);
-  assert.strictEqual(r.status, 1);
+  assert.strictEqual(r.status, 3, '需要人工确认属于等待输入（C08）');
   assert.strictEqual(r.json.code, 'review-required');
   assert.match(r.out, /number-unit.*3 分钟/);
   assert.match(r.out, /business-claim/);
@@ -182,7 +182,7 @@ test('草稿之后任务定义变化：draft-stale，并指出变化的事实部
   const state = path.join(root, '.manual');
   taskStore.writeTask(state, { ...taskStore.readTask(state, 't'), steps: [{ id: 'open', instruction: '点击「偏好」', page: 'home', action: { type: 'click', target: { role: 'button', name: '偏好' } } }] });
   const r = cli(root, ['generate-task', 't', '--copy', copyFile(root, {}), '--json']);
-  assert.strictEqual(r.status, 1);
+  assert.strictEqual(r.status, 4, '草稿过期属于漂移（C08）');
   assert.match(r.out, /draft-stale.*(inputRevision|steps)/);
 });
 

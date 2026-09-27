@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { parseArgs } = require('../cli/args');
+const { exitCodeFor, usageExit } = require('../cli/output');
 const { loadConfig } = require('../config/load');
 const { validateTask } = require('../tasks/model');
 const { approve, approvalState, APPROVAL_STATES } = require('../model/approval');
@@ -32,7 +33,7 @@ function fail(errors, json) {
   const list = Array.isArray(errors) ? errors : [errors];
   if (json) process.stdout.write(JSON.stringify({ ok: false, errors: list }, null, 2) + '\n');
   else for (const error of list) process.stderr.write(`[manual approve-tasks] ${error}\n`);
-  return 1;
+  return exitCodeFor(list);
 }
 
 function readJson(file, errors) {
@@ -56,7 +57,7 @@ function run(argv) {
     process.stdout.write(HELP + '\n');
     return 0;
   }
-  if (unknownFlags.length > 0) return fail(`未知参数: ${unknownFlags.join(', ')}`, json);
+  if (unknownFlags.length > 0) return usageExit(fail(`未知参数: ${unknownFlags.join(', ')}`, json));
   if (!values.input) return fail('需要 --input <决策.json>。', json);
 
   const projectRoot = path.resolve(values.projectRoot || process.cwd());

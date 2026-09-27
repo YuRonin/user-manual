@@ -213,7 +213,9 @@ const badCases = [
 for (const [name, args, pattern] of badCases) {
   test(`拒绝：${name}`, (root) => {
     const r = runInit(root, args);
-    assert.strictEqual(r.status, 1, `应以 1 退出，实际 ${r.status}`);
+    // C08：未知参数是参数错误（2）；取值不合法是执行失败（1）
+    const expected = name === '未知参数' ? 2 : 1;
+    assert.strictEqual(r.status, expected, `应以 ${expected} 退出，实际 ${r.status}`);
     assert.match(r.stderr, pattern, `报错信息不匹配，实际:\n${r.stderr}`);
     assert.ok(!fs.existsSync(configPath(root)), '校验失败时不应产生配置文件');
   });

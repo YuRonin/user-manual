@@ -137,11 +137,11 @@
   - [x] 文案字段约束，语义结果保持 source/model 来源。
   - [x] 超时重试只作用模型任务，等待时释放资源。
   - [x] 跨会话提交、幂等和旧响应拒绝测试通过。
-- [ ] **P2-07 CLI 和 Skill 编排**（依赖 P2-02/03/04/05/06）
-  - [ ] generate 自动规划，capture 只产证据。
-  - [ ] status/resume/run-submit 及兼容 wrapper。
-  - [ ] JSON/退出码/help/alias 对齐。
-  - [ ] Skill 将状态/cache/retry 决策交给 Runtime。
+- [x] **P2-07 CLI 和 Skill 编排**（依赖 P2-02/03/04/05/06）
+  - [x] generate 自动规划，capture 只产证据。
+  - [x] status/resume/run-submit 及兼容 wrapper。
+  - [x] JSON/退出码/help/alias 对齐。
+  - [x] Skill 将状态/cache/retry 决策交给 Runtime。
 - [ ] **P2-08 中断恢复矩阵**（依赖 P2-01～07）
   - [ ] 独立子进程故障注入与锁/租约恢复。
   - [ ] inputHash/output integrity 对账。
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 进行中（2026-09-27 起），已完成 22 / 32。下一项：P2-07。
+- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 进行中（2026-09-27 起），已完成 23 / 32。下一项：P2-08。
 
 ### 执行记录
 
@@ -725,4 +725,25 @@ Task ID: P2-06
 产物 / commit 引用: 见本任务提交
 剩余风险: 请求文件的 files 只覆盖页面入口 / 声明源码 / 依赖清单中的前 20 个文件，大型页面的语义分析可能信息不足（宿主可提示用户直接 describe）。
 下一项可执行任务: P2-07
+```
+
+```text
+Task ID: P2-07
+状态: completed
+开始时基线 commit / dirty files: 51fdabb（P2-06）；工作区干净
+实际修改文件:
+  - 新增：src/cli/output.js（C08 退出码映射）、src/cli/run-report.js（Run 结果输出）、src/runtime/app.js（规划 / 执行 / 继续 / 状态 / 旧入口登记缓存）、src/commands/status.js、resume.js、run-submit.js、test/runtime-cli.test.js
+  - 命令：generate.js（默认 Runtime；--plan / --offline / --refresh / --no-cache / --copy / --copy-default；兼容三段式改为 --draft / --finalize）、capture.js（接受 page: / task: 目标，默认规格采集登记缓存）、capture-task.js（与 capture task:<id> 共用 captureTaskTarget 并登记缓存）、verify.js（help 说明离线范围，--live 留给 Phase 3）；其余命令的失败出口按 C08 返回退出码（approve-tasks / auth / describe / discover-tasks / init / inspect / migrate / migrate-artifacts / plan-capture / publication / generate-task）
+  - src/cli/commands.js（注册 status / resume / run-submit，别名由 registry 自动生成）；src/runtime/planner.js（计划主体记录 policy：文案来源、acceptReview、force、缓存模式，供 --replan 使用）
+  - SKILL.md（Runtime 编排：按退出码与 waiting code 处理，不在对话中重演缓存 / 重试；同步 --copy、publication、migrate）；README.md（最小流程、退出码、高级与兼容命令）
+  - 测试按 C08 更新退出码断言：init、auth-command、auth-identity、capture、capture-task、page-validation、finalize-safety、fact-pack、publication-gates、task-rerun、gate1；generate.test / gate0 / gate1 的页面阶段一改为 --draft
+契约变更: 无（实现 C08 退出码切换）。退出码归类：2 = invalid-arguments / unknown-target / ambiguous-target / invalid-target；3 = approval-required / scope-changed / auth-missing / auth-expired / login-required / review-required / model-input-required / analysis-required / outcome-unknown / lock-held-remote；4 = publication-conflict / model-conflict / run-input-changed / draft-stale / evidence-stale / plan-tampered；其余失败 1。兼容说明写入 README 与 SKILL.md。
+执行命令与结果:
+  - node test/runtime-cli.test.js：6 passed（真实 Chromium 通过 CLI 子进程：--plan 退出 0、不创建 Run、列出风险边界；歧义目标退出 2 并给候选，未知参数 / 互斥开关 / 缺参数退出 2；离线无证据退出 1 且 code=cache-miss-offline；一条 generate task:… --copy-default 完成采集 → 草稿 → 校验 → 发布并退出 0，status 可读，再规划为 cache-hit 且不需要浏览器；page:chat 等待模型退出 3 并给出 run-submit 提示，错 inputHash 被拒，正确响应后 resume 完成；等待期间改任务定义 → resume 退出 4 且原 Run 字节不变，--replan 创建带 predecessor 的新 Run；capture task:… 登记缓存，help 列出新命令）。
+  - node test/compat-aliases.test.js：2 passed。
+  - npm test：54 个测试文件全部通过（macOS / Node 26.4.0）。
+失败或跳过的验收及原因: 无。
+产物 / commit 引用: 见本任务提交
+剩余风险: 页面 capture 使用 --url / --params / --profile 等覆盖参数时不登记缓存（与规划的缓存输入不一致），之后 generate 会重新采集；兼容三段式仍保留，旧脚本需改用 --draft 触发阶段一。
+下一项可执行任务: P2-08
 ```

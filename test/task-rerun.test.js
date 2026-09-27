@@ -33,9 +33,9 @@ async function ok(root, args) {
   return result.stdout ? JSON.parse(result.stdout) : null;
 }
 
-async function failsWith(root, args, pattern) {
+async function failsWith(root, args, pattern, exit = 1) {
   const result = await cli(root, args);
-  assert.strictEqual(result.status, 1, `manual ${args.join(' ')} 应失败\n${result.stdout}`);
+  assert.strictEqual(result.status, exit, `manual ${args.join(' ')} 应以 ${exit} 退出\n${result.stdout}`);
   assert.match(result.stdout + result.stderr, pattern);
 }
 
@@ -86,7 +86,7 @@ async function step(name, fn) {
       }] }));
       await ok(root, ['discover-tasks', 'profile', '--input', candidates, '--json']);
       assert.deepStrictEqual(task().approval, { status: 'pending', scopeHash: null });
-      await failsWith(root, ['capture-task', 'edit-profile', '--json'], /approval-required/);
+      await failsWith(root, ['capture-task', 'edit-profile', '--json'], /approval-required/, 3);
       const decisions = path.join(root, 'decisions.json');
       fs.writeFileSync(decisions, JSON.stringify({ decisions: [{ id: 'edit-profile', decision: 'approve', actor: 'tester', decisionRef: 'review-1' }] }));
       await ok(root, ['approve-tasks', '--input', decisions, '--json']);
@@ -129,7 +129,7 @@ async function step(name, fn) {
       const oldFacts = fs.readFileSync(path.join(state, 'drafts', 'tasks', 'edit-profile.facts.json'), 'utf8');
       await capture();
       fs.writeFileSync(path.join(state, 'drafts', 'tasks', 'edit-profile.facts.json'), oldFacts);
-      await failsWith(root, ['generate-task', 'edit-profile', '--finalize', kept, '--json'], /draft-stale/);
+      await failsWith(root, ['generate-task', 'edit-profile', '--finalize', kept, '--json'], /draft-stale/, 4);
       await failsWith(root, ['verify', 'edit-profile', '--json'], /document-stale/);
       await ok(root, ['generate-task', 'edit-profile', '--finalize', await draft(), '--json']);
       await ok(root, ['verify', 'edit-profile', '--json']);
@@ -138,7 +138,7 @@ async function step(name, fn) {
     await step('stale 不是死路：inspect 标记后生成被阻止，重新 capture 清除标记', async () => {
       taskStore.writeTask(state, { ...task(), stale: { reasons: ['page-changed:profile'], detectedAt: new Date().toISOString() } });
       assert.strictEqual(task().status, 'verified', '标记不改写 status');
-      await failsWith(root, ['generate-task', 'edit-profile', '--json'], /evidence-stale.*page-changed:profile/);
+      await failsWith(root, ['generate-task', 'edit-profile', '--json'], /evidence-stale.*page-changed:profile/, 4);
       await capture();
       assert.strictEqual(task().stale, null);
       await ok(root, ['generate-task', 'edit-profile', '--finalize', await draft(), '--json']);
@@ -154,8 +154,8 @@ async function step(name, fn) {
     await step('动作 / 断言 / claim 变化：需要重新审批，旧证据过期；重新确认后恢复', async () => {
       const current = task();
       taskStore.writeTask(state, { ...current, completion: { ...current.completion, claims: [{ id: 'editor-opened', text: '编辑面板已经打开。', assertionRefs: ['editor-visible'] }] } });
-      await failsWith(root, ['capture-task', 'edit-profile', '--json'], /approval-scope-changed/);
-      await failsWith(root, ['generate-task', 'edit-profile', '--json'], /evidence-stale.*scope-changed/);
+      await failsWith(root, ['capture-task', 'edit-profile', '--json'], /approval-scope-changed/, 3);
+      await failsWith(root, ['generate-task', 'edit-profile', '--json'], /evidence-stale.*scope-changed/, 4);
       const decisions = path.join(root, 'decisions-2.json');
       fs.writeFileSync(decisions, JSON.stringify({ decisions: [{ id: 'edit-profile', decision: 'approve' }] }));
       const statusBefore = task().status;

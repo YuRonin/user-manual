@@ -42,9 +42,9 @@ async function ok(root, args) {
   return r.json;
 }
 
-async function fails(root, args, pattern) {
+async function fails(root, args, pattern, exit = 1) {
   const r = await cli(root, [...args, '--json']);
-  assert.strictEqual(r.status, 1, `manual ${args.join(' ')} 应失败\n${r.stdout}`);
+  assert.strictEqual(r.status, exit, `manual ${args.join(' ')} 应以 ${exit} 退出\n${r.stdout}`);
   assert.match(r.stdout + r.stderr, pattern);
   return r;
 }
@@ -86,7 +86,7 @@ const writeJson = (file, value) => { fs.writeFileSync(file, JSON.stringify(value
       };
       fs.writeFileSync(file, yaml.dump(page));
       await ok(root, ['capture', 'chat']);
-      await ok(root, ['generate', 'chat']);
+      await ok(root, ['generate', 'chat', '--draft']);
       await ok(root, ['generate', 'chat', '--copy', writeJson(path.join(root, 'page-copy.json'), { intro: '在这里和 AI 助手对话。' })]);
       assert.match(fs.readFileSync(path.join(docs, 'chat.md'), 'utf8'), /在这里和 AI 助手对话。/);
       assert.ok(readCurrentRelease(state, 'page-chat'), '页面定稿产生发布记录');
@@ -179,7 +179,7 @@ const writeJson = (file, value) => { fs.writeFileSync(file, JSON.stringify(value
       assert.deepStrictEqual(impact.reasons, ['content-changed:components/Profile.tsx']);
       assert.ok(out.staleTasks.includes('edit-profile'));
       assert.deepStrictEqual(task().stale.reasons.includes('page-changed:task-profile'), true);
-      await fails(root, ['generate-task', 'edit-profile'], /evidence-stale/);
+      await fails(root, ['generate-task', 'edit-profile'], /evidence-stale/, 4);
       assert.deepStrictEqual(records(), before, '新的判断不删除旧观察');
       await ok(root, ['capture-task', 'edit-profile']);
       assert.strictEqual(task().stale, null);

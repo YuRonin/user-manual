@@ -68,7 +68,7 @@ async function step(name, fn) {
       await ok(root, ['describe', '--input', input]);
       const capture = JSON.parse((await ok(root, ['capture', 'chat', '--json'])).stdout);
       assert.strictEqual(capture.published.privacy.status, 'passed');
-      await ok(root, ['generate', 'chat']);
+      await ok(root, ['generate', 'chat', '--draft']);
       await ok(root, ['generate', 'chat', '--finalize', path.join(state, 'drafts', 'chat.md')]);
     });
 

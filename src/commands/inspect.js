@@ -14,6 +14,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { parseArgs } = require('../cli/args');
+const { exitCodeFor, usageExit } = require('../cli/output');
 const { loadConfig } = require('../config/load');
 const { detectFramework } = require('../inspect/detect');
 const { scanNextjs } = require('../inspect/nextjs');
@@ -66,7 +67,7 @@ function fail(errors, { json }) {
     for (const e of list) process.stderr.write(`  ✗ ${e}\n`);
     process.stderr.write('\n用 `manual inspect --help` 查看用法。\n');
   }
-  return 1;
+  return exitCodeFor(list);
 }
 
 /** 待分析清单：AI 接下来该读哪些文件、补哪些页面。 */
@@ -178,7 +179,7 @@ function run(argv) {
     return 0;
   }
   if (unknownFlags.length > 0) {
-    return fail([`未知参数: ${unknownFlags.join(', ')}`], { json });
+    return usageExit(fail([`未知参数: ${unknownFlags.join(', ')}`], { json }));
   }
 
   const projectRoot = path.resolve(values.projectRoot || process.cwd());

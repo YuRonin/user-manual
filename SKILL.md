@@ -16,13 +16,16 @@ Skill 自身代码与项目数据分离：**Skill 只提供能力，项目状态
 | `manual init` | ✅ V0.1 | 收集配置，生成 `.manual/config.yaml` |
 | `manual inspect` | ✅ V0.2+ | 扫描路由与静态源码依赖，建立页面模型和正逆索引 |
 | `manual describe` | ✅ V0.2 | 把页面的源码分析结果写回模型 |
-| `manual capture` | ✅ V0.3 | 用真实浏览器打开页面并截图 |
+| `manual capture` | ✅ V0.3 | 用真实浏览器采集页面或任务证据（`page:<id>` / `task:<id>`），只推进到证据提交 |
 | `manual auth` | ✅ | 登录并管理可跨 worktree 复用的认证档案 |
-| `manual generate` | ✅ V0.4 | 生成 Markdown 手册（含中文自然化） |
+| `manual generate` | ✅ Runtime | 规划并执行：按需采集（复用有效缓存）→ 草稿 → 文案 → 发布门槛 → 发布；`--plan` 只预览 |
+| `manual status` / `resume` / `run-submit` | ✅ Runtime | 查看 Run、从任务快照继续、提交模型文案响应 |
+| `manual publication` | ✅ | 查看与恢复中断的发布事务（`status` / `repair`） |
+| `manual migrate` | ✅ | 显式迁移旧项目到 v2 模型（`--dry-run` / `--apply` / `--rollback`） |
 | `manual discover-tasks` | ✅ Task-first 基础 | 基于页面证据准备候选发现工作清单并写入候选任务 |
 | `manual approve-tasks` | ✅ Task-first 基础 | 由人工批准、调整或拒绝候选任务 |
-| `manual plan-capture` / `capture-task` | ✅ Task-first 采集 | 任务截图计划 / 安全交互采集 |
-| `manual generate-task` / `verify` | ✅ Task-first 发布 | 任务指南草稿、结构化事实校验与最终验证 |
+| `manual plan-capture` / `capture-task` | ✅ 兼容 | 任务截图计划 / 安全交互采集（与 `capture task:<id>` 同一用例） |
+| `manual generate-task` / `verify` | ✅ 兼容 / 验证 | 分步生成任务指南（`--copy` / `--finalize`）；验证已发布文档与证据 |
 | `manual migrate-artifacts` | ✅ 兼容迁移 | 检查旧页面原图，显式复制到非发布产物目录且不删除源文件 |
 | `manual update` | ⏳ | 增量更新与过期处理 |
 
@@ -48,11 +51,31 @@ manual inspect
 
 候选任务必须保持 `candidate`；不得代替用户批准，也不得把“请生成手册”解释成对所有候选任务的批量批准。只有 `approved` 任务才能进入后续截图计划、任务采集和发布。
 
-任务批准后，先运行 `manual plan-capture <task-id> --json`，把计划里的动作、状态断言、截图点和风险边界展示给用户。确认计划符合预期后再运行 `manual capture-task <task-id>`。`read` / `local` 可执行，`write` 停在动作前，`destructive` 不执行；目标缺失、不可见、匹配多个或状态断言失败时立即停止，并保留诊断图。
-
-任务证据完成脱敏与标注后，运行 `manual generate-task <task-id> --json` 生成事实草稿。按中文写作规范编辑草稿，再用 `--finalize <文件>` 定稿；最后运行 `manual verify <task-id>`。正式任务文档只能引用 `images/annotated/`，任何 raw、sanitized、缺失图片或结构化事实变化都会阻止发布。
+任务批准后，用 `manual generate task:<id> --plan --json` 把计划里的动作、风险边界（`write` 停在动作前、`destructive` 不执行）和需要浏览器的场景展示给用户；确认后执行 `manual generate task:<id> --json`。正式任务文档只能引用 `images/annotated/`，任何 raw、sanitized、缺失图片或结构化事实变化都会阻止发布；发布后可用 `manual verify <task-id>` 复核。
 
 执行候选发现或审批时，先读 [references/task-workflow.md](references/task-workflow.md)。
+
+---
+
+## Runtime：一条命令完成已授权的依赖
+
+Skill 只负责 **解析意图 → 调用命令 → 处理 waiting_input → 报告结果**。状态、缓存、重试、恢复都由 Runtime 决定并持久化在 `.manual/runs/`，不要在对话里自己重演（例如不要为了“保险”手动重新截图，也不要自行重试失败的步骤）。
+
+```
+node <skill>/bin/manual.js generate <task:<id>|page:<id>> --project-root <项目根> --json
+```
+
+按退出码处理（契约 C08，JSON 里的 `code` 作细分）：
+
+| 退出码 | 含义 | 怎么做 |
+|---|---|---|
+| 0 | 完成 | 报告文档路径；`cache` 里的复用项说明“使用了 observedAt 时刻的历史观察，未在线确认” |
+| 3 | 等待输入 | 看 `waiting[].code`：`model-input-required` → 读请求文件（只读其中列出的文件），按 `references/manual-writing-style.md` 第七节写响应 → `manual run-submit <runId> --request <id> --input <响应.json>` → `manual resume <runId>`；`approval-required` / `scope-changed` → 把任务展示给用户，得到明确确认后 `approve-tasks` 再 `resume`；`auth-*` → 请用户登录后 `resume`；`review-required` → 展示需确认的数字 / 承诺，用户确认后带 `--accept-review` 重新运行 |
+| 4 | 漂移或冲突 | `run-input-changed` → `manual resume <runId> --replan`；`publication-conflict` → 把人工修改展示给用户，由用户决定是否 `--force` |
+| 1 | 失败 | `manual status <runId> --json` 报告失败任务的 code 与提示；Runtime 已按策略重试过，不要自行循环重跑 |
+| 2 | 参数错误 / 目标歧义 | 把 `candidates` 给用户选，用 `task:` / `page:` 前缀重新运行 |
+
+常用选项：`--plan`（只预览，不执行）、`--copy <文案.json>`（已有文案块）、`--copy-default`（不改写文案）、`--offline`（只用历史证据）、`--refresh`（强制重新采集，仅在用户要求时使用）。
 
 ---
 
@@ -209,13 +232,14 @@ DOM 连续静止 → 冻结 CSS 动画与过渡 → 静置回流。
 
 ## `$manual-generate` / `/manual-generate` —— 生成手册（含中文自然化）
 
-三段式。**中文润色是 AI 的活，事实校验是程序的活**——AI 润色时最容易「顺手把事实改通顺」，
+默认走 Runtime（见上文）：文案通过交接请求填写，正文由事实包确定性渲染。下面的三段式是兼容流程，
+需要整篇润色 Markdown 时使用。**中文润色是 AI 的活，事实校验是程序的活**——AI 润色时最容易「顺手把事实改通顺」，
 靠提示词自觉挡不住，所以由程序逐项比对。
 
 ### 阶段一：出事实草稿
 
 ```
-node <skill>/bin/manual.js generate <page-id> --project-root <项目根> --json
+node <skill>/bin/manual.js generate <page-id> --draft --project-root <项目根> --json
 ```
 
 草稿写到 `.manual/drafts/<id>.md`，只由确定性事实拼成，一个字都不是推断的。正索引中的关联源码会写入 HTML 元数据，并通过 `--json` 的 `indexContext` 返回给 AI 调用方，不会被当成用户可见操作步骤。
@@ -318,6 +342,11 @@ status:
 
 `confidence` 只有在**源码分析完成 且 浏览器验证过**时才升到 `verified`。
 光截了图但没分析过语义，`browser.verified` 是 true 而 `confidence` 仍是 `none`——不虚报。
+
+## 发布恢复与迁移
+
+- 发布按 journal 推进（prepared → assets → document → release → completed）。进程中断后运行 `manual publication status --json` 查看，`manual publication repair` 对账恢复；文档被人工修改时报 `publication-conflict` 并保留修改，不自动覆盖。
+- 旧项目先 `manual migrate --dry-run --json` 查看清单，再 `--apply`；迁移不会把旧的 verified 伪装成已验证。
 
 ## 注意
 

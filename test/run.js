@@ -59,6 +59,7 @@ const FILES = [
   'runtime-planner.test.js',
   'runtime-runner.test.js',
   'model-handoff.test.js',
+  'runtime-cli.test.js',
 ];
 
 let failed = 0;

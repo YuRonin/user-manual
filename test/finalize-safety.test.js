@@ -82,13 +82,14 @@ function prepared(root) {
 process.stdout.write('\nfinalize safety\n');
 
 // 能否定稿取决于审批与证据新鲜度，不取决于 status 的先后：未批准、没有证据、证据过期都不行。
-for (const [status, code] of [['candidate', /approval-required/], ['approved', /evidence-missing/], ['stale', /evidence-stale/]]) {
+// C08 退出码：待审批 = 等待输入（3）；没有证据 = 失败（1）；证据过期 = 漂移（4）
+for (const [status, code, exit] of [['candidate', /approval-required/, 3], ['approved', /evidence-missing/, 1], ['stale', /evidence-stale/, 4]]) {
   test(`任务为 ${status} 时 finalize 失败（${code.source}），正式文档字节不变`, (root) => {
     const { state, draft } = prepared(root);
     taskStore.writeTask(state, { ...taskStore.readTask(state, 't'), status });
     const before = sha(MANUAL(root));
     const result = cli(root, ['generate-task', 't', '--finalize', draft]);
-    assert.strictEqual(result.status, 1, result.stdout + result.stderr);
+    assert.strictEqual(result.status, exit, result.stdout + result.stderr);
     assert.match(result.stdout + result.stderr, code);
     assert.strictEqual(sha(MANUAL(root)), before, '非法状态下不能改写正式文档');
     assert.strictEqual(taskStore.readTask(state, 't').status, status);
@@ -100,7 +101,7 @@ test('inspect 标记证据过期后 finalize 失败；标记不改写 status', (
   taskStore.writeTask(state, { ...taskStore.readTask(state, 't'), stale: { reasons: ['page-changed:home'], detectedAt: new Date().toISOString() } });
   const before = sha(MANUAL(root));
   const result = cli(root, ['generate-task', 't', '--finalize', draft]);
-  assert.strictEqual(result.status, 1);
+  assert.strictEqual(result.status, 4, '证据过期属于漂移（C08）');
   assert.match(result.stdout + result.stderr, /evidence-stale.*page-changed:home/);
   assert.strictEqual(sha(MANUAL(root)), before);
   assert.strictEqual(taskStore.readTask(state, 't').status, 'captured');

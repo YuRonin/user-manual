@@ -2,6 +2,7 @@
 
 const path = require('path');
 const { parseArgs } = require('../cli/args');
+const { exitCodeFor, usageExit } = require('../cli/output');
 const { loadConfig } = require('../config/load');
 const { createProjectStore } = require('../store/project');
 const { deriveTaskScenario } = require('../scenarios/model');
@@ -15,15 +16,15 @@ function fail(errors, json) {
   const list = Array.isArray(errors) ? errors : [errors];
   if (json) process.stdout.write(JSON.stringify({ ok: false, errors: list }, null, 2) + '\n');
   else list.forEach((error) => process.stderr.write(`[manual plan-capture] ${error}\n`));
-  return 1;
+  return exitCodeFor(list);
 }
 
 function run(argv) {
   const { values, positional, unknownFlags } = parseArgs(argv, { known: KNOWN_FLAGS });
   const json = values.json === true;
   if (values.help) { process.stdout.write(HELP + '\n'); return 0; }
-  if (unknownFlags.length) return fail(`未知参数: ${unknownFlags.join(', ')}`, json);
-  if (positional.length !== 1) return fail('需要一个 task-id。', json);
+  if (unknownFlags.length) return usageExit(fail(`未知参数: ${unknownFlags.join(', ')}`, json));
+  if (positional.length !== 1) return usageExit(fail('需要一个 task-id。', json));
   const projectRoot = path.resolve(values.projectRoot || process.cwd());
   const loaded = loadConfig(projectRoot);
   if (!loaded.ok) return fail(loaded.errors, json);

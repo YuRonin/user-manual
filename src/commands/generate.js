@@ -17,15 +17,19 @@ const fs = require('fs');
 const path = require('path');
 
 const { parseArgs } = require('../cli/args');
+const { exitCodeFor, exitCodeForCode, usageExit } = require('../cli/output');
 const { loadConfig } = require('../config/load');
 const { extractFacts, formatViolations } = require('../generate/facts');
 const { displayPath } = require('../util/fsx');
 const { draftPage, preparePageFinal, publishPageFinal } = require('../generate/page-usecase');
+const { copyPolicy, planTargets, startRun } = require('../runtime/app');
+const { printRun, printRuntimeError } = require('../cli/run-report');
 
 const KNOWN_FLAGS = new Set([
-  'projectRoot', 'finalize', 'copy', 'acceptReview', 'noScreenshot', 'fallbackDraft', 'force', 'json', 'help',
+  'projectRoot', 'finalize', 'copy', 'copyDefault', 'acceptReview', 'noScreenshot', 'fallbackDraft', 'force', 'json', 'help',
+  'draft', 'plan', 'offline', 'refresh', 'noCache',
 ]);
-const BOOLEAN_FLAGS = ['noScreenshot', 'fallbackDraft', 'acceptReview'];
+const BOOLEAN_FLAGS = ['noScreenshot', 'fallbackDraft', 'acceptReview', 'copyDefault', 'draft', 'plan', 'offline', 'refresh', 'noCache'];
 
 /** 风格规范相对 Skill 根目录的位置。AI 在润色前要读它。 */
 const STYLE_GUIDE_RELATIVE = 'references/manual-writing-style.md';
@@ -34,38 +38,51 @@ const HELP = `
 manual generate —— 生成页面的 Markdown 使用手册
 
 用法:
-  manual generate <page-id>                     阶段一：出事实草稿
-  manual generate <page-id> --finalize <文件>   阶段三：校验并定稿
+  manual generate <目标> [--copy <文案.json> | --copy-default] [--plan] [--offline | --refresh | --no-cache] [--json]
+      默认：规划并执行 Runtime —— 按需采集（可复用有效缓存）→ 事实草稿 → 文案 → 发布门槛 → 发布。
+      目标：task:<id> / page:<id> / manual:<manualId> / 无前缀的唯一 id。
+      需要登录、审批或模型文案时停在 waiting_input（退出码 3），处理后 manual resume <runId>。
+  manual generate <page-id> --draft             兼容：阶段一，只出事实草稿
+  manual generate <page-id> --finalize <文件>   兼容：阶段三，校验润色稿并定稿
 
-流程:
-  1. manual generate chat
+Runtime 选项:
+  --plan                  只打印计划（动作、风险边界、需要浏览器的场景数、缓存命中原因），不执行、不创建 Run
+  --copy <文案.json>      文案块 { "intro": "..." }；正文由事实包渲染
+  --copy-default          不改写文案，使用事实包默认文案（确定性路径，不等待模型）
+  --offline               只用历史证据生成，结果标 onlineChecked=false；没有证据时失败，不打开浏览器
+  --refresh               不复用已有采集与生成结果（认证快照仍复用），重新采集
+  --no-cache              不读也不写缓存索引（不删除历史证据）
+  --accept-review         确认新出现的数字 / 单位、业务承诺属实后继续
+  --force                 覆盖有人工修改的正式文档
+
+兼容流程（页面三段式）:
+  1. manual generate chat --draft
        读页面模型与真实截图数据 → 写 .manual/drafts/chat.md
   2. 按 ${STYLE_GUIDE_RELATIVE} 把草稿改写成自然中文
   3. manual generate chat --finalize <润色后的文件>
        逐项比对事实 → 通过才写 docs/manual/chat.md
-
-  校验不通过时不会输出正式文档，并逐条列出哪里改动了事实。
 
 事实优先级:
   真实 Browser Capture > Inspect 项目模型 > （不允许有第三档）
   润色阶段只能改句式、语序、冗余表达、翻译腔、AI 套话；
   不能改事实、UI 名称、操作顺序、页面行为、截图引用。
 
-选项:
-  --project-root <路径>   项目根目录，默认当前工作目录
-  --copy <文案.json>      推荐的定稿方式：只提供文案块 { "intro": "..." }，正文由事实包渲染
-  --accept-review         确认新出现的数字 / 单位、业务承诺属实后继续定稿
+兼容选项:
+  --draft                 只生成事实草稿
   --finalize <文件>       润色后的 Markdown，传 - 从 stdin 读
-  --no-screenshot         这个页面还没截图时，允许生成纯文字草稿
+  --no-screenshot         这个页面还没截图时，允许生成纯文字草稿（隐含 --draft）
   --fallback-draft        校验不通过时，用事实草稿原文定稿（保事实、丢润色）
-  --force                 覆盖已存在的正式文档
+
+通用选项:
+  --project-root <路径>   项目根目录，默认当前工作目录
   --json                  以 JSON 输出结果
   --help                  显示本帮助
 
 示例:
-  manual generate chat
-  manual generate chat --finalize .manual/drafts/chat.polished.md
-  manual generate chat --finalize - < polished.md
+  manual generate task:edit-profile
+  manual generate page:chat --copy chat-copy.json
+  manual generate chat --plan --json
+  manual generate chat --draft
 `.trim();
 
 function fail(errors, { json }) {
@@ -77,7 +94,7 @@ function fail(errors, { json }) {
     for (const e of list) process.stderr.write(`  ✗ ${e}\n`);
     process.stderr.write('\n用 `manual generate --help` 查看用法。\n');
   }
-  return 1;
+  return exitCodeFor(list);
 }
 
 // ---------------------------------------------------------------- 阶段一：草稿
@@ -87,7 +104,8 @@ function runDraft({ projectRoot, config, pageId, skillRoot, noScreenshot, json }
   try {
     built = draftPage({ projectRoot, config, pageId, noScreenshot });
   } catch (error) {
-    return fail(error.errors || [error.message], { json });
+    fail(error.errors || [error.message], { json });
+    return exitCodeForCode(error.code);
   }
   const { page, draftPath, finalPath, markdown, facts, image, indexContext } = built;
   const draftFacts = extractFacts(markdown);
@@ -147,12 +165,10 @@ function runDraft({ projectRoot, config, pageId, skillRoot, noScreenshot, json }
 
 // ---------------------------------------------------------------- 阶段三：定稿
 
-function runFinalize({ projectRoot, config, pageId, finalizeInput, copyInput, acceptReview, fallbackDraft, force, json }) {
-  let copy = null;
+function runFinalize({ projectRoot, config, pageId, finalizeInput, acceptReview, fallbackDraft, force, json }) {
+  const copy = null;
   let markdown = null;
-  if (copyInput) {
-    try { copy = JSON.parse(fs.readFileSync(path.resolve(copyInput), 'utf8')); } catch (error) { return fail([`--copy 读取失败: ${error.message}`], { json }); }
-  } else if (finalizeInput === '-') {
+  if (finalizeInput === '-') {
     try {
       markdown = fs.readFileSync(0, 'utf8');
     } catch (e) {
@@ -172,7 +188,10 @@ function runFinalize({ projectRoot, config, pageId, finalizeInput, copyInput, ac
     prepared = preparePageFinal({ projectRoot, config, pageId, copy, markdown, acceptReview, fallbackDraft, force });
     published = publishPageFinal({ projectRoot, config, prepared, force });
   } catch (error) {
-    if (error.code !== 'fact-mismatch') return fail(error.errors || [error.message], { json });
+    if (error.code !== 'fact-mismatch') {
+      fail(error.errors || [error.message], { json });
+      return exitCodeForCode(error.code);
+    }
     // 事实校验没过：默认拒绝落盘，让润色重来。
     if (json) {
       process.stdout.write(
@@ -239,6 +258,46 @@ function runFinalize({ projectRoot, config, pageId, finalizeInput, copyInput, ac
   return 0;
 }
 
+// ---------------------------------------------------------------- Runtime（默认）
+
+async function runRuntime({ projectRoot, values, target, json }) {
+  const flags = { offline: values.offline === true, refresh: values.refresh === true, noCache: values.noCache === true };
+  try {
+    const copy = copyPolicy({ copy: typeof values.copy === 'string' ? values.copy : null, copyDefault: values.copyDefault === true });
+    const options = { projectRoot, command: 'generate', targets: [target], flags, copy, acceptReview: values.acceptReview === true, force: values.force === true };
+    if (values.plan) return printPlan({ json, planned: planTargets(options) });
+    return printRun({ json, result: await startRun(options), label: 'generate' });
+  } catch (error) {
+    return printRuntimeError({ json, error, label: 'generate' });
+  }
+}
+
+/** --plan：只读计划；规划错误（离线无证据、能力不足、审批被拒）照样报告但不执行。 */
+function printPlan({ json, planned }) {
+  const { plan, planHash, errors } = planned;
+  const body = {
+    ok: errors.length === 0,
+    dryRun: true,
+    planHash,
+    targets: plan.targets,
+    tasks: plan.tasks.map((t) => ({ id: t.id, kind: t.kind, dependsOn: t.dependsOn, reason: t.reason, reuse: t.reuse })),
+    summary: plan.summary,
+    errors,
+  };
+  if (json) process.stdout.write(JSON.stringify(body, null, 2) + '\n');
+  else {
+    const L = ['', `[manual generate] 计划 ${planHash.slice(7, 19)}（未执行）`];
+    for (const t of plan.tasks) L.push(`  ${t.id.padEnd(14)} ${t.kind.padEnd(12)} ${t.reason}${t.dependsOn.length ? `  ← ${t.dependsOn.join(', ')}` : ''}`);
+    L.push(`  需要浏览器的场景: ${plan.summary.browserScenarios}`);
+    for (const b of plan.summary.riskBoundaries) L.push(`  风险边界: ${b.subject} 在步骤 ${b.stepId} 前停止（${b.execution}）`);
+    for (const w of plan.summary.waitingFor) L.push(`  可能等待: ${w.message}`);
+    for (const e of errors) L.push(`  ✗ ${e}`);
+    L.push('');
+    process.stdout.write(L.join('\n') + '\n');
+  }
+  return errors.length ? exitCodeFor(errors) : 0;
+}
+
 // ---------------------------------------------------------------- 入口
 
 function run(argv) {
@@ -252,21 +311,23 @@ function run(argv) {
     process.stdout.write(HELP + '\n');
     return 0;
   }
-  if (unknownFlags.length > 0) return fail([`未知参数: ${unknownFlags.join(', ')}`], { json });
+  if (unknownFlags.length > 0) return usageExit(fail([`未知参数: ${unknownFlags.join(', ')}`], { json }));
 
-  const pageId = positional[0];
-  if (!pageId) {
-    return fail(['需要指定页面 id，例如 `manual generate chat`。'], { json });
+  const legacy = values.draft === true || values.noScreenshot === true || values.fallbackDraft === true || values.finalize !== undefined;
+  if (!positional[0]) {
+    return usageExit(fail(['需要指定目标，例如 `manual generate task:edit-profile` 或 `manual generate chat --draft`。'], { json }));
   }
   if (positional.length > 1) {
-    return fail([`一次只能生成一个页面，收到: ${positional.join(', ')}`], { json });
+    return usageExit(fail([`一次只能生成一个目标，收到: ${positional.join(', ')}`], { json }));
   }
 
   const projectRoot = path.resolve(values.projectRoot || process.cwd());
   if (!fs.existsSync(projectRoot) || !fs.statSync(projectRoot).isDirectory()) {
     return fail([`--project-root 不是一个存在的目录: ${projectRoot}`], { json });
   }
+  if (!legacy) return runRuntime({ projectRoot, values, target: positional[0], json });
 
+  const pageId = positional[0].replace(/^page:/, '');
   const loaded = loadConfig(projectRoot);
   if (!loaded.ok) return fail(loaded.errors, { json });
   const { config } = loaded;
@@ -274,19 +335,18 @@ function run(argv) {
   const skillRoot = path.resolve(__dirname, '..', '..');
 
   const finalizeInput = values.finalize;
-  if (values.copy && finalizeInput) return fail(['--finalize 与 --copy 只能选一个。'], { json });
-  if (values.copy || (finalizeInput !== undefined && finalizeInput !== '')) {
+  if (values.copy) return usageExit(fail(['兼容阶段不接受 --copy：直接运行 `manual generate <目标> --copy <文件>`。'], { json }));
+  if (finalizeInput !== undefined && finalizeInput !== '' && finalizeInput !== true) {
     return runFinalize({
       projectRoot, config, pageId, finalizeInput,
-      copyInput: values.copy || null,
       acceptReview: values.acceptReview === true,
       fallbackDraft: values.fallbackDraft === true,
       force: values.force === true,
       json,
     });
   }
-  if (finalizeInput === '') {
-    return fail(['--finalize 需要一个文件路径（或 - 表示从 stdin 读）。'], { json });
+  if (finalizeInput !== undefined) {
+    return usageExit(fail(['--finalize 需要一个文件路径（或 - 表示从 stdin 读）。'], { json }));
   }
 
   return runDraft({

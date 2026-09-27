@@ -3,6 +3,7 @@
 const path = require('path');
 
 const { parseArgs } = require('../cli/args');
+const { usageExit } = require('../cli/output');
 const { loadConfig } = require('../config/load');
 const { status, repair } = require('../publication/reconcile');
 
@@ -24,9 +25,9 @@ function run(argv) {
   const json = values.json === true;
   const print = (payload) => { if (json) process.stdout.write(JSON.stringify(payload, null, 2) + '\n'); return payload.ok ? 0 : 1; };
   if (values.help) { process.stdout.write(HELP + '\n'); return 0; }
-  if (unknownFlags.length) return print({ ok: false, errors: [`未知参数: ${unknownFlags.join(', ')}`] });
+  if (unknownFlags.length) return usageExit(print({ ok: false, errors: [`未知参数: ${unknownFlags.join(', ')}`] }));
   const action = positional[0];
-  if (!['status', 'repair'].includes(action)) return print({ ok: false, errors: ['需要子命令 status 或 repair。'] });
+  if (!['status', 'repair'].includes(action)) return usageExit(print({ ok: false, errors: ['需要子命令 status 或 repair。'] }));
   const projectRoot = path.resolve(values.projectRoot || process.cwd());
   const loaded = loadConfig(projectRoot);
   if (!loaded.ok) return print({ ok: false, errors: loaded.errors });

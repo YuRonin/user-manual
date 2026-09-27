@@ -3,6 +3,7 @@
 const path = require('path');
 
 const { parseArgs } = require('../cli/args');
+const { exitCodeFor, usageExit } = require('../cli/output');
 const { loadConfig } = require('../config/load');
 const { createProvider } = require('../browser');
 const cache = require('../auth/cache');
@@ -37,7 +38,7 @@ function fail(error, json) {
   const payload = { ok: false, reason: error.code || 'auth-error', message: String(error.message || error) };
   if (json) process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
   else process.stderr.write(`[manual auth] ${payload.message}\n`);
-  return 1;
+  return exitCodeFor(error);
 }
 
 function resolveUrl(baseUrl, value) {
@@ -48,10 +49,10 @@ async function run(argv) {
   const { values, positional, unknownFlags } = parseArgs(argv, { known: KNOWN_FLAGS });
   const json = values.json === true;
   if (values.help) { process.stdout.write(HELP + '\n'); return 0; }
-  if (unknownFlags.length) return fail(new Error(`未知参数: ${unknownFlags.join(', ')}`), json);
+  if (unknownFlags.length) return usageExit(fail(new Error(`未知参数: ${unknownFlags.join(', ')}`), json));
   const action = positional[0];
   if (!['login', 'status', 'clear'].includes(action) || positional.length !== 1) {
-    return fail(new Error('需要指定 login、status 或 clear。'), json);
+    return usageExit(fail(new Error('需要指定 login、status 或 clear。'), json));
   }
 
   const projectRoot = path.resolve(values.projectRoot || process.cwd());

@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { parseArgs } = require('../cli/args');
+const { exitCodeFor, exitCodeForCode, usageExit } = require('../cli/output');
 const { loadConfig } = require('../config/load');
 const { draftTask, prepareTaskFinal, publishTaskFinal } = require('../generate/task-usecase');
 
@@ -21,15 +22,16 @@ function fail(e, j, extra = {}) {
   const a = Array.isArray(e) ? e : [e];
   if (j) process.stdout.write(JSON.stringify({ ok: false, ...extra, errors: a }, null, 2) + '\n');
   else a.forEach((x) => process.stderr.write(`[manual generate-task] ${x}\n`));
-  return 1;
+  return exitCodeFor(a);
 }
 
 /** 用例错误 → 旧输出形状：审查类与部分提交带 code（及 committed），其余只有 errors。 */
 function failWith(error, json) {
   const errors = error.errors || [error.message];
-  if (error.code === 'partial-commit') return fail(errors, json, { code: error.code, committed: error.committed || [] });
-  if (['review-required', 'copy-blocked'].includes(error.code)) return fail(errors, json, { code: error.code });
-  return fail(errors, json);
+  if (error.code === 'partial-commit') fail(errors, json, { code: error.code, committed: error.committed || [] });
+  else if (['review-required', 'copy-blocked'].includes(error.code)) fail(errors, json, { code: error.code });
+  else fail(errors, json);
+  return exitCodeForCode(error.code);
 }
 
 function readInput(file, label) {
@@ -79,9 +81,9 @@ function run(argv) {
   const { values, positional, unknownFlags } = parseArgs(argv, { known: KNOWN_FLAGS, booleans: ['acceptReview', 'force'] });
   const json = values.json === true;
   if (values.help) { process.stdout.write(HELP + '\n'); return 0; }
-  if (values.finalize && values.copy) return fail('--finalize 与 --copy 只能选一个。', json);
-  if (unknownFlags.length) return fail(`未知参数: ${unknownFlags.join(', ')}`, json);
-  if (positional.length !== 1) return fail('需要一个 task-id。', json);
+  if (values.finalize && values.copy) return usageExit(fail('--finalize 与 --copy 只能选一个。', json));
+  if (unknownFlags.length) return usageExit(fail(`未知参数: ${unknownFlags.join(', ')}`, json));
+  if (positional.length !== 1) return usageExit(fail('需要一个 task-id。', json));
   const root = path.resolve(values.projectRoot || process.cwd());
   const loaded = loadConfig(root);
   if (!loaded.ok) return fail(loaded.errors, json);

@@ -423,7 +423,7 @@ async function main() {
     const root = await prepareProject(server.baseUrl);
     try {
       const r = await run('capture', root, ['protected']);
-      assert.strictEqual(r.status, 1);
+      assert.strictEqual(r.status, 3, '缺少登录属于等待输入（C08）');
       assert.match(r.stderr, /auth-missing/);
       assert.match(r.stderr, /重定向到了登录页/);
       assert.match(r.stderr, /manual auth login --profile default/);
@@ -467,7 +467,7 @@ async function main() {
         storageState: { cookies: [], origins: [] },
       });
       const r = await run('capture', root, ['protected'], { MANUAL_AUTH_CACHE_DIR: cacheRoot });
-      assert.strictEqual(r.status, 1);
+      assert.strictEqual(r.status, 3, '登录失效属于等待输入（C08）');
       assert.match(r.stderr, /auth-expired/);
     } finally {
       fx.cleanup(root);
@@ -565,7 +565,7 @@ async function main() {
     const root = await prepareProject(server.baseUrl);
     try {
       const r = await run('capture', root, ['nope']);
-      assert.strictEqual(r.status, 1);
+      assert.strictEqual(r.status, 2, '未知目标是参数错误（C08）');
       assert.match(r.stderr, /找不到页面/);
       assert.match(r.stderr, /chat/);
     } finally {

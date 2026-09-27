@@ -208,7 +208,7 @@ function runCli(args, env) {
       cfg.auth.enabled = false;
       fs.writeFileSync(configFile, yaml.dump(cfg));
       r = await runCli(['capture', 'protected', '--project-root', project, '--json'], env);
-      assert.strictEqual(r.status, 1, r.stdout);
+      assert.strictEqual(r.status, 3, `需要登录属于等待输入（C08）: ${r.stdout}`);
       assert.strictEqual(JSON.parse(r.stdout).reason, 'login-required');
       assert.ok(fs.readFileSync(cache.cacheFileFor(ref)).equals(before), '匿名采集不能刷新认证缓存');
       r = await runCli(['auth', 'status', '--project-root', project, '--json'], env);

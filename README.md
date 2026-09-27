@@ -28,7 +28,8 @@
 ## 安装
 
 ```bash
-npm install          # 唯一依赖 js-yaml
+npm ci               # 依赖版本以 package-lock.json 为准（js-yaml、markdown-it、playwright、sharp）
+npx playwright install chromium
 ```
 
 作为 Skill 使用：把本目录复制或软链到 Codex 的 `skills/manual/`，运行 `npm run install:compat`，之后在 Codex 使用 `$manual-init`、在 Claude Code 使用 `/manual-init`；其它子命令同样采用连字符形式。
@@ -37,29 +38,44 @@ npm install          # 唯一依赖 js-yaml
 
 ## 用法
 
+最小流程（普通用户）：
+
 ```bash
 # 1. 初始化：同时记录手册面向外部公开还是仅内部使用
 node bin/manual.js init --base-url http://localhost:3000 --audience public
 
 # 受保护页面只需登录一次；命名档案可跨 worktree 复用
 node bin/manual.js auth login --profile default
-node bin/manual.js auth status --profile default
 
-# 2. 扫描：识别技术栈、扫出全部用户可访问页面
+# 2. 扫描页面，AI 读完源码后写回标题 / 用途 / 主要操作
 node bin/manual.js inspect
-
-# 3. 写回：AI 读完源码后补上标题/用途/主要操作
 node bin/manual.js describe --input describe.json
 
-# 4. 截图：用真实浏览器打开页面（需要项目已经在跑）
-node bin/manual.js capture chat
-
-# 5. 出手册：先出事实草稿，AI 按写作规范润色，再校验定稿
-node bin/manual.js generate chat
-#    → .manual/drafts/chat.md，按 references/manual-writing-style.md 改写
-node bin/manual.js generate chat --finalize <润色后的文件>
-#    → 事实校验通过才写 docs/manual/chat.md
+# 3. 一条命令生成：按需用真实浏览器采集（需要项目已经在跑，可复用有效缓存）→ 草稿 → 文案 → 发布
+node bin/manual.js generate page:chat --plan     # 先看计划：动作、风险边界、需要浏览器的场景
+node bin/manual.js generate page:chat            # 需要文案时停在 waiting_input（退出码 3）
+node bin/manual.js run-submit <runId> --request <requestId> --input copy-response.json
+node bin/manual.js resume <runId>                # → docs/manual/chat.md
 ```
+
+任务型指南（“怎样完成某件事”）：`discover-tasks` 提出候选 → 人工 `approve-tasks` 确认 → `generate task:<id>`。写操作停在动作前，删除类操作不执行。
+
+退出码：0 成功 / `--plan`；1 失败；2 参数错误或目标歧义；3 等待输入（登录、审批、文案、人工确认）；4 检测到漂移或冲突（证据过期、输入变化、人工修改）。
+
+高级与兼容命令：
+
+| 命令 | 用途 |
+|---|---|
+| `status [runId]` | 只读查看 Run：任务状态、等待原因、失败 code、缓存复用来源 |
+| `resume <runId> [--replan]` | 从任务快照继续；输入变了用 `--replan` 创建新 Run |
+| `generate <目标> --offline / --refresh / --no-cache` | 只用历史证据 / 强制重新采集 / 不读写缓存 |
+| `generate <目标> --copy <文案.json> / --copy-default` | 直接提供文案块 / 使用默认文案 |
+| `capture <page-id|task:<id>>` | 只采集证据，不生成文档 |
+| `generate <page-id> --draft` / `--finalize <文件>` | 兼容的页面三段式（草稿 → 润色 → 校验定稿） |
+| `plan-capture` / `capture-task` / `generate-task` | 兼容的任务分步命令 |
+| `verify <task-id>` | 复核已发布任务文档与证据 |
+| `publication status / repair` | 查看与恢复中断的发布 |
+| `migrate --dry-run / --apply` | 旧项目迁移 |
 
 每条命令都有 `--help`；加 `--json` 得到结构化输出。
 

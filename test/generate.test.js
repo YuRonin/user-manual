@@ -120,7 +120,7 @@ async function main() {
   await test('草稿引用经过隐私处理的发布图，路径相对最终文档位置', async () => {
     const root = await prepareProject(server.baseUrl);
     try {
-      const r = await run('generate', root, ['chat', '--json']);
+      const r = await run('generate', root, ['chat', '--draft', '--json']);
       assert.strictEqual(r.status, 0, r.stdout + r.stderr);
       const draft = readDraft(root, 'chat');
       // 正式文档在 docs/manual/chat.md，发布图在 docs/manual/images/annotated/page--chat--<hash>.png
@@ -139,7 +139,7 @@ async function main() {
   await test('带图定稿：发布门槛通过并输出正式文档', async () => {
     const root = await prepareProject(server.baseUrl);
     try {
-      await run('generate', root, ['chat']);
+      await run('generate', root, ['chat', '--draft']);
       const r = await run('generate', root, ['chat', '--finalize', writePolished(root, 'chat', readDraft(root, 'chat'))]);
       assert.strictEqual(r.status, 0, r.stderr);
       const final = fs.readFileSync(finalPath(root, 'chat'), 'utf8');
@@ -157,7 +157,7 @@ async function main() {
     await test(`拦截（带图草稿）：${name}`, async () => {
       const root = await prepareProject(server.baseUrl);
       try {
-        await run('generate', root, ['chat']);
+        await run('generate', root, ['chat', '--draft']);
         const r = await run('generate', root, ['chat', '--finalize', writePolished(root, 'chat', mutate(readDraft(root, 'chat')))]);
         assert.strictEqual(r.status, 1);
         assert.match(r.stderr, /截图引用被改动/);
@@ -171,7 +171,7 @@ async function main() {
   await test('草稿后发布图被替换：hash 不符，定稿被阻止', async () => {
     const root = await prepareProject(server.baseUrl);
     try {
-      await run('generate', root, ['chat']);
+      await run('generate', root, ['chat', '--draft']);
       fs.writeFileSync(publishedFile(root, 'chat'), fs.readFileSync(rawFile(root, 'chat')));
       const r = await run('generate', root, ['chat', '--finalize', writePolished(root, 'chat', readDraft(root, 'chat')), '--json']);
       assert.strictEqual(r.status, 1);
@@ -190,7 +190,7 @@ async function main() {
       const model = yaml.load(fs.readFileSync(pageFile, 'utf8'));
       model.browser.published = null;
       fs.writeFileSync(pageFile, yaml.dump(model));
-      const r = await run('generate', root, ['chat', '--json']);
+      const r = await run('generate', root, ['chat', '--draft', '--json']);
       assert.strictEqual(r.status, 1, r.stdout);
       const out = JSON.parse(r.stdout);
       assert.match(out.errors.join('\n'), /unsafe-page-artifact/);
@@ -473,7 +473,7 @@ async function main() {
     const root = await prepareProject(server.baseUrl);
     try {
       await run('describe', root, ['--id', 'slow', '--title', '慢页面', '--purpose', '演示用。']);
-      const r = await run('generate', root, ['slow']);
+      const r = await run('generate', root, ['slow', '--draft']);
       assert.strictEqual(r.status, 1);
       assert.match(r.stderr, /还没有截图/);
       assert.match(r.stderr, /manual capture slow/);
@@ -499,8 +499,8 @@ async function main() {
   await test('没做源码分析就 generate：要求先 describe', async () => {
     const root = await prepareProject(server.baseUrl);
     try {
-      const r = await run('generate', root, ['login']);
-      assert.strictEqual(r.status, 1);
+      const r = await run('generate', root, ['login', '--draft']);
+      assert.strictEqual(r.status, 3, '缺少源码分析属于等待输入（C08）');
       assert.match(r.stderr, /源码分析/);
       assert.match(r.stderr, /manual describe/);
     } finally {
@@ -512,7 +512,7 @@ async function main() {
     const root = await prepareProject(server.baseUrl);
     try {
       fs.rmSync(publishedFile(root, 'chat'));
-      const r = await run('generate', root, ['chat']);
+      const r = await run('generate', root, ['chat', '--draft']);
       assert.strictEqual(r.status, 1);
       assert.match(r.stderr, /artifact-missing: published/);
       assert.match(r.stderr, /manual capture chat/);
@@ -526,14 +526,14 @@ async function main() {
     const root = await prepareProject(server.baseUrl);
     try {
       fs.writeFileSync(publishedFile(root, 'chat'), fs.readFileSync(rawFile(root, 'chat')));
-      let r = await run('generate', root, ['chat']);
+      let r = await run('generate', root, ['chat', '--draft']);
       assert.strictEqual(r.status, 1);
       assert.match(r.stderr, /(size|hash)-mismatch: published/);
       assert.ok(!fs.existsSync(draftPath(root, 'chat')));
 
       const captureId = pageBrowser(root, 'chat').latestCaptureId;
       fs.rmSync(path.join(root, '.manual', 'evidence', 'captures', `${captureId}.json`));
-      r = await run('generate', root, ['chat']);
+      r = await run('generate', root, ['chat', '--draft']);
       assert.strictEqual(r.status, 1);
       assert.match(r.stderr, /capture-record-missing/);
     } finally {
@@ -589,8 +589,8 @@ async function main() {
   await test('未知 page id：列出可用页面', async () => {
     const root = await prepareProject(server.baseUrl);
     try {
-      const r = await run('generate', root, ['nope']);
-      assert.strictEqual(r.status, 1);
+      const r = await run('generate', root, ['nope', '--draft']);
+      assert.strictEqual(r.status, 2, '未知目标是参数错误（C08）');
       assert.match(r.stderr, /找不到页面/);
       assert.match(r.stderr, /chat/);
     } finally {

@@ -107,7 +107,7 @@ async function main() {
   await test('未知 auth 动作返回可读错误', async (root, cacheRoot) => {
     init(root, cacheRoot);
     const result = run(root, cacheRoot, ['auth', 'explode']);
-    assert.strictEqual(result.status, 1);
+    assert.strictEqual(result.status, 2, '不支持的子命令是参数错误（C08）');
     assert.match(result.stderr, /login|status|clear/);
   });
 

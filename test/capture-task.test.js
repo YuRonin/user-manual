@@ -19,7 +19,7 @@ try {
     id: 'edit-profile', title: '修改资料', goal: '修改资料', entryPage: 'profile', preconditions: ['已登录'], risk: 'read', status: 'candidate', steps: [{ id: 'inspect', instruction: '查看资料', page: 'profile', action: { type: 'inspect' }, capture: { timing: 'after' } }], completion: { description: '看到资料', verification: 'verified' },
   });
   result = spawnSync(process.execPath, [CLI, 'capture-task', 'edit-profile', '--project-root', root, '--json'], { encoding: 'utf8' });
-  assert.strictEqual(result.status, 1);
+  assert.strictEqual(result.status, 3, '待审批属于等待输入（C08）');
   assert.match(result.stdout, /approval-required/);
   process.stdout.write('\ncapture task\n  ✓ candidate 在启动浏览器前被阻止\n\n1 passed, 0 failed\n');
 } finally {

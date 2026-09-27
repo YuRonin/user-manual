@@ -13,12 +13,15 @@ const fs = require('fs');
 const path = require('path');
 
 const { parseArgs } = require('../cli/args');
+const { exitCodeFor, exitCodeForCode, usageExit } = require('../cli/output');
 const { loadConfig } = require('../config/load');
 const { CaptureError } = require('../browser/errors');
 const { DEFAULT_READY_OPTIONS } = require('../browser/provider');
 const { displayPath } = require('../util/fsx');
 const { validateNavigation } = require('../evidence/validate-page');
 const { capturePage, parseParams, resolveRoute, joinUrl } = require('../evidence/capture-page');
+const { recordCapture } = require('../runtime/app');
+const captureTaskCommand = require('./capture-task');
 
 const KNOWN_FLAGS = new Set([
   'projectRoot', 'params', 'url', 'waitFor', 'timeout', 'quietMs', 'settleMs',
@@ -30,7 +33,7 @@ const HELP = `
 manual capture —— 用真实浏览器打开页面并截图
 
 用法:
-  manual capture <page-id> [选项]
+  manual capture <page-id | page:<id> | task:<id>> [选项]
 
 做什么:
   从 .manual/pages/<page-id>.yaml 取出 route → 拼出 {baseUrl}{route} → 用配置里的
@@ -95,7 +98,7 @@ function fail(error, { json }) {
     }
     process.stderr.write('\n  没有产出截图文件（页面打不开时不会伪造截图）。\n\n');
   }
-  return 1;
+  return exitCodeFor(error);
 }
 
 /**
@@ -145,14 +148,14 @@ async function run(argv) {
     process.stdout.write(HELP + '\n');
     return 0;
   }
-  if (unknownFlags.length > 0) return fail([`未知参数: ${unknownFlags.join(', ')}`], { json });
+  if (unknownFlags.length > 0) return usageExit(fail([`未知参数: ${unknownFlags.join(', ')}`], { json }));
 
   const pageId = positional[0];
   if (!pageId) {
-    return fail(['需要指定页面 id，例如 `manual capture chat`。用 `manual inspect` 看有哪些页面。'], { json });
+    return usageExit(fail(['需要指定页面 id，例如 `manual capture chat`。用 `manual inspect` 看有哪些页面。'], { json }));
   }
   if (positional.length > 1) {
-    return fail([`一次只能截一个页面，收到: ${positional.join(', ')}`], { json });
+    return usageExit(fail([`一次只能截一个页面，收到: ${positional.join(', ')}`], { json }));
   }
 
   const projectRoot = path.resolve(values.projectRoot || process.cwd());
@@ -164,12 +167,16 @@ async function run(argv) {
   if (!loaded.ok) return fail(loaded.errors, { json });
   const { config } = loaded;
 
+  // task:<id> 与 capture-task 走同一个用例；capture 只推进到证据提交，不生成文档。
+  if (pageId.startsWith('task:')) return captureTaskCommand.captureTaskTarget({ projectRoot, config, taskId: pageId.slice(5), json });
+  const overrides = ['profile', 'provider', 'url', 'params', 'fullPage', 'timeout', 'quietMs', 'settleMs', 'noFreezeAnimations', 'waitFor'].filter((k) => values[k] !== undefined && values[k] !== false);
+
   let result;
   try {
     result = await capturePage({
       projectRoot,
       config,
-      pageId,
+      pageId: pageId.replace(/^page:/, ''),
       options: {
         profile: values.profile, provider: values.provider, url: values.url, params: values.params,
         fullPage: values.fullPage === true, timeout: values.timeout, quietMs: values.quietMs, settleMs: values.settleMs,
@@ -177,9 +184,13 @@ async function run(argv) {
       },
     });
   } catch (e) {
-    return fail(e instanceof CaptureError ? e : (e.errors || [e.message]), { json });
+    if (e instanceof CaptureError) return fail(e, { json });
+    fail(e.errors || [e.message], { json });
+    return exitCodeForCode(e.code);
   }
   const { page, updatedPage, record, shot, ready, navigation, identity, safe, url, effectiveRoute, profileId, profile, providerId, capturedAt, screenshotRelative, published } = result;
+  // 按默认规格采集的证据登记进缓存，之后 manual generate 可以复用；自定义地址 / 规格的采集不登记。
+  if (overrides.length === 0) recordCapture({ projectRoot, subject: { type: 'page', id: page.id }, captureIds: [record.id], observedAt: record.observedAt });
 
   // --out 只额外导出一份原图副本；权威产物是内容寻址安装的 Capture。
   const outPath = values.out ? path.resolve(projectRoot, values.out) : null;

@@ -223,7 +223,8 @@ async function main() {
       await test(`真浏览器：${label} → ${reasons.join('/')}，不产出截图`, async () => {
         if (fs.existsSync(raw)) fs.rmSync(raw);
         const result = await captureUrl(route);
-        assert.strictEqual(result.status, 1, result.stdout + result.stderr);
+        // C08：需要登录属于等待输入（3），其余页面错误是执行失败（1）
+        assert.strictEqual(result.status, reasons.includes('login-required') ? 3 : 1, result.stdout + result.stderr);
         assert.ok(reasons.includes(JSON.parse(result.stdout).reason), result.stdout);
         assert.ok(!fs.existsSync(raw), '失败时不能产出截图');
       });

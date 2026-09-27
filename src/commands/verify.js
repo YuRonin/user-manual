@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { parseArgs } = require('../cli/args');
+const { exitCodeFor, usageExit } = require('../cli/output');
 const { loadConfig } = require('../config/load');
 const { createProjectStore } = require('../store/project');
 const { readCurrentRelease, manualIdFor } = require('../publication/release-store');
@@ -9,6 +10,13 @@ const { fileHash } = require('../publication/publisher');
 const { checkEvidenceUsable } = require('../model/approval');
 const { validateTaskFinal } = require('../generate/task-facts');
 const { validatePublication, formatIssues } = require('../publication/validate');
+
+const HELP = `
+manual verify <task-id> [--json]
+    离线产物验证（artifact scope）：正式文档与发布记录一致、图片存在且 hash 相符、隐私与发布门槛通过、
+    结构化事实与证据一致。它不访问浏览器——通过只说明"文档与当时的证据一致"，不代表当前网页行为未变。
+    --live（真实导航与断言回放）计划在 Phase 3 提供。
+`.trim();
 
 /** 读取任务、正式文档与事实文件。 */
 function loadVerify(root, config, taskId) {
@@ -51,19 +59,27 @@ function prepareVerify({ root, config, task, pages = [], manual, markdown, facts
 }
 
 async function run(argv) {
-  const { values, positional } = parseArgs(argv, { known: new Set(['projectRoot', 'json', 'help']) });
+  const { values, positional, unknownFlags } = parseArgs(argv, { known: new Set(['projectRoot', 'live', 'json', 'help']), booleans: ['live'] });
   const json = values.json === true;
-  if (values.help) { process.stdout.write('manual verify <task-id> [--json]\n'); return 0; }
+  if (values.help) { process.stdout.write(HELP + '\n'); return 0; }
+  if (values.live) {
+    process.stderr.write('[manual verify] --live（真实导航并逐条回放断言）计划在 Phase 3 提供；当前只做离线产物验证。\n');
+    return usageExit();
+  }
+  if (unknownFlags.length) {
+    process.stderr.write(`[manual verify] 未知参数: ${unknownFlags.join(', ')}\n`);
+    return usageExit();
+  }
   const root = path.resolve(values.projectRoot || process.cwd());
   const fail = (e) => {
     const a = Array.isArray(e) ? e : [e];
     if (json) process.stdout.write(JSON.stringify({ ok: false, errors: a }, null, 2) + '\n');
     else a.forEach((x) => process.stderr.write(`[manual verify] ${x}\n`));
-    return 1;
+    return exitCodeFor(a);
   };
   const loaded = loadConfig(root);
   if (!loaded.ok) return fail(loaded.errors);
-  if (positional.length !== 1) return fail('需要一个 task-id。');
+  if (positional.length !== 1) return usageExit(fail('需要一个 task-id。'));
   const config = loaded.config;
   const input = loadVerify(root, config, positional[0]);
   if (!input.ok) return fail(input.errors);

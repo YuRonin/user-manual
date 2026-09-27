@@ -337,7 +337,8 @@ function plan(snapshot, policy) {
     command,
     targets: snapshot.targets.map((t) => t.ref),
     modelRevision: snapshot.modelRevision,
-    copy: copy.mode === 'file' ? { mode: 'file', sha256: copy.sha256 } : { mode: copy.mode },
+    // resume --replan 用同一策略重新规划；缓存模式也记在这里，恢复时沿用。
+    policy: { copy, acceptReview: !!policy.acceptReview, force: !!policy.force, mode: snapshot.mode.name },
     tasks: checked.order.map((id) => nodes.find((n) => n.id === id)),
     summary,
   };

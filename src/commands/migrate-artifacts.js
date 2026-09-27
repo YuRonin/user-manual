@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { parseArgs } = require('../cli/args');
+const { exitCodeFor, usageExit } = require('../cli/output');
 const { loadConfig } = require('../config/load');
 const { listMarkdownImages } = require('../publication/paths');
 const { legacyRawPrefixes } = require('../publication/validate');
@@ -24,7 +25,7 @@ function fail(errors, json) {
   const list = Array.isArray(errors) ? errors : [errors];
   if (json) process.stdout.write(JSON.stringify({ ok: false, errors: list }, null, 2) + '\n');
   else list.forEach((error) => process.stderr.write(`[manual migrate-artifacts] ${error}\n`));
-  return 1;
+  return exitCodeFor(list);
 }
 
 function inside(root, target) {
@@ -103,7 +104,7 @@ function run(argv) {
   });
   const json = values.json === true;
   if (values.help) { process.stdout.write(HELP + '\n'); return 0; }
-  if (unknownFlags.length > 0) return fail(`未知参数: ${unknownFlags.join(', ')}`, json);
+  if (unknownFlags.length > 0) return usageExit(fail(`未知参数: ${unknownFlags.join(', ')}`, json));
   if (positional.length > 0) return fail('此命令不接受位置参数。', json);
 
   const projectRoot = path.resolve(values.projectRoot || process.cwd());

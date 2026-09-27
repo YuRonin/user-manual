@@ -5,6 +5,7 @@ const path = require('path');
 const yaml = require('js-yaml');
 
 const { parseArgs } = require('../cli/args');
+const { exitCodeFor, usageExit } = require('../cli/output');
 const { loadConfig, configPathFor } = require('../config/load');
 const { planMigration, applyMigration, rollbackMigration } = require('../store/migrate');
 
@@ -28,7 +29,7 @@ manual migrate —— 把旧项目显式迁移到 v2 模型（可重复执行）
 
 function output(payload, json) {
   if (json) process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
-  return payload.ok ? 0 : 1;
+  return payload.ok ? 0 : exitCodeFor(payload.errors || []);
 }
 
 function fail(errors, json, extra = {}) {
@@ -52,7 +53,7 @@ function run(argv) {
   const { values, unknownFlags } = parseArgs(argv, { known: KNOWN_FLAGS, booleans: ['dryRun', 'apply'] });
   const json = values.json === true;
   if (values.help) { process.stdout.write(HELP + '\n'); return 0; }
-  if (unknownFlags.length) return fail(`未知参数: ${unknownFlags.join(', ')}`, json);
+  if (unknownFlags.length) return usageExit(fail(`未知参数: ${unknownFlags.join(', ')}`, json));
   const modes = [values.dryRun === true, values.apply === true, values.rollback !== undefined].filter(Boolean).length;
   if (modes !== 1) return fail('需要且只能指定 --dry-run、--apply 或 --rollback <id> 之一。', json);
 
