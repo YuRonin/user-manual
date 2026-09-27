@@ -3,8 +3,9 @@
 const path = require('path');
 const { parseArgs } = require('../cli/args');
 const { loadConfig } = require('../config/load');
-const pageStore = require('../inspect/store');
-const taskStore = require('../tasks/store');
+const { createProjectStore } = require('../store/project');
+const { deriveTaskScenario } = require('../scenarios/model');
+const { resolveScenario } = require('../scenarios/store');
 const { buildCapturePlan, writeCapturePlan } = require('../tasks/capture-plan');
 
 const KNOWN_FLAGS = new Set(['projectRoot', 'json', 'help']);
@@ -26,12 +27,17 @@ function run(argv) {
   const projectRoot = path.resolve(values.projectRoot || process.cwd());
   const loaded = loadConfig(projectRoot);
   if (!loaded.ok) return fail(loaded.errors, json);
-  const stateDir = path.join(projectRoot, loaded.config.artifacts.stateDir);
-  const task = taskStore.readTask(stateDir, positional[0]);
+  const { config } = loaded;
+  const stateDir = path.join(projectRoot, config.artifacts.stateDir);
+  // 与 capture-task 读取同一份已提交模型与 Scenario，打印的计划就是将要执行的计划。
+  let base;
+  try { base = createProjectStore({ stateDirAbs: stateDir, docsOutputDir: config.docs.outputDir }).load(); } catch (error) { return fail(error.errors || [error.message], json); }
+  const task = base.model.tasks.find((t) => t.id === positional[0]);
   if (!task) return fail(`找不到任务: ${positional[0]}`, json);
-  const pages = pageStore.readExistingPages(stateDir);
-  if (pages.errors.length) return fail(pages.errors, json);
-  const result = buildCapturePlan(task, pages.pages);
+  const pages = base.model.pages;
+  const scenario = resolveScenario(stateDir, deriveTaskScenario(task, pages, config), { stepIds: (task.steps || []).map((step) => step.id) });
+  if (!scenario.ok) return fail(scenario.errors, json);
+  const result = buildCapturePlan(task, pages, { scenario: scenario.scenario });
   if (!result.ok) return fail(result.errors, json);
   const planFile = writeCapturePlan(stateDir, result.plan);
   const output = { ok: true, planFile, plan: result.plan };

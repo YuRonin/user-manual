@@ -122,11 +122,11 @@
   - [x] hash/scope/privacy/TTL 检查和 miss reason。
   - [x] offline/refresh/no-cache 语义和 observedAt 保留。
   - [x] 身份、DPR、模板、privacy 变化命中矩阵通过。
-- [ ] **P2-02 Planner DAG**（依赖 P2-01/05）
-  - [ ] 显式 target 解析和歧义处理。
-  - [ ] 缺口→节点、共享去重、拓扑检查。
-  - [ ] plan 固定 scope/revision，gate 处理已有授权。
-  - [ ] 同输入同计划，--plan 零业务副作用。
+- [x] **P2-02 Planner DAG**（依赖 P2-01/05）
+  - [x] 显式 target 解析和歧义处理。
+  - [x] 缺口→节点、共享去重、拓扑检查。
+  - [x] plan 固定 scope/revision，gate 处理已有授权。
+  - [x] 同输入同计划，--plan 零业务副作用。
 - [ ] **P2-03 Runner**（依赖 P2-01/02/04）
   - [ ] 命令拆应用用例，handler 不 spawn 子 CLI。
   - [ ] 持久状态→执行→产物校验→成功。
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 进行中（2026-09-27 起），已完成 19 / 32。下一项：P2-02。
+- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 进行中（2026-09-27 起），已完成 20 / 32。下一项：P2-03。
 
 ### 执行记录
 
@@ -654,4 +654,27 @@ Task ID: P2-05
 产物 / commit 引用: 见本任务提交
 剩余风险: captureKey 的 browser / platform / readinessPolicy 取值约定由 planner 统一生成（P2-02）；subject 指针只记录最近一次写入，多个旧版本之间不做历史比较。
 下一项可执行任务: P2-02
+```
+
+```text
+Task ID: P2-02
+状态: completed
+开始时基线 commit / dirty files: 386034c（P2-05）；工作区干净
+实际修改文件: src/runtime/resolve-target.js、src/runtime/planner.js（新）；src/tasks/capture-plan.js（计划内嵌 modelRevision 与 pageRevisions）；src/commands/capture-task.js（不再事后补写 modelRevision）；src/commands/plan-capture.js（改走 Project Store + Scenario，与 capture-task 同一份输入）；src/cache/store.js（entry.meta 保存生成发布图时的图像输入）；test/runtime-planner.test.js（新）、test/run.js
+契约变更: 无（实现 C07 planner.plan）。补充约定：
+  - collectPlanningInputs() 只读收集 snapshot（模型、Scenario、配置、缓存查找结果）；plan() 为纯函数，planHash = revisionOf(计划主体)，主体不含时间戳。
+  - 单目标时节点 id 即 kind 名（approve / analyze / capture / derive-image / draft / rewrite / validate / publish）；多目标加 -t<n> 后缀，capture 按 captureKey 去重共享。
+  - 审批 gate 为 kind=validate 的 approve 节点（replay=requires-input），只在任务未获批时出现；页面源码分析为 analyze 节点，只是 draft 的依赖，不阻塞采集。
+  - 缓存命中的 capture 只带 reuse 标记（from / observedAt / stale / onlineChecked=false），执行前仍需校验；复用时若当前隐私规则 / 标注主题 / 渲染器与生成发布图时不同，插入 derive-image。
+  - 文案策略 copy.mode = model（rewrite 等待宿主模型）/ file（rewrite 读取文件，记录 sha256）/ default（无 rewrite，validate 只依赖 draft）。
+  - 节点 inputHash 只覆盖执行结论依赖的输入（capture：captureKey；approve：scopeHash；draft：上游 + 语言 + 模板版本），供 resume 判断输入是否变化。
+  - 本阶段没有 inspect 节点：扫描会改写模型定义，由用户显式运行 manual inspect；index-store 未改动（目标解析直接使用已提交模型）。
+执行命令与结果:
+  - node test/runtime-planner.test.js：11 passed（前缀 / 无前缀 / manual / scenario 解析，歧义列候选，未知与非法 id；同输入同 DAG 与 planHash、计划无时间戳、规划前后 .manual 目录逐字节与 mtime 不变；获批任务 DAG、缺证据必有 capture、风险边界摘要；未获批任务 approve gate；default / file / capture 命令三种形状；页面 analyze 只挡 draft；缓存命中为 reuse candidate、创建 Run 后仍是 pending、--refresh 跳过、图像输入变化插入 derive-image；离线无证据 cache-miss-offline；同任务两个目标共享一次采集；DAG 循环 / 未知依赖 / 重复；能力不足；plan-capture 输出 Scenario 与 revision）。
+  - 回归：capture-plan 10 passed；task-first-e2e 2 passed；capture-task 1 passed；task-rerun 8 passed；gate1 8 passed。
+  - npm test：51 个测试文件全部通过（macOS / Node 26.4.0）。
+失败或跳过的验收及原因: 无。
+产物 / commit 引用: 见本任务提交
+剩余风险: 缓存 key 中的 deployedBuild 目前只能来自 config.runtime.deployedBuild（缺省 unknown → live 软 TTL）；derive-image 与各节点 handler 在 P2-03 实现。
+下一项可执行任务: P2-03
 ```

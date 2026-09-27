@@ -3,7 +3,8 @@
 const path = require('path');
 const { writeText } = require('../util/fsx');
 const { effectiveRisk } = require('./model');
-const { approvalState, approvalMessage, scopeHash, APPROVAL_STATES } = require('../model/approval');
+const { approvalState, approvalMessage, scopeHash, pageRevisionsFor, APPROVAL_STATES } = require('../model/approval');
+const { definitionRevision } = require('../model/revision');
 const { resolveRouteTemplate } = require('../scenarios/model');
 
 // 执行前的保守分类：步骤没有显式声明风险、却对着"保存/删除/提交/支付"这类目标动作时，
@@ -110,6 +111,9 @@ function buildCapturePlan(task, pages, options = {}) {
       taskTitle: task.title,
       createdAt: new Date().toISOString(),
       approvalScopeHash: scopeHash(task, pages),
+      // 执行所依据的定义：截图记录与 Run 计划都引用它；执行时不再无声地重建另一份内容。
+      modelRevision: definitionRevision('userTask', task),
+      pageRevisions: pageRevisionsFor(task, pages),
       scenario: options.scenario ? { id: options.scenario.id, revision: options.scenario.revision, authProfile: options.scenario.authProfile } : null,
       entry: {
         page: entryPage.id,

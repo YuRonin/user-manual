@@ -5,7 +5,6 @@ const { parseArgs } = require('../cli/args');
 const { loadConfig } = require('../config/load');
 const { createProvider } = require('../browser');
 const { createProjectStore } = require('../store/project');
-const { definitionRevision } = require('../model/revision');
 const { scopeHash, pageRevisionsFor } = require('../model/approval');
 const { deriveTaskScenario } = require('../scenarios/model');
 const { resolveScenario } = require('../scenarios/store');
@@ -44,8 +43,6 @@ async function run(argv) {
   if (!scenario.ok) return fail(scenario.errors, json);
   const built = buildCapturePlan(task, pages.pages, { scenario: scenario.scenario });
   if (!built.ok) return fail(built.errors, json);
-  // 截图记录绑定本次执行所依据的任务定义 revision
-  built.plan.modelRevision = definitionRevision('userTask', task);
   const planFile = writeCapturePlan(stateDir, built.plan);
 
   const profileId = config.capture.activeProfile;

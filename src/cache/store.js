@@ -59,7 +59,7 @@ function createCacheStore({ stateDirAbs, now = () => Date.now() }) {
 
   /**
    * 写入一条 entry。observedAt 是产物实际观察时间（来自 Capture 记录），不是写缓存的时间。
-   * @param {{ kind, key, input, subject?, outputRefs, observedAt, validationScopes?, privacy?, uncertainty? }} entry
+   * @param {{ kind, key, input, subject?, outputRefs, observedAt, validationScopes?, privacy?, uncertainty?, meta? }} entry
    */
   function put(entry) {
     if (!Array.isArray(entry.outputRefs) || entry.outputRefs.length === 0) {
@@ -79,6 +79,8 @@ function createCacheStore({ stateDirAbs, now = () => Date.now() }) {
       validationScopes: entry.validationScopes || [],
       privacy: entry.privacy || null,
       uncertainty: entry.uncertainty || [],
+      // 不参与 key 的附加说明（例如产生这批发布图时的隐私规则 / 主题 / 渲染器），用于判断是否需要重新派生。
+      meta: entry.meta || null,
       recordedAt: new Date(now()).toISOString(),
     };
     const file = entryFile(entry.kind, entry.key);

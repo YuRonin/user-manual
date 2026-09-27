@@ -56,6 +56,7 @@ const FILES = [
   'browser-session.test.js',
   'cache-keys.test.js',
   'cache-policy.test.js',
+  'runtime-planner.test.js',
 ];
 
 let failed = 0;
