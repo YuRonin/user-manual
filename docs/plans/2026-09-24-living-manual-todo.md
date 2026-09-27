@@ -132,11 +132,11 @@
   - [x] 持久状态→执行→产物校验→成功。
   - [x] 有界 retry/time/action budget、cancel 和 waiting_input。
   - [x] 失败不重跑已提交依赖、不越过发布门槛。
-- [ ] **P2-06 模型文件交接**（依赖 P2-01/03）
-  - [ ] request/response schema 和 inputHash 绑定。
-  - [ ] 文案字段约束，语义结果保持 source/model 来源。
-  - [ ] 超时重试只作用模型任务，等待时释放资源。
-  - [ ] 跨会话提交、幂等和旧响应拒绝测试通过。
+- [x] **P2-06 模型文件交接**（依赖 P2-01/03）
+  - [x] request/response schema 和 inputHash 绑定。
+  - [x] 文案字段约束，语义结果保持 source/model 来源。
+  - [x] 超时重试只作用模型任务，等待时释放资源。
+  - [x] 跨会话提交、幂等和旧响应拒绝测试通过。
 - [ ] **P2-07 CLI 和 Skill 编排**（依赖 P2-02/03/04/05/06）
   - [ ] generate 自动规划，capture 只产证据。
   - [ ] status/resume/run-submit 及兼容 wrapper。
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 进行中（2026-09-27 起），已完成 21 / 32。下一项：P2-06。
+- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 进行中（2026-09-27 起），已完成 22 / 32。下一项：P2-07。
 
 ### 执行记录
 
@@ -704,4 +704,25 @@ Task ID: P2-03
 产物 / commit 引用: 见本任务提交
 剩余风险: 单任务超时通过关闭浏览器会话中断进行中的调用，非浏览器的长时间文件操作只受外层超时约束；模型交接（请求 / 响应文件）在 P2-06 实现，本阶段 rewrite / analyze 只返回 waiting_input。
 下一项可执行任务: P2-06
+```
+
+```text
+Task ID: P2-06
+状态: completed
+开始时基线 commit / dirty files: adc70b3（P2-03）；工作区干净
+实际修改文件: src/runtime/model-request.js、src/runtime/model-response.js（新）；src/runtime/handlers.js（analyze / rewrite 写请求并等待，validate 读取响应信封中的文案）；references/manual-writing-style.md（第七节：请求 / 响应格式与 run-submit 流程）；test/model-handoff.test.js（新）、test/run.js
+契约变更: 无。补充约定：
+  - 请求 runs/<runId>/model/<requestId>.request.json：requestId / runId / taskId / kind / subject / inputHash / files[{path, sha256}] / facts / output（allowedBlocks 或 allowedFields）/ instructions / limits / responsePath；同一任务同一 inputHash 的请求在 resume 时复用。
+  - 响应 { requestId, inputHash, output }；rewrite 只接受 allowedBlocks 中的非空字符串且通过 validateCopy 的 blocked 检查；analyze 只接受 title / purpose / detectedActions，结果写入页面定义并标 analysis.semantic.origin=model 与依据文件。
+  - 提交时逐个核对请求列出的文件 hash，并检查草稿新鲜度（任务 checkDraftFresh / 页面 pageDraftStale），不一致 → run-input-changed；拒绝时不改模型、不推进任务。
+  - describe / discover-tasks 的 --input 保持原样作为兼容入口：直接 describe 补全分析后，resume 时 analyze handler 会看到分析已完成而直接成功。命令文件本身未改动（describe 只导出 validateEntry / applyPatch 供响应复用）。
+  - run-submit / resume 命令在 P2-07 接入 CLI；本任务提供 submitModelResponse 用例。
+执行命令与结果:
+  - node test/model-handoff.test.js：5 passed（真实 Chromium：文案请求只含文件 hash、文案块、schema 与限制，不含凭据，resume 复用同一请求；错 requestId、旧 inputHash、未授权块、引入未知 UI 名称、跨 Run 请求均为 invalid-model-response 且任务仍等待；子进程提交正确响应 → 成功，重复提交幂等，不同内容不能覆盖，继续执行后文档含该文案；等待期间事实文件变化 → run-input-changed；语义分析请求含源码 hash，lifecycle 字段被拒，正确响应写入标题并标 origin=model，采集不被阻塞，继续后完成）。
+  - 回归：runtime-runner 11 passed；fact-pack 与 discover-tasks 随 npm test 通过。
+  - npm test：53 个测试文件全部通过（macOS / Node 26.4.0）。
+失败或跳过的验收及原因: 无。模型"超时"在无内置模型的 CLI 中体现为等待；invalid-model-response / model-timeout 只重试 rewrite / analyze 由 P2-03 retry 策略保证。
+产物 / commit 引用: 见本任务提交
+剩余风险: 请求文件的 files 只覆盖页面入口 / 声明源码 / 依赖清单中的前 20 个文件，大型页面的语义分析可能信息不足（宿主可提示用户直接 describe）。
+下一项可执行任务: P2-07
 ```

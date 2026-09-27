@@ -29,6 +29,8 @@ const { manualIdFor, readCurrentRelease } = require('../publication/release-stor
 const { lookup, offlineMissError } = require('../cache/lookup');
 const { collectPlanningInputs, imageInputsOf, subjectKey } = require('./planner');
 const { RuntimeError } = require('./errors');
+const { requestModel } = require('./model-request');
+const { copyFromResponse } = require('./model-response');
 
 const rel = (ctx, file) => path.relative(ctx.projectRoot, file).replace(/\\/g, '/');
 
@@ -81,7 +83,9 @@ function readCopy(ctx, task) {
   const refs = dependencyOutputs(ctx, task, 'rewrite');
   if (!refs) return null;
   const ref = refs.find((r) => r.kind === 'file' || r.kind === 'request');
-  return JSON.parse(fs.readFileSync(path.join(ctx.projectRoot, ref.ref), 'utf8'));
+  const file = path.join(ctx.projectRoot, ref.ref);
+  // 模型响应带 requestId / inputHash 信封；文案文件就是文案块本身。
+  return ref.kind === 'request' ? copyFromResponse(file) : JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
 /** 页面正式文档存在且与上次发布一致（没有人工修改）时，重新生成不需要 --force。 */
@@ -284,9 +288,8 @@ function analyze(ctx, task) {
   if (page?.status?.sourceAnalysis === ANALYSIS.COMPLETED) {
     return { outputs: [{ kind: 'value', sha256: sha256Hex(JSON.stringify({ title: page.title, purpose: page.purpose })), value: { analysis: 'completed' } }] };
   }
-  const handoff = ctx.modelHandoff?.('analyze', task);
-  if (handoff) return handoff;
-  return { waiting: { code: 'model-input-required', message: `页面 ${subject.id} 需要源码语义分析：运行 manual describe --id ${subject.id} 补充标题与用途后 resume。` } };
+  // 兼容入口：用户也可以直接运行 manual describe 补充标题与用途，resume 时这里会看到分析已完成。
+  return requestModel(ctx, 'analyze', task);
 }
 
 function draft(ctx, task) {
@@ -310,9 +313,7 @@ function rewrite(ctx, task) {
     try { JSON.parse(bytes.toString('utf8')); } catch (error) { throw new RuntimeError('invalid-copy', `文案文件不是合法 JSON: ${error.message}`); }
     return { outputs: [writeRunFile(ctx, `copy/${subject.type}-${subject.id}.json`, bytes)] };
   }
-  const handoff = ctx.modelHandoff?.('rewrite', task);
-  if (handoff) return handoff;
-  return { waiting: { code: 'model-input-required', message: `${subjectKey(subject)} 的文案块需要宿主模型填写。` } };
+  return requestModel(ctx, 'rewrite', task);
 }
 
 function publishDoc(ctx, task) {

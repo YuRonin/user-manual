@@ -58,6 +58,7 @@ const FILES = [
   'cache-policy.test.js',
   'runtime-planner.test.js',
   'runtime-runner.test.js',
+  'model-handoff.test.js',
 ];
 
 let failed = 0;

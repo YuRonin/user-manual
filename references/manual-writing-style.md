@@ -159,3 +159,29 @@
 - [ ] 没有编造响应时间、异常行为、业务规则
 - [ ] 通读一遍不像机器写的，也不像营销文案
 - [ ] 第三节的禁用词一个都没有
+
+---
+
+## 七、通过 Runtime 交接文案（run-submit）
+
+`manual generate <目标>` 需要文案时会停在 waiting_input，并在 `.manual/runs/<runId>/model/<requestId>.request.json` 写出请求：
+
+- `files`：允许读取的文件及其 sha256（草稿、事实包、本规范）。只读这些文件，不要翻整个仓库。
+- `facts.copyBlocks`：可填写的文案块及默认文字；`output.allowedBlocks` 之外的键一律被拒绝。
+- `limits`：单块最多字数、响应总大小。
+
+响应写成 JSON 后提交：
+
+```json
+{ "requestId": "<请求里的 requestId>", "inputHash": "<请求里的 inputHash>", "output": { "copy": { "intro": "……", "step.open-editor": "……" } } }
+```
+
+```bash
+manual run-submit <runId> --request <requestId> --input <响应.json>
+manual resume <runId>
+```
+
+- requestId / inputHash 必须原样抄回；事实在等待期间变了（重新采集、改了任务），旧响应会被拒绝（run-input-changed），按提示 `resume --replan`。
+- 文案只能改说法：否定或改写受保护的动作、UI 名称会被直接拒绝；新出现的数字、单位或业务承诺需要人工确认（review-required）。
+- 页面语义分析（`kind: analyze`）的响应是 `{ "output": { "title": "…", "purpose": "…", "detectedActions": ["…"] } }`，只能填这三个字段；结果标记为模型推断，不等于浏览器验证。
+- 同一份响应重复提交是幂等的；请求与响应可能含业务文案，保存在本地 `runs/` 下，不入库。
