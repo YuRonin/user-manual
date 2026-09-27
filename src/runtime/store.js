@@ -18,15 +18,12 @@ const fs = require('fs');
 const path = require('path');
 
 const { writeFileAtomic } = require('../util/atomic-write');
-const { revisionOf, sha256Hex } = require('../util/hash');
-const { newUuid, isUuid, isSafeId } = require('../model/ids');
+const { revisionOf } = require('../util/hash');
+const { newUuid, isUuid } = require('../model/ids');
 const { validateRun } = require('../model/schema');
 const { acquireLock, renewLock, inspectLock, releaseLock, lockFileFor, DEFAULT_LEASE_MS } = require('../store/lock');
 const { mergeStateGitignore } = require('../config/render');
-const { createCaptureStore } = require('../evidence/store');
-const { verifyCaptureRecord } = require('../evidence/integrity');
-const { readRelease } = require('../publication/release-store');
-const { isProjectRelativePath } = require('../model/schema');
+const { verifyOutputRefs } = require('../evidence/integrity');
 const {
   DEFAULT_BUDGET, canTransition, deriveRunStatus, normalizeTaskDefinitions, outputRefShapeErrors,
 } = require('./model');
@@ -204,29 +201,11 @@ function createRunStore({ projectRoot, stateDirAbs, now = () => Date.now(), leas
     if (!lease.renew()) throw new RuntimeError('lease-lost', `Run ${runId} 的执行租约已失效或被接管，停止写入。`);
   }
 
-  /** 校验输出引用：文件存在且 hash 一致、Capture 记录完整、Release 存在。 */
+  /** 校验输出引用：形状 + 不可变产物完整性（与缓存共用 verifyOutputRefs）。 */
   function checkOutputRefs(refs) {
     const problems = outputRefShapeErrors(refs).map((message) => ({ code: 'invalid-output', message }));
     if (problems.length > 0) return problems;
-    for (const ref of refs) {
-      if (ref.kind === 'file' || ref.kind === 'request') {
-        if (!isProjectRelativePath(ref.ref)) { problems.push({ code: 'invalid-output', ref: ref.ref, message: '需要是项目根相对路径。' }); continue; }
-        const file = path.join(projectRoot, ref.ref);
-        if (!fs.existsSync(file)) { problems.push({ code: 'artifact-missing', ref: ref.ref }); continue; }
-        if (typeof ref.sha256 !== 'string') { problems.push({ code: 'invalid-output', ref: ref.ref, message: '文件输出需要 sha256。' }); continue; }
-        if (sha256Hex(fs.readFileSync(file)) !== ref.sha256.replace(/^sha256:/, '')) problems.push({ code: 'hash-mismatch', ref: ref.ref });
-      } else if (ref.kind === 'capture') {
-        let record = null;
-        try { record = createCaptureStore({ projectRoot, stateDirAbs }).read(ref.ref); } catch (_) { record = null; }
-        if (!record) { problems.push({ code: 'capture-missing', ref: ref.ref }); continue; }
-        const integrity = verifyCaptureRecord(projectRoot, record);
-        for (const problem of integrity.problems) problems.push({ code: problem.code, ref: ref.ref, path: problem.path });
-      } else if (ref.kind === 'release') {
-        const [manualId, releaseId] = String(ref.ref).split('/');
-        if (!isSafeId(manualId) || !isUuid(releaseId) || !readRelease(stateDirAbs, manualId, releaseId)) problems.push({ code: 'release-missing', ref: ref.ref });
-      }
-    }
-    return problems;
+    return verifyOutputRefs(projectRoot, stateDirAbs, refs);
   }
 
   /**

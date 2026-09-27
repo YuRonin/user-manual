@@ -54,6 +54,8 @@ const FILES = [
   'run-store.test.js',
   'runtime-errors.test.js',
   'browser-session.test.js',
+  'cache-keys.test.js',
+  'cache-policy.test.js',
 ];
 
 let failed = 0;

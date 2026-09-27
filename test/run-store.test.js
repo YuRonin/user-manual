@@ -110,7 +110,7 @@ test('状态机：非法转换拒绝；succeeded 必须有通过校验的 output
   fs.writeFileSync(path.join(root, 'docs/out.md'), 'tampered');
   assert.throws(() => store.transition(run.id, 'capture-dashboard', 'succeeded', { lease, outputRefs: [ref] }), (e) => e.code === 'invalid-output' && e.problems[0].code === 'hash-mismatch');
   assert.throws(() => store.transition(run.id, 'capture-dashboard', 'succeeded', { lease, outputRefs: [{ kind: 'capture', ref: '00000000-0000-4000-8000-000000000000' }] }),
-    (e) => e.problems[0].code === 'capture-missing');
+    (e) => e.problems[0].code === 'artifact-missing');
   assert.throws(() => store.transition(run.id, 'capture-dashboard', 'succeeded', { lease, outputRefs: [{ kind: 'file', ref: '../escape', sha256: 'x' }] }), (e) => e.code === 'invalid-output');
   const good = writeOutput(root, 'docs/out.md', 'v2');
   store.transition(run.id, 'capture-dashboard', 'succeeded', { lease, outputRefs: [good] });

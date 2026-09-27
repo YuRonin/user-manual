@@ -13,7 +13,7 @@ const path = require('path');
 const yaml = require('js-yaml');
 
 const {
-  DEFAULTS, deriveCacheKey, AUDIENCES, validateBaseUrl, validateDocsDir, validateLanguage,
+  DEFAULTS, deriveCacheKey, AUDIENCES, validateBaseUrl, validateDocsDir, validateLanguage, runtimeDefaults,
 } = require('./schema');
 const profiles = require('./profiles');
 const { checkSchemaVersion, isProjectRelativePath } = require('../model/schema');
@@ -123,6 +123,13 @@ function loadConfig(projectRoot) {
       ...(raw.auth || {}),
     },
   };
+
+  const defaults = runtimeDefaults();
+  config.runtime = { ...(raw.runtime || {}), budget: { ...defaults.budget, ...(raw.runtime?.budget || {}) } };
+  config.cache = { ...defaults.cache, ...(raw.cache || {}) };
+  for (const [field, value] of [...Object.entries(config.runtime.budget).map(([k, v]) => [`runtime.budget.${k}`, v]), ...Object.entries(config.cache).map(([k, v]) => [`cache.${k}`, v])]) {
+    if (!Number.isInteger(value) || value <= 0) return { ok: false, errors: [`${field} 需要是正整数，收到: ${value}`] };
+  }
 
   config.privacy.rules = {
     redact: [],

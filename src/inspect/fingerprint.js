@@ -214,7 +214,16 @@ function impactReport(previousGraph, graph) {
   return { pages: report, broadImpact: broad.map((file) => `global-changed:${file}`) };
 }
 
+/**
+ * captureKey 使用的 sourceHash：即页面的 analysis.sourceRevision（文件内容 + 依赖集合 + 解析器版本 + 全局配置）。
+ * 尚未分析过的页面返回 null，调用方据此记录不确定性，而不是用空值当作"未变化"。
+ */
+function sourceHashOf(page) {
+  return page?.analysis?.sourceRevision || null;
+}
+
 module.exports = {
+  sourceHashOf,
   PARSER_VERSION, GLOBAL_FILES, hashFile, globalFileHashes, createFileLister, globToRegex, expandSourcePatterns, pageFingerprint,
   applyFingerprints, changeReasons, impactReport,
 };

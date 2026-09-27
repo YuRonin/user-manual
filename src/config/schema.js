@@ -312,7 +312,18 @@ function buildConfig(input) {
   };
 }
 
+/**
+ * Runtime / 缓存默认值（C07 预算、C09 TTL）。配置中的 runtime.budget、cache 为可选覆盖，
+ * 缺省行为与这里一致；init 不写入这些块。
+ */
+function runtimeDefaults() {
+  const { DEFAULT_BUDGET } = require('../runtime/model');
+  const { DEFAULT_CACHE_POLICY } = require('../cache/policy');
+  return { budget: { ...DEFAULT_BUDGET }, cache: { ...DEFAULT_CACHE_POLICY } };
+}
+
 module.exports = {
+  runtimeDefaults,
   CONFIG_VERSION,
   MAX_CONFIG_VERSION,
   DEFAULTS,

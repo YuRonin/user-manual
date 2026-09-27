@@ -117,11 +117,11 @@
   - [x] Scenario/角色隔离及 page/popup alias。
   - [x] Provider capabilities 与 auth 刷新接线。
   - [x] 1 Browser/3 Context 计数、崩溃和清理测试通过。
-- [ ] **P2-05 分层缓存**（依赖 P2-01）
-  - [ ] source/capture/image/manual 独立 key 与 policy。
-  - [ ] hash/scope/privacy/TTL 检查和 miss reason。
-  - [ ] offline/refresh/no-cache 语义和 observedAt 保留。
-  - [ ] 身份、DPR、模板、privacy 变化命中矩阵通过。
+- [x] **P2-05 分层缓存**（依赖 P2-01）
+  - [x] source/capture/image/manual 独立 key 与 policy。
+  - [x] hash/scope/privacy/TTL 检查和 miss reason。
+  - [x] offline/refresh/no-cache 语义和 observedAt 保留。
+  - [x] 身份、DPR、模板、privacy 变化命中矩阵通过。
 - [ ] **P2-02 Planner DAG**（依赖 P2-01/05）
   - [ ] 显式 target 解析和歧义处理。
   - [ ] 缺口→节点、共享去重、拓扑检查。
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 进行中（2026-09-27 起），已完成 18 / 32。下一项：P2-05。
+- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 进行中（2026-09-27 起），已完成 19 / 32。下一项：P2-02。
 
 ### 执行记录
 
@@ -637,4 +637,21 @@ Task ID: P2-04
 产物 / commit 引用: 见本任务提交
 剩余风险: capture / capture-task 命令仍各自创建 provider，接入 BrowserSession 在 P2-03 Runner 中完成；弹窗登记依赖 Playwright 的 context 'page' 事件，非 Playwright provider 需声明 popups=false。
 下一项可执行任务: P2-05
+```
+
+```text
+Task ID: P2-05
+状态: completed
+开始时基线 commit / dirty files: 26bf7fe（P2-04）；工作区干净
+实际修改文件: src/cache/keys.js、src/cache/store.js、src/cache/policy.js、src/cache/lookup.js（新）；src/evidence/integrity.js（verifyOutputRefs，Run Store 与缓存共用）；src/runtime/store.js（改用 verifyOutputRefs）；src/config/schema.js（runtimeDefaults）；src/config/load.js（runtime.budget / cache 可选覆盖与校验）；src/inspect/fingerprint.js（sourceHashOf）；test/cache-keys.test.js、test/cache-policy.test.js（新）、test/run.js、test/run-store.test.js（缺失 Capture 的问题码统一为 artifact-missing）
+契约变更: 无（实现 C09）。补充约定：缓存索引为 cache/<kind>/entries/<keyHex>.json（每条一个文件、原子替换）与 subjects/<hash>.json（逻辑对象 → 最近 key，用于 input-changed 的 changedFields）；environment 不确定 → environment-unknown 不复用；deployedBuild / dataRevision 任一未知 → 软 TTL，否则按内容版本无 TTL；--refresh / --no-cache 的查找结果为 { hit:false, bypassed }，不计入 miss reason；runtime.budget 与 cache 为可选配置块，init 不写入。
+执行命令与结果:
+  - node test/cache-keys.test.js：5 passed（确定性；白名单外 Cookie 字段不进 key；身份 / 租户数据 / DPR / locale / timezone / 浏览器 / Scenario / checkpoint / 视口 / 模式 / sourceHash / build / 环境 / 就绪策略各自改变 key 且 changedFields 精确；unknown 与不确定性；必填缺失拒绝；image / manual key 变化与顺序无关）。
+  - node test/cache-policy.test.js：10 passed（命中保留旧 observedAt、不改 entry、onlineChecked=false；注入时钟 15 分钟边界、fixture 无 TTL、配置覆盖；offline 过期仍可用标 stale、无证据 cache-miss-offline、开关互斥；refresh / no-cache 语义且不删历史 Capture；图被替换 hash-mismatch、缺失 artifact-missing、scope 不足；DPR 变化 changedFields=['dpr']；公开受众 privacy not-run 不命中；隐私规则变化只让 image miss、模板变化只让 manual miss；损坏 entry 丢弃、clear 不删 Capture；两个进程并发写 80 条全部可读；配置默认 / 覆盖 / 非法值）。
+  - 回归：node test/capture-store.test.js 8 passed；node test/run-store.test.js 9 passed。
+  - npm test：50 个测试文件全部通过（macOS / Node 26.4.0）。
+失败或跳过的验收及原因: 无。缓存模块本身尚未接入命令，由 P2-02 planner（cacheDecisions）与 P2-03 runner 使用。
+产物 / commit 引用: 见本任务提交
+剩余风险: captureKey 的 browser / platform / readinessPolicy 取值约定由 planner 统一生成（P2-02）；subject 指针只记录最近一次写入，多个旧版本之间不做历史比较。
+下一项可执行任务: P2-02
 ```

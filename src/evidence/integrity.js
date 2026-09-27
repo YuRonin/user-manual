@@ -67,4 +67,42 @@ function describeProblems(problems) {
   return problems.map((p) => `${p.code}: ${p.kind} ${p.path}`);
 }
 
-module.exports = { verifyCaptureRecord, cacheCandidacy, scopePassed, describeProblems };
+/**
+ * 校验 Run 输出 / 缓存 entry 中的不可变引用（Run Store 与缓存共用）：
+ *   file / request  项目相对路径、文件存在、sha256 一致
+ *   capture         Capture 记录存在且全部产物完整
+ *   release         发布记录存在（ref = <manualId>/<releaseId>）
+ *   value           纯值结果，只要求带 sha256
+ * @returns {Array<{ code, ref?, path?, message? }>} 空数组表示全部通过
+ */
+function verifyOutputRefs(projectRoot, stateDirAbs, refs) {
+  // 延迟加载：evidence/store 与发布记录模块在这里只是读取方。
+  const { createCaptureStore } = require('./store');
+  const { readRelease } = require('../publication/release-store');
+  const { isUuid, isSafeId } = require('../model/ids');
+  const problems = [];
+  for (const ref of refs || []) {
+    if (ref.kind === 'file' || ref.kind === 'request') {
+      if (!isProjectRelativePath(ref.ref)) { problems.push({ code: 'invalid-output', ref: ref.ref, message: '需要是项目根相对路径。' }); continue; }
+      const file = path.join(projectRoot, ref.ref);
+      if (!fs.existsSync(file)) { problems.push({ code: 'artifact-missing', ref: ref.ref }); continue; }
+      if (typeof ref.sha256 !== 'string') { problems.push({ code: 'invalid-output', ref: ref.ref, message: '文件引用需要 sha256。' }); continue; }
+      if (sha256Hex(fs.readFileSync(file)) !== ref.sha256.replace(/^sha256:/, '')) problems.push({ code: 'hash-mismatch', ref: ref.ref });
+    } else if (ref.kind === 'capture') {
+      let record = null;
+      try { record = createCaptureStore({ projectRoot, stateDirAbs }).read(ref.ref); } catch (_) { record = null; }
+      if (!record) { problems.push({ code: 'artifact-missing', ref: ref.ref, message: 'Capture 记录不存在或无效。' }); continue; }
+      for (const problem of verifyCaptureRecord(projectRoot, record).problems) problems.push({ code: problem.code, ref: ref.ref, path: problem.path });
+    } else if (ref.kind === 'release') {
+      const [manualId, releaseId] = String(ref.ref).split('/');
+      if (!isSafeId(manualId) || !isUuid(releaseId) || !readRelease(stateDirAbs, manualId, releaseId)) problems.push({ code: 'artifact-missing', ref: ref.ref, message: '发布记录不存在。' });
+    } else if (ref.kind === 'value') {
+      if (typeof ref.sha256 !== 'string') problems.push({ code: 'invalid-output', message: 'value 引用需要 sha256。' });
+    } else {
+      problems.push({ code: 'invalid-output', ref: ref.ref, message: `未知引用类型: ${ref.kind}` });
+    }
+  }
+  return problems;
+}
+
+module.exports = { verifyCaptureRecord, verifyOutputRefs, cacheCandidacy, scopePassed, describeProblems };
