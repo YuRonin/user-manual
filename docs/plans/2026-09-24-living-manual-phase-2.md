@@ -1,5 +1,7 @@
 # Phase 2：持久化 Runtime、Browser 复用、缓存与恢复
 
+> 状态：已完成（2026-09-28，Gate 2 通过）。执行记录见 [TODO](2026-09-24-living-manual-todo.md)。
+
 > 前置：Phase 1 集成验收通过。入口：[总计划](2026-09-24-living-manual-optimization-plan.md)，契约：[C07～C11](2026-09-24-living-manual-contracts.md)，进度：[TODO](2026-09-24-living-manual-todo.md)。
 
 建议顺序：P2-01 → P2-04 → P2-05 → P2-02 → P2-03 → P2-06 → P2-07 → P2-08。先串行执行和故障恢复，最后才考虑并发优化。

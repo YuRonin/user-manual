@@ -62,6 +62,7 @@ const FILES = [
   'runtime-cli.test.js',
   'runtime-recovery.test.js',
   'runtime-failure-matrix.test.js',
+  'gate2.test.js',
 ];
 
 let failed = 0;

@@ -1,6 +1,6 @@
 # Living User Manual Optimization TODO LIST
 
-> 状态：Phase 0、Phase 1 已完成，Phase 2 实施中。此文件是实施进度唯一来源；计划已写完不代表下面的工程任务已完成。
+> 状态：Phase 0、Phase 1、Phase 2 已完成，Phase 3 待开始。此文件是实施进度唯一来源；计划已写完不代表下面的工程任务已完成。
 > 总入口：[实施总计划](2026-09-24-living-manual-optimization-plan.md)；接口：[数据与接口契约](2026-09-24-living-manual-contracts.md)。
 
 ## 使用规则
@@ -147,7 +147,7 @@
   - [x] inputHash/output integrity 对账。
   - [x] 写操作 outcome_unknown 禁止盲目重放。
   - [x] 六个 checkpoint 和全部错误分类恢复验收。
-- [ ] **Gate 2：一条 generate 自动补依赖，新进程 resume，缓存理由与验证范围可解释。**
+- [x] **Gate 2：一条 generate 自动补依赖，新进程 resume，缓存理由与验证范围可解释。**
 
 ## Phase 3 — update / live verify / CI
 
@@ -223,7 +223,7 @@ Task ID:
 ## 当前记录
 
 - 2026-09-24：已编写总计划、契约、四阶段实施任务和本 TODO。
-- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 进行中（2026-09-27 起），已完成 24 / 32。下一项：Gate 2 集成验收。
+- 工程实施：Phase 0 与 Phase 1 全部完成；Gate 0、Gate 1 已通过（2026-09-24）。Phase 2 全部完成，Gate 2 已通过（2026-09-28），共 24 / 32。下一项：P3-01（Phase 3 开始前建议暂停审阅）。
 
 ### 执行记录
 
@@ -763,4 +763,17 @@ Task ID: P2-08
 产物 / commit 引用: 见本任务提交
 剩余风险: 跨主机的残留 staging 不自动回收；derive-image 中断后按重放处理（可能多出一条重新派生记录，不影响正确性）。
 下一项可执行任务: Gate 2 集成验收
+```
+
+```text
+Task ID: Gate 2
+状态: completed
+开始时基线 commit / dirty files: b5d61fd（P2-08）；工作区干净
+实际修改文件: test/gate2.test.js（新）、test/run.js、docs/plans/2026-09-24-living-manual-phase-2.md（标记已完成）
+执行命令与结果:
+  - node test/gate2.test.js：8 passed（真实 Chromium + CLI 子进程）。1 generate page:chat 首次完成采集 → 草稿 → 校验 → 发布，第二次 cache-hit 不新增 Capture 并报告旧 observedAt；2 改 docs.language 只重建文档（capture cache-hit、无新截图），改 DPR → capture-required:input-changed(dpr) 并新增一次采集，改 privacy.maskStyle → 插入 derive-image、不需要浏览器、只多一条重新派生记录；3 一个 Run 采集 3 个 Scenario = 1 次 Browser 启动 / 3 个 Context / 3 次 Context 关闭 / 1 次 Browser 关闭；4 CLI 在 capture-committed 被杀后 manual resume 补记采集（recovery: reconciled）、不重采并完成；5 错 inputHash 响应被 run-submit 拒绝，正确响应由另一进程提交后 resume 完成；6 404 页面失败时 status 给出 http-not-found 与说明、未完成任务保持 pending，runs/ 与 cache/ 中不含认证 Cookie 值；7 写步骤停在动作前（manifest save=not-executed），文档含"此操作未执行"与验证范围说明，不声称已保存。
+  - npm test：57 个测试文件全部通过（macOS / Node 26.4.0）。
+Gate 2 对照: 1 ✓；2 ✓；3 ✓（member / admin 身份隔离由 P2-04 真实浏览器用例覆盖）；4 ✓；5 ✓；6 ✓；7 ✓。
+未覆盖: Windows / Linux 未在本阶段运行（P3-07 CI 矩阵）；一个 Run 目前由 CLI 接受单个目标，多目标只经应用层 API 使用。
+下一项可执行任务: P3-01（建议先审阅 Phase 2 再进入 Phase 3）
 ```
