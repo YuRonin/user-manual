@@ -108,7 +108,29 @@ node <skill>/bin/manual.js update --project-root <项目根> --json          # �
 
 ### 1. 先问用户六项配置
 
-用一次 AskUserQuestion 把下面五项一起问完：
+优先用客户端的结构化选项工具，让用户点选而不是打字：Claude Code 用 `AskUserQuestion`，Codex 用 `request_user_input`。
+这类工具单次最多 4 个问题，所以这样拆：
+
+1. 先自己探测项目访问 URL：读 `package.json` 的 dev 脚本与框架默认端口，再请求一下常见端口看是否已在运行。
+   探测到就作为推荐项，否则放一个"开发服务器未运行"选项；用户可以在自定义输入里填完整 URL。
+2. 一次结构化提问问 4 项：截图规格、Browser Provider、项目访问 URL、发布范围。
+   文档语言与输出目录直接用默认值，并在问题说明里写明"需要改可在自定义输入里说明"。
+
+每个问题都把默认项放在第一位，标"（推荐）"。
+
+当前客户端没有结构化选项工具时（例如 Codex 默认模式），不要把选项逐条展开成长列表，而是给一张紧凑的编号表，并允许一句话全部确认：
+
+```text
+初始化配置（直接回复"默认"即全部采用推荐值；只改个别项就写 "1=b 3=http://localhost:5173"）：
+1 截图规格    a) desktop-standard 1440×900@2x（推荐） b) desktop-wide c) laptop d) custom
+2 浏览器      a) 无头（推荐） b) 有头，可看见操作过程
+3 访问 URL    探测到 http://localhost:3000 正在运行（推荐）/ 未探测到，请填写
+4 文档语言    a) zh-CN（推荐） b) en-US c) 其它
+5 输出目录    docs/manual（推荐）
+6 发布范围    a) public（推荐） b) internal
+```
+
+各项的取值：
 
 | 项 | 选项 / 默认 |
 |---|---|
