@@ -143,6 +143,33 @@ function runCli(args, env) {
     assert.strictEqual(cache.readState(ref).storageState.cookies[0].value, 'v1');
   });
 
+  await test('刷新成功后同步内存快照；reloadAuth 拿到其他进程写入的新一代', async (root) => {
+    const { reloadAuth } = require('../src/auth/runtime');
+    const ref = { root, cacheKey: 'app', profile: 'member' };
+    cache.writeState(ref, { origin: 'http://app.test', storageState: STORAGE('v1') });
+    const auth = prepareAuth(config(), { root });
+    assert.strictEqual((await refreshAuth({ async exportStorageState() { return STORAGE('v2'); } }, auth)).updated, true);
+    assert.strictEqual(auth.storageState.cookies[0].value, 'v2');
+    assert.strictEqual(auth.generation, 2);
+    cache.writeState(ref, { origin: 'http://app.test', storageState: STORAGE('v3') }, { expectedGeneration: 2 });
+    reloadAuth(auth);
+    assert.strictEqual(auth.storageState.cookies[0].value, 'v3');
+    assert.strictEqual(auth.generation, 3);
+  });
+
+  await test('onlyIfChanged：凭据未变不写；登录 Cookie 被清除时不写回', async (root) => {
+    const ref = { root, cacheKey: 'app', profile: 'member' };
+    cache.writeState(ref, { origin: 'http://app.test', storageState: STORAGE('v1') });
+    const auth = prepareAuth(config(), { root });
+    const same = await refreshAuth({ async exportStorageState() { return STORAGE('v1'); } }, auth, { onlyIfChanged: true });
+    assert.strictEqual(same.updated, false);
+    assert.strictEqual(cache.readState(ref).generation, 1);
+    const loggedOut = await refreshAuth({ async exportStorageState() { return { cookies: [], origins: [] }; } }, auth);
+    assert.strictEqual(loggedOut.updated, false);
+    assert.match(loggedOut.warning, /sid.*疑似已登出/);
+    assert.strictEqual(cache.readState(ref).storageState.cookies[0].value, 'v1');
+  });
+
   await test('profile 锁：活跃锁使写入报 auth-locked，残留的过期锁被清理', (root) => {
     const ref = { root, cacheKey: 'app', profile: 'member' };
     const file = cache.cacheFileFor(ref);

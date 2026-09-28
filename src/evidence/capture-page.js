@@ -7,7 +7,7 @@
  * 提交不可变 Capture → 提交页面观察投影。页面打不开就不产出截图（见 capture 命令说明）。
  *
  * 不做任何输出；失败抛 CaptureError（浏览器相关）或带 errors 列表的 RuntimeError（输入问题）。
- * 在 BrowserSession 中运行时由 session 提供隔离 Context 并在成功后刷新认证。
+ * 在 BrowserSession 中运行时由 session 提供隔离 Context 并负责写回认证（含轮换后的令牌）。
  */
 
 const fs = require('fs');
@@ -222,7 +222,15 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
       observed.ready.warnings.push(...result.warnings);
     } else {
       const provider = createProvider({ id: providerId, providerConfig, profile, storageState: auth.storageState });
-      try { observed = await work(provider); } finally { await provider.close(); }
+      try {
+        observed = await work(provider);
+      } catch (error) {
+        // 失败也要保存已轮换的令牌，否则下次注入的是已作废的旧 refresh token。
+        await refreshAuth(provider, auth, { onlyIfChanged: true });
+        throw error;
+      } finally {
+        await provider.close();
+      }
     }
   } catch (e) {
     captureStore.abort(staging);

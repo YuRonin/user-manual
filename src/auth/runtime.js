@@ -77,10 +77,43 @@ function assertAuthenticated(openResult, auth) {
 }
 
 /**
- * 采集成功后刷新认证快照。
- * 刷新前再次确认当前仍处于已登录页面；写入用 generation CAS，旧 Context 的快照不能覆盖新快照。
+ * 把内存里的认证快照同步到磁盘上的最新一代。
+ * 一次 Run 会多次使用同一个 auth（重试、多个 Scenario）；很多站点每次刷新都会轮换 refresh token，
+ * 并把旧 token 的复用当作盗用、吊销该用户全部令牌。所以每个 Context 注入前都必须拿最新快照，
+ * 不能反复注入 prepareAuth 时读到的那一份。
  */
-async function refreshAuth(provider, auth) {
+function reloadAuth(auth) {
+  if (!auth || auth.status !== 'stored' || !auth.ref) return auth;
+  try {
+    const state = cache.readState(auth.ref);
+    if (state && state.generation !== auth.generation) {
+      auth.storageState = state.storageState;
+      auth.generation = state.generation;
+    }
+  } catch (_) { /* 读不到就沿用内存中的快照，由后续导航结果判断是否失效 */ }
+  return auth;
+}
+
+function cookieKey(cookie) {
+  return `${cookie.name}\u0000${cookie.domain}\u0000${cookie.path}`;
+}
+
+/** 原先未过期的 Cookie 在新快照里消失，说明站点已经登出（清掉了会话 / refresh Cookie），不能写回。 */
+function lostCookies(previous, next, now = Date.now() / 1000) {
+  const kept = new Set((next?.cookies || []).map(cookieKey));
+  return (previous?.cookies || [])
+    .filter((cookie) => !(cookie.expires > 0 && cookie.expires <= now))
+    .filter((cookie) => !kept.has(cookieKey(cookie)))
+    .map((cookie) => cookie.name);
+}
+
+/**
+ * 把当前 Context 的认证状态写回缓存（Scenario 结束时，或站点下发新 Cookie 时）。
+ * 写回前确认仍处于登录状态：不在登录页、原有 Cookie 没有被清掉；写入用 generation CAS，
+ * 成功后同步内存快照，让同一 Run 里下一个 Context 使用刚轮换出的新令牌。
+ * @param {{ onlyIfChanged?: boolean }} [options] 只在凭据与注入时不同的情况下写入（失败的 Scenario 用）
+ */
+async function refreshAuth(provider, auth, { onlyIfChanged = false } = {}) {
   if (!auth || auth.status !== 'stored') return { updated: false, warning: null };
   try {
     const observation = provider.currentObservation ? await provider.currentObservation() : null;
@@ -89,10 +122,22 @@ async function refreshAuth(provider, auth) {
     }
     const storageState = await provider.exportStorageState({ indexedDB: auth.capabilities.includes('indexedDB') });
     if (!storageState) return { updated: false, warning: 'Browser Provider 不支持导出认证状态。' };
-    cache.writeState(auth.ref, { origin: auth.expectedOrigin, storageState, identityRevision: auth.identityRevision }, { expectedGeneration: auth.generation });
+    const lost = lostCookies(auth.storageState, storageState);
+    if (lost.length) {
+      return { updated: false, warning: `登录 Cookie（${lost.join('、')}）已被站点清除，疑似已登出，未写回认证缓存。` };
+    }
+    if (onlyIfChanged && JSON.stringify(storageState) === JSON.stringify(auth.storageState)) {
+      return { updated: false, warning: null };
+    }
+    const written = cache.writeState(auth.ref, { origin: auth.expectedOrigin, storageState, identityRevision: auth.identityRevision }, { expectedGeneration: auth.generation });
+    auth.storageState = storageState;
+    auth.generation = written.generation;
     return { updated: true, warning: null };
   } catch (error) {
-    if (error.code === 'auth-cas-conflict') return { updated: false, warning: '认证缓存已被其他进程更新，丢弃本次较旧的刷新。' };
+    if (error.code === 'auth-cas-conflict') {
+      reloadAuth(auth);
+      return { updated: false, warning: '认证缓存已被其他进程更新，丢弃本次较旧的刷新。' };
+    }
     return { updated: false, warning: '认证状态刷新失败；已保留上一份可用缓存。' };
   }
 }
@@ -109,4 +154,4 @@ function authRuntimeFor(auth, { refresh = true } = {}) {
   };
 }
 
-module.exports = { prepareAuth, classifyAuthFailure, assertAuthenticated, refreshAuth, authRuntimeFor, cacheRoot, LOGIN_PATH_RE };
+module.exports = { prepareAuth, classifyAuthFailure, assertAuthenticated, refreshAuth, reloadAuth, lostCookies, authRuntimeFor, cacheRoot, LOGIN_PATH_RE };

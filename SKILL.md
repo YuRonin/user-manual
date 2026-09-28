@@ -239,6 +239,10 @@ manual auth login --profile default
 - `auth-window-closed`：窗口在保存前被关掉了。请用户重新登录，看到"登录状态已保存"之后再关窗口。
 - `auth-timeout`：报错里会带最后停留的 URL，据此判断是没登录完，还是跳去了别的主机。
 
+**会轮换 refresh token 的站点**（每次刷新都换发新 token，复用旧 token 会被吊销全部登录）：采集时工具会串行使用同一认证档案，站点下发新 Cookie 就立即写回缓存，采集失败也会保存轮换后的令牌。
+不要在同一认证档案上同时运行多个 manual 进程；建议用专门的测试账号采集，避免连带踢掉真人登录。
+如果仍被要求重新登录，说明缓存里的 token 已被站点吊销，请用户重新 `auth login`，不要反复重试。
+
 该命令打开一次可见浏览器，让用户手动完成登录；之后 `capture` 与 `capture-task` 自动复用 cookies 和
 localStorage。使用 `manual auth status` 查看档案状态，使用 `manual auth clear` 清除档案。认证值位于
 系统用户级缓存，可跨 worktree 使用；不得打印、复制进项目文件或写入证据清单。

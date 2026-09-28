@@ -222,7 +222,7 @@ function storageFor(baseUrl, role) {
     assert.strictEqual(sharedBrowser.isConnected(), false);
   });
 
-  await test('认证刷新只在 Scenario 成功结束时执行（generation CAS）', async () => {
+  await test('凭据未变化的失败 Scenario 不写认证缓存；成功时刷新（generation CAS）', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'manual-session-auth-'));
     const server = await startServer();
     const session = createBrowserSession();
@@ -245,6 +245,82 @@ function storageFor(baseUrl, role) {
       assert.strictEqual(ok.value, 'done');
       assert.deepStrictEqual(ok.warnings, []);
       assert.strictEqual(cache.readState(ref).generation, initial.generation + 1);
+    } finally {
+      await session.close();
+      await server.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  // 模拟轮换 refresh token 的站点（如 NeoAgent）：每次请求都换发新 token；旧 token 被复用 → 吊销全部。
+  function startRotatingServer() {
+    const state = { current: 't0', issued: 0, revokedAll: false, reuse: 0 };
+    const server = http.createServer((req, res) => {
+      const token = /(?:^|;\s*)rt=([^;]+)/.exec(req.headers.cookie || '')?.[1] || null;
+      if (req.url === '/login') { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<h1>登录</h1>'); return; }
+      if (state.revokedAll || !token) { res.writeHead(302, { location: '/login' }); res.end(); return; }
+      if (token !== state.current) {
+        state.reuse += 1;
+        state.revokedAll = true;
+        res.writeHead(302, { location: '/login' }); res.end(); return;
+      }
+      state.issued += 1;
+      state.current = `t${state.issued}`;
+      res.writeHead(200, { 'content-type': 'text/html', 'set-cookie': `rt=${state.current}; Path=/; HttpOnly; Max-Age=86400` });
+      res.end('<h1>应用</h1>');
+    });
+    return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({
+      state,
+      baseUrl: `http://127.0.0.1:${server.address().port}`,
+      close: () => new Promise((r) => server.close(r)),
+    })));
+  }
+
+  function rotatingAuth(root, baseUrl) {
+    const ref = { root, cacheKey: 'rotating', profile: 'member' };
+    const host = new URL(baseUrl).hostname;
+    const initial = cache.writeState(ref, {
+      origin: baseUrl,
+      storageState: { cookies: [{ name: 'rt', value: 't0', domain: host, path: '/', expires: Math.floor(Date.now() / 1000) + 86400, httpOnly: true, secure: false, sameSite: 'Lax' }], origins: [] },
+    });
+    return { ref, auth: { ref, status: 'stored', storageState: initial.storageState, generation: initial.generation, expectedOrigin: baseUrl, identityRevision: null, capabilities: [] } };
+  }
+
+  await test('refresh token 轮换：失败的 Scenario 也写回新令牌，重试不会复用旧令牌', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'manual-session-rotate-'));
+    const server = await startRotatingServer();
+    const session = createBrowserSession();
+    try {
+      const { ref, auth } = rotatingAuth(root, server.baseUrl);
+      // 第一次：站点已轮换令牌，但 Scenario 因别的原因失败（例如目标不可见）
+      await assert.rejects(session.withScenario({ providerConfig, profile, auth }, async (provider) => {
+        await provider.open(`${server.baseUrl}/app`);
+        throw Object.assign(new Error('目标不可见'), { code: 'target-not-visible' });
+      }));
+      assert.strictEqual(cache.readState(ref).storageState.cookies.find((c) => c.name === 'rt').value, 't1', '失败时也写回轮换后的令牌');
+      // 重试：同一个 auth 对象（Runtime 重试就是这样），必须注入最新令牌
+      const retried = await session.withScenario({ providerConfig, profile, auth }, async (provider) => (await provider.open(`${server.baseUrl}/app`)).finalUrl);
+      assert.ok(!retried.value.endsWith('/login'), '重试不应被踢回登录页');
+      assert.strictEqual(server.state.reuse, 0, '不得复用已作废的 refresh token');
+      assert.strictEqual(cache.readState(ref).storageState.cookies.find((c) => c.name === 'rt').value, 't2');
+    } finally {
+      await session.close();
+      await server.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await test('同一认证档案的并发 Scenario 串行使用凭据，不触发复用吊销', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'manual-session-rotate-'));
+    const server = await startRotatingServer();
+    const session = createBrowserSession();
+    try {
+      const { auth } = rotatingAuth(root, server.baseUrl);
+      const open = () => session.withScenario({ providerConfig, profile, auth }, async (provider) => (await provider.open(`${server.baseUrl}/app`)).finalUrl);
+      const results = await Promise.all([open(), open(), open()]);
+      assert.ok(results.every((r) => !r.value.endsWith('/login')), JSON.stringify(results.map((r) => r.value)));
+      assert.strictEqual(server.state.reuse, 0);
+      assert.strictEqual(server.state.issued, 3);
     } finally {
       await session.close();
       await server.close();

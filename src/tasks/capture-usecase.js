@@ -89,7 +89,7 @@ async function captureTask({ projectRoot, config, taskId, session = null, runId 
     annotatedDir: config.artifacts.annotatedDir,
     theme: config.annotation.themes[config.annotation.activeTheme],
     redactionRules: config.privacy || {},
-    // BrowserSession 在 Scenario 成功结束后统一刷新认证并关闭 Context
+    // BrowserSession 负责写回认证（成功总是写，失败只在凭据变化时写）并关闭 Context
     authRuntime: authRuntimeFor(auth, { refresh: ownsProvider }),
     ownsProvider,
   });

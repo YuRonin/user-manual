@@ -303,6 +303,14 @@ class PlaywrightBrowserProvider extends BrowserProvider {
       reducedMotion: 'reduce',
       ...(this.storageState ? { storageState: this.storageState } : {}),
     });
+    // 服务器下发 Set-Cookie（例如 refresh token 轮换）时通知上层立即持久化，不等 Scenario 结束：
+    // 失败、超时、进程中断都不能让认证缓存停在已作废的旧令牌上。
+    this.context.on('response', (response) => {
+      if (typeof this.onCredentialChange !== 'function') return;
+      response.headerValue('set-cookie')
+        .then((value) => { if (value && typeof this.onCredentialChange === 'function') this.onCredentialChange(); })
+        .catch(() => { /* 页面已关闭 */ });
+    });
     this.page = await this.context.newPage();
     this.registerPage('main', this.page);
     // 同一流程内打开的弹窗 / 新标签登记为 popup-N，由动作显式切换，不默认作用于旧 Page。
