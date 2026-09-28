@@ -38,6 +38,8 @@ const POLICIES = {
   'browser-crashed': RETRY,
   'browser-launch-failed': RETRY,
   'geometry-unstable': RETRY,
+  // 运行环境拦截网络：确定性失败，重试只会浪费时间。
+  'network-access-denied': FAIL,
   'lock-timeout': RETRY,
   'file-busy': RETRY,
   // 模型：只重试模型任务本身（由 runner 按 task kind 限定）。

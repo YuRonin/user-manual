@@ -11,6 +11,7 @@
 const REASON = {
   SERVER_UNREACHABLE: 'server-unreachable',
   DNS_FAILURE: 'dns-failure',
+  NETWORK_ACCESS_DENIED: 'network-access-denied',
   HTTP_NOT_FOUND: 'http-not-found',
   HTTP_ERROR: 'http-error',
   TIMEOUT: 'timeout',
@@ -36,6 +37,7 @@ const REASON = {
 const HINTS = {
   [REASON.SERVER_UNREACHABLE]: '项目大概率没在跑。先启动开发服务器，或检查 config.yaml 里的 project.baseUrl 端口是否正确。',
   [REASON.DNS_FAILURE]: '域名解析失败。检查 project.baseUrl 拼写，或确认网络/VPN 状态。',
+  [REASON.NETWORK_ACCESS_DENIED]: '浏览器的网络被运行环境拦截了（常见于 AI 客户端沙箱，例如 Codex 的 workspace-write 默认禁止联网），不是网站的问题，重试也没用。请在沙箱外运行这条命令（Codex 里批准提权执行），或在 ~/.codex/config.toml 设置 [sandbox_workspace_write] network_access = true 后重新执行。',
   [REASON.HTTP_NOT_FOUND]: '服务器返回 404。这个 route 可能已经不存在了——重跑 `manual inspect` 看看页面模型是否过期。',
   [REASON.HTTP_ERROR]: '服务器返回了错误状态码。先在浏览器里手工访问这个地址确认服务端是否正常。',
   [REASON.TIMEOUT]: '页面在超时时间内没有加载完。可以用 --timeout 放宽，或用 --wait-for <选择器> 指定真正该等的元素。',
@@ -87,6 +89,10 @@ function classifyNavigationError(err, url) {
   // 归到「项目没启动」会把用户引到错误的方向。
   if (/ERR_UNSAFE_PORT/i.test(msg)) {
     return new CaptureError(REASON.UNSAFE_PORT, `Chromium 拒绝访问该端口: ${url}`, { url, cause: msg.split('\n')[0] });
+  }
+  // 运行环境（沙箱 / 策略）拦截的网络访问：同样没有真正发起连接，重试不会变好。
+  if (/ERR_NETWORK_ACCESS_DENIED|ERR_ACCESS_DENIED|ERR_BLOCKED_BY_ADMINISTRATOR/i.test(msg)) {
+    return new CaptureError(REASON.NETWORK_ACCESS_DENIED, `浏览器访问 ${url} 被运行环境拦截`, { url, cause: msg.split('\n')[0] });
   }
   if (/ERR_CONNECTION_REFUSED|ECONNREFUSED|ERR_CONNECTION_RESET|ERR_EMPTY_RESPONSE/i.test(msg)) {
     return new CaptureError(REASON.SERVER_UNREACHABLE, `连不上 ${url}`, { url, cause: msg.split('\n')[0] });

@@ -123,6 +123,17 @@ async function runWith(error) {
     assert.deepStrictEqual(Object.keys(errorSummary(result)).sort(), ['code', 'message', 'phase', 'policy', 'requiresInput', 'retryable']);
   });
 
+  await test('沙箱拦截网络归类为 network-access-denied，不重试且带提示', async () => {
+    const { classifyNavigationError } = require('../src/browser/errors');
+    const err = classifyNavigationError(new Error('page.goto: net::ERR_NETWORK_ACCESS_DENIED at https://app.test/chat'), 'https://app.test/chat');
+    assert.strictEqual(err.reason, REASON.NETWORK_ACCESS_DENIED);
+    const result = toErrorResult(err, { phase: 'capture' });
+    assert.strictEqual(result.code, 'network-access-denied');
+    assert.strictEqual(result.retryable, false);
+    assert.strictEqual(result.policy, 'fail');
+    assert.ok(result.hint.includes('network_access'));
+  });
+
   process.stdout.write(`\n${passed} passed, ${failures.length} failed\n`);
   if (failures.length > 0) process.exitCode = 1;
 })();

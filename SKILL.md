@@ -76,7 +76,7 @@ node <skill>/bin/manual.js generate <task:<id>|page:<id>> --project-root <项目
 | 0 | 完成 | 报告文档路径；`cache` 里的复用项说明“使用了 observedAt 时刻的历史观察，未在线确认” |
 | 3 | 等待输入 | 看 `waiting[].code`：`model-input-required` → 读请求文件（只读其中列出的文件），按 `references/manual-writing-style.md` 第七节写响应 → `manual run-submit <runId> --request <id> --input <响应.json>` → `manual resume <runId>`；`approval-required` / `scope-changed` → 把任务展示给用户，得到明确确认后 `approve-tasks` 再 `resume`；`auth-*` → 请用户登录后 `resume`；`review-required` → 展示需确认的数字 / 承诺，用户确认后带 `--accept-review` 重新运行 |
 | 4 | 漂移或冲突 | `run-input-changed` → `manual resume <runId> --replan`；`merge-conflict` → 把 `proposed.md` 与逐块对照展示给用户：采用提案（合入正式文档）或把要保留的块头改为 `owner=human`，然后 `resume`；只有用户明确要求才 `--force`；`document-missing` → 问用户是重新生成（`--force`）还是下线（标 retired）；`verify` 的 failed / drift → 报告分类与差异，不要自动重新生成或接受新基线 |
-| 1 | 失败 | `manual status <runId> --json` 报告失败任务的 code 与提示；Runtime 已按策略重试过，不要自行循环重跑 |
+| 1 | 失败 | `manual status <runId> --json` 报告失败任务的 code 与提示；Runtime 已按策略重试过，不要自行循环重跑。例外：`network-access-denied` 是客户端沙箱禁止联网，不是网站问题，应在沙箱外重新执行同一条命令（Codex 申请提权执行，用户批准即可），不要让用户“等环境恢复” |
 | 2 | 参数错误 / 目标歧义 | 把 `candidates` 给用户选，用 `task:` / `page:` 前缀重新运行 |
 
 常用选项：`--plan`（只预览，不执行）、`--copy <文案.json>`（已有文案块）、`--copy-default`（不改写文案）、`--offline`（只用历史证据）、`--refresh`（强制重新采集，仅在用户要求时使用）。
@@ -265,7 +265,8 @@ DOM 连续静止 → 冻结 CSS 动画与过渡 → 静置回流。
 页面打不开就没有 PNG，并给出分类原因：`server-unreachable`（项目没启动）、
 `http-not-found`（404，route 可能过期）、`auth-missing`（未登录）、`auth-expired`（登录过期）、
 `auth-corrupt`（认证缓存损坏）、
-`timeout`、`blank-page`（前端崩了）、`http-error`、`unsafe-port`。
+`timeout`、`blank-page`（前端崩了）、`http-error`、`unsafe-port`、
+`network-access-denied`（客户端沙箱禁止联网，需在沙箱外执行）。
 每类都带一条可操作的建议。**把失败原因原样转达给用户，不要自己找补。**
 
 ### 常用参数
