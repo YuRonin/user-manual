@@ -19,6 +19,7 @@ const providers = require('../config/providers');
 const { renderConfigYaml, renderStateGitignore } = require('../config/render');
 const { isUuid } = require('../model/ids');
 const { writeText, backupFile, displayPath } = require('../util/fsx');
+const { probeRedirect, redirectWarning } = require('../util/redirect-probe');
 
 const KNOWN_FLAGS = new Set([
   'projectRoot', 'baseUrl', 'profile', 'viewport', 'dpr', 'provider',
@@ -121,7 +122,7 @@ function existingProjectId(projectRoot) {
   return isUuid(id) ? id : null;
 }
 
-function run(argv) {
+async function run(argv) {
   const { values, unknownFlags } = parseArgs(argv, { known: KNOWN_FLAGS });
   const json = values.json === true;
 
@@ -205,6 +206,9 @@ function run(argv) {
 
   const files = [configPath, gitignorePath];
   const summary = { ...built.summary, backupPath };
+  // 配置阶段就提示 baseUrl 被跨协议 / 跨主机重定向，免得到 auth login 才在浏览器里卡住。
+  const redirect = redirectWarning(built.config.project.baseUrl, await probeRedirect(built.config.project.baseUrl));
+  const warnings = redirect ? [redirect] : [];
 
   if (json) {
     process.stdout.write(
@@ -217,6 +221,7 @@ function run(argv) {
           projectRoot,
           version: built.config.version,
           ...built.summary,
+          warnings,
         },
         null,
         2
@@ -225,6 +230,7 @@ function run(argv) {
   } else {
     process.stdout.write(renderSummary(summary, files, projectRoot) + '\n');
   }
+  for (const warning of warnings) process.stderr.write(`[manual init] ⚠ ${warning}\n`);
 
   return 0;
 }

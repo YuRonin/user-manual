@@ -230,6 +230,15 @@ node <skill>/bin/manual.js describe --project-root <项目根> --input <分析�
 manual auth login --profile default
 ```
 
+**登录前先排查 baseUrl 重定向**：`init`、`auth login`、`doctor` 都会探测 `project.baseUrl` 是否被 301 到另一个协议或主机（最常见是 http → https）。
+只要输出里有 `⚠ baseUrl … 会被服务器重定向到 …`，先把它转告用户，确认后改 `.manual/config.yaml` 的 `project.baseUrl`，再登录。
+不改也能登录，但认证缓存、截图地址和配置对不上，后续命令容易出问题。
+
+登录过程中 CLI 会往 stderr 输出进度：已打开登录页、当前页面 URL、检测到已离开登录页、正在保存。
+要把这些进度原样告诉用户，不要自己猜 CLI 停在哪一步。几种结果的含义：
+- `auth-window-closed`：窗口在保存前被关掉了。请用户重新登录，看到"登录状态已保存"之后再关窗口。
+- `auth-timeout`：报错里会带最后停留的 URL，据此判断是没登录完，还是跳去了别的主机。
+
 该命令打开一次可见浏览器，让用户手动完成登录；之后 `capture` 与 `capture-task` 自动复用 cookies 和
 localStorage。使用 `manual auth status` 查看档案状态，使用 `manual auth clear` 清除档案。认证值位于
 系统用户级缓存，可跨 worktree 使用；不得打印、复制进项目文件或写入证据清单。

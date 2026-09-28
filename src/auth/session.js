@@ -6,9 +6,9 @@ const { verifyIdentity } = require('./identity');
  * 登录编排：打开登录页 → 等待离开登录页 → 在验证页执行身份断言 → 导出状态。
  * "离开 /login" 只是前提；只有身份断言通过才记为 validated。
  */
-async function establishSession({ provider, loginUrl, verifyUrl = null, timeout = 300000, config = null, profile = 'default', capabilities = [] }) {
+async function establishSession({ provider, loginUrl, verifyUrl = null, timeout = 300000, config = null, profile = 'default', capabilities = [], onProgress = null }) {
   await provider.open(loginUrl, { timeout });
-  const verified = await provider.waitForAuthentication({ loginUrl, verifyUrl, timeout });
+  const verified = await provider.waitForAuthentication({ loginUrl, verifyUrl, timeout, onProgress });
   const identity = config
     ? await verifyIdentity(provider, { config, profile, verifyUrl: null })
     : { validationStatus: 'unvalidated', validatedAt: null, identityRevision: null };

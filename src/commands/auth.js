@@ -9,6 +9,7 @@ const { createProvider } = require('../browser');
 const cache = require('../auth/cache');
 const { establishSession } = require('../auth/session');
 const { authDisabled, resolveCapabilities } = require('../auth/identity');
+const { probeRedirect, redirectWarning } = require('../util/redirect-probe');
 
 const KNOWN_FLAGS = new Set([
   'projectRoot', 'profile', 'loginUrl', 'verifyPath', 'timeout', 'json', 'help',
@@ -96,6 +97,13 @@ async function run(argv) {
   const profileConfig = config.capture.profiles[config.capture.activeProfile];
   const activeId = config.browser.activeProvider;
   const activeProvider = config.browser.providers[activeId];
+  // 先查 baseUrl 是否被重定向到另一个协议 / 主机：这是登录后"CLI 一直等不到"的头号原因，打开浏览器前就说清楚。
+  const preflight = [];
+  const redirect = redirectWarning(config.project.baseUrl, await probeRedirect(config.project.baseUrl));
+  if (redirect) {
+    preflight.push(redirect);
+    process.stderr.write(`[manual auth] ⚠ ${redirect}\n`);
+  }
   const provider = createProvider({
     id: `${activeId}-auth`,
     profile: profileConfig,
@@ -112,6 +120,7 @@ async function run(argv) {
       config,
       profile,
       capabilities,
+      onProgress: (message) => process.stderr.write(`[manual auth] ${message}\n`),
     });
     const state = cache.writeState(ref, {
       origin: new URL(config.project.baseUrl).origin,
@@ -119,9 +128,10 @@ async function run(argv) {
       identityRevision: result.identityRevision,
       validatedAt: result.validatedAt,
     });
-    const warnings = result.validationStatus === 'validated' ? [] : ['未配置 auth.identityAssertions：登录状态已保存，但未经身份断言确认（validationStatus=unvalidated）。'];
+    const warnings = [...preflight, ...(result.validationStatus === 'validated' ? [] : ['未配置 auth.identityAssertions：登录状态已保存，但未经身份断言确认（validationStatus=unvalidated）。'])];
     return output({ ok: true, status: 'stored', profile, finalUrl: result.finalUrl, warnings, ...cache.publicMetadata(state, cache.cacheFileFor(ref)) }, { json, action });
   } catch (error) {
+    if (redirect && error.code === 'auth-timeout') error.message += ` 另外：${redirect}`;
     return fail(error, json);
   } finally {
     await provider.close();

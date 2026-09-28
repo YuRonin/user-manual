@@ -14,6 +14,7 @@ const pkg = require('../../package.json');
 const { parseArgs } = require('../cli/args');
 const { loadConfig, configPathFor } = require('../config/load');
 const cache = require('../auth/cache');
+const { probeRedirect, redirectWarning } = require('../util/redirect-probe');
 
 const KNOWN_FLAGS = new Set(['projectRoot', 'json', 'help']);
 const HELP = `
@@ -256,9 +257,23 @@ function collectChecks({
   return { ok: checks.every((item) => item.status !== 'fail'), projectRoot, checks };
 }
 
+/** baseUrl 被重定向到另一个协议 / 主机时，登录判定和认证缓存都会对不上；这是最常见的"登录后 CLI 等不到"原因。 */
+async function checkBaseUrlRedirect(projectRoot, { probe = probeRedirect } = {}) {
+  let loaded;
+  try { loaded = loadConfig(projectRoot); } catch (_) { loaded = null; }
+  if (!loaded || !loaded.ok) return check('base-url', 'skip', '没有可用配置，跳过 baseUrl 重定向检查。');
+  const baseUrl = loaded.config.project.baseUrl;
+  const result = await probe(baseUrl);
+  if (!result) return check('base-url', 'skip', `${baseUrl} 当前无法访问，跳过重定向检查。`);
+  const warning = redirectWarning(baseUrl, result);
+  return warning
+    ? check('base-url', 'warn', warning, { finalUrl: result.finalUrl, hint: `把 project.baseUrl 改成 ${new URL(result.finalUrl).origin}` })
+    : check('base-url', 'ok', `${baseUrl} 没有跨协议或跨主机重定向`);
+}
+
 const MARK = { ok: '✓', warn: '!', fail: '✗', skip: '-' };
 
-function run(argv) {
+async function run(argv) {
   const { values, positional, unknownFlags } = parseArgs(argv, { known: KNOWN_FLAGS });
   const json = values.json === true;
   if (values.help) { process.stdout.write(HELP + '\n'); return 0; }
@@ -269,6 +284,7 @@ function run(argv) {
     return 2;
   }
   const report = collectChecks({ projectRoot: path.resolve(values.projectRoot || process.cwd()) });
+  report.checks.push(await checkBaseUrlRedirect(report.projectRoot));
   if (json) {
     process.stdout.write(JSON.stringify(report, null, 2) + '\n');
   } else {
@@ -280,4 +296,4 @@ function run(argv) {
   return report.ok ? 0 : 1;
 }
 
-module.exports = { run, HELP, KNOWN_FLAGS, collectChecks, versionAtLeast, checkAuthPermissions, checkFonts };
+module.exports = { run, HELP, KNOWN_FLAGS, collectChecks, checkBaseUrlRedirect, versionAtLeast, checkAuthPermissions, checkFonts };

@@ -19,6 +19,7 @@ const FILES = [
   'doctor.test.js',
   'auth-cache.test.js',
   'auth-session.test.js',
+  'auth-wait.test.js',
   'auth-command.test.js',
   'auth-identity.test.js',
   'import-graph.test.js',

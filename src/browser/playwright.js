@@ -733,19 +733,46 @@ class PlaywrightBrowserProvider extends BrowserProvider {
     return this.context.storageState(indexedDB ? { indexedDB: true } : undefined);
   }
 
-  async waitForAuthentication({ loginUrl, verifyUrl = null, timeout = 300000 }) {
+  /**
+   * 轮询整个 Context 的所有标签页，直到任一页回到应用站点且不在登录路径上。
+   * 按 host 比较而不是 origin：站点常把 http 301 到 https，按 origin 比较会永远等不到。
+   * 轮询而不是 waitForURL：SPA 的 router.push 与新标签页 / 弹窗都能被看到；窗口被关掉时立即报错。
+   */
+  async waitForAuthentication({ loginUrl, verifyUrl = null, timeout = 300000, pollInterval = 500, onProgress = null }) {
     if (!this.page) throw new Error('waitForAuthentication 之前必须先 open()。');
-    const expectedOrigin = new URL(verifyUrl || loginUrl).origin;
+    const appHost = new URL(verifyUrl || loginUrl).host.replace(/:(80|443)$/, '');
+    const hostOf = (parsed) => parsed.host.replace(/:(80|443)$/, '');
     const authenticated = (url) => {
-      const parsed = new URL(String(url));
-      return parsed.origin === expectedOrigin && !LOGIN_PATH_RE.test(parsed.pathname);
+      let parsed;
+      try { parsed = new URL(String(url)); } catch (_) { return false; }
+      return /^https?:$/.test(parsed.protocol) && hostOf(parsed) === appHost && !LOGIN_PATH_RE.test(parsed.pathname);
     };
-    if (!authenticated(this.page.url())) {
-      try {
-        await this.page.waitForURL((url) => authenticated(url), { timeout });
-      } catch (_) {
-        throw Object.assign(new Error('等待登录完成超时，请完成登录后重试。'), { code: 'auth-timeout' });
+    const progress = (message) => { if (typeof onProgress === 'function') onProgress(message); };
+
+    const deadline = Date.now() + timeout;
+    let lastUrls = [];
+    progress(`已打开登录页 ${this.page.url()}，请在弹出的浏览器窗口中完成登录（最长等待 ${Math.round(timeout / 1000)} 秒）。`);
+    for (;;) {
+      const browserGone = this.browser && typeof this.browser.isConnected === 'function' && !this.browser.isConnected();
+      const pages = browserGone ? [] : this.context.pages().filter((page) => !page.isClosed());
+      if (!pages.length) {
+        throw Object.assign(new Error('登录窗口已被关闭，未保存登录状态。请重新运行 manual auth login，并在登录完成后等待命令提示保存成功再关闭窗口。'), { code: 'auth-window-closed' });
       }
+      const urls = pages.map((page) => page.url());
+      if (urls.join('\n') !== lastUrls.join('\n')) {
+        progress(`当前页面：${urls.join('，')}`);
+        lastUrls = urls;
+      }
+      const landed = pages.find((page) => authenticated(page.url()));
+      if (landed) {
+        this.page = landed;
+        progress(`检测到已离开登录页：${landed.url()}，正在保存登录状态…`);
+        break;
+      }
+      if (Date.now() >= deadline) {
+        throw Object.assign(new Error(`等待登录完成超时。最后停留在：${urls.join('，')}；登录成功的判据是回到 ${appHost} 且路径不是登录页。`), { code: 'auth-timeout' });
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollInterval));
     }
     if (verifyUrl) {
       await this.open(verifyUrl, { timeout: Math.min(timeout, 30000) });
