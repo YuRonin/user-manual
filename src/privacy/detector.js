@@ -39,13 +39,15 @@ function classifyCandidate(candidate, policy) {
   if (candidate.inputType === 'password' || CREDENTIAL_LABEL.test(label)) {
     return { kind: 'credential', confidence: 'high', forced: true };
   }
+  // 业务方用 data-redact 显式声明的区域优先于一切启发式：
+  // "134****1255" 这类半掩码仍会暴露号段与尾号，不能因为含星号就当作已脱敏跳过。
+  if (candidate.source === 'explicit') return { kind: 'explicit', confidence: 'high', forced: true };
   // 按命中的敏感片段判断：一段文字里有省略号，不代表其中其他完整手机号/邮箱也已脱敏。
   if (PHONE.test(text)) return { kind: 'phone', confidence: 'high', forced: true };
   if (EMAIL.test(text)) return { kind: 'email', confidence: 'high', forced: true };
   // 只有整段本身已是脱敏形态时，才跳过基于标签/语义的判断。
   if (isAlreadyObscured(text)) return null;
   if (ACCOUNT_LABEL.test(label)) return { kind: 'account', confidence: 'high', forced: true };
-  if (candidate.source === 'explicit') return { kind: 'explicit', confidence: 'high', forced: true };
 
   const explicitRedact = policy.rules.redact.some((rule) => ruleMatches(rule, candidate));
   const explicitPreserve = policy.rules.preserve.some((rule) => ruleMatches(rule, candidate));

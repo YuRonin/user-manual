@@ -79,6 +79,15 @@ test('高风险规则、显式规则和账号标签按优先级处理', () => {
   assert.deepStrictEqual(result.redactions.map((item) => item.kind), ['phone', 'email', 'account', 'explicit']);
 });
 
+test('data-redact 显式标记的半掩码手机号仍然遮挡', () => {
+  const { detectRedactions } = require('../src/privacy/detector');
+  const rect = { x: 0, y: 0, width: 80, height: 16 };
+  const result = detectRedactions([
+    { text: '134****1255', label: '', rect, source: 'explicit' },
+  ], { audience: 'public', rules: { redact: [], preserve: [] } });
+  assert.deepStrictEqual(result.redactions.map((item) => item.kind), ['explicit']);
+});
+
 test('内部模式允许 preserve 普通语义字段，配置冲突仍阻止', () => {
   const { detectRedactions } = require('../src/privacy/detector');
   const preserved = detectRedactions([
