@@ -14,11 +14,11 @@ const { revisionOf } = require('../util/hash');
 const DEFINITION_FIELDS = {
   page: [
     'id', 'lifecycle', 'title', 'purpose', 'route', 'dynamic', 'params', 'routeBindings',
-    'entry', 'source', 'includeInManual', 'detectedActions', 'states', 'identityAssertions',
+    'entry', 'source', 'includeInManual', 'detectedActions', 'guide', 'states', 'identityAssertions',
   ],
   userTask: [
     'id', 'title', 'goal', 'entryPage', 'priority', 'preconditions', 'risk', 'environment',
-    'fixtures', 'steps', 'branches', 'relatedTasks', 'completion',
+    'fixtures', 'writeAuthorization', 'steps', 'branches', 'relatedTasks', 'completion',
   ],
   scenario: [
     'id', 'userTaskId', 'environment', 'authProfile', 'data', 'entry', 'expected', 'setup', 'checkpoints',
@@ -26,7 +26,7 @@ const DEFINITION_FIELDS = {
 };
 
 const STEP_FIELDS = [
-  'id', 'instruction', 'page', 'pageId', 'stateBefore', 'stateAfter', 'action', 'risk', 'replay', 'capture', 'valueRef',
+  'id', 'instruction', 'page', 'pageId', 'stateBefore', 'stateAfter', 'pageAfter', 'requires', 'assertionTimeoutMs', 'action', 'risk', 'replay', 'capture', 'valueRef',
 ];
 
 /** 规范化 JSON 值的 revision。undefined / NaN / 循环引用等抛 invalid-json-value。 */

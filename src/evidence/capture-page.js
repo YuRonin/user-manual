@@ -196,7 +196,19 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
     const semantic = provider.semanticSnapshot ? await provider.semanticSnapshot() : null;
     const environment = provider.environmentInfo ? provider.environmentInfo({ fullPage: options.fullPage === true }) : null;
     // 稳定截图 + 离线派生：原图只留在 rawDir，发布图由同一份原图遮罩后写入 annotatedDir。
-    const captured = await captureStable(provider, { rawPath: stagedRaw, fullPage: options.fullPage === true, format });
+    const captured = await captureStable(provider, { rawPath: stagedRaw, fullPage: options.fullPage === true, format,
+      resolveTargets: async () => {
+        const targets = [];
+        for (const [i, item] of (page.guide || []).entries()) {
+          if (!item.target) continue;
+          const found = await provider.performAction({ type: 'inspect', target: item.target });
+          const rect = { ...found.rect };
+          if (options.fullPage) { const geometry = await provider.collectGeometry({ fullPage: true }); rect.x += geometry.scroll.x; rect.y += geometry.scroll.y; }
+          targets.push({ label: String(i + 1), rect });
+        }
+        return targets;
+      },
+    });
     fs.writeFileSync(stagedDerivation, derivationSidecar(captured));
     const safe = await derivePublished({
       captured,
@@ -206,6 +218,7 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
       theme: config.annotation.themes[config.annotation.activeTheme],
       redactionRules: config.privacy || {},
     });
+    ready.warnings.push(...safe.quality.warnings);
     if (!safe.published) ready.warnings.push(`页面隐私检测未通过（${safe.privacy.unresolved.length} 项无法定位），未生成发布图；手册只能出文字版。`);
     if (!session) {
       const refreshed = await refreshAuth(provider, auth);
@@ -280,6 +293,7 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
         ...(semantic ? { semantic } : {}),
         ...(environment ? { environment } : {}),
         privacy: safe.privacy,
+        quality: safe.quality,
         redactions: safe.redactions.map(({ kind, rect, result }) => ({ kind, rect, result })),
         // simulated：界面由拦截的静态响应驱动，只证明"界面如何呈现这种数据"；fixture：登记的测试数据
         ...(data.fixture ? { fixture: data.fixture } : {}),

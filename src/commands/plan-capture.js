@@ -9,8 +9,8 @@ const { deriveTaskScenario } = require('../scenarios/model');
 const { resolveScenario } = require('../scenarios/store');
 const { buildCapturePlan, writeCapturePlan } = require('../tasks/capture-plan');
 
-const KNOWN_FLAGS = new Set(['projectRoot', 'json', 'help']);
-const HELP = 'manual plan-capture <task-id> [--project-root <路径>] [--json]';
+const KNOWN_FLAGS = new Set(['projectRoot', 'json', 'help', 'live']);
+const HELP = 'manual plan-capture <task-id> [--project-root <路径>] [--live] [--json]\n--live 在真实浏览器预演只读/本地步骤，写操作前停止；不发布证据。';
 
 function fail(errors, json) {
   const list = Array.isArray(errors) ? errors : [errors];
@@ -19,8 +19,8 @@ function fail(errors, json) {
   return exitCodeFor(list);
 }
 
-function run(argv) {
-  const { values, positional, unknownFlags } = parseArgs(argv, { known: KNOWN_FLAGS });
+async function run(argv) {
+  const { values, positional, unknownFlags } = parseArgs(argv, { known: KNOWN_FLAGS, booleans: ['live'] });
   const json = values.json === true;
   if (values.help) { process.stdout.write(HELP + '\n'); return 0; }
   if (unknownFlags.length) return usageExit(fail(`未知参数: ${unknownFlags.join(', ')}`, json));
@@ -38,8 +38,15 @@ function run(argv) {
   const pages = base.model.pages;
   const scenario = resolveScenario(stateDir, deriveTaskScenario(task, pages, config), { stepIds: (task.steps || []).map((step) => step.id) });
   if (!scenario.ok) return fail(scenario.errors, json);
-  const result = buildCapturePlan(task, pages, { scenario: scenario.scenario });
+  const result = buildCapturePlan(task, pages, { scenario: scenario.scenario, config, preflight: !!values.live });
   if (!result.ok) return fail(result.errors, json);
+  if (values.live) {
+    try {
+      const result = await require('../tasks/capture-usecase').captureTask({ projectRoot, config, taskId: task.id, preflight: true });
+      process.stdout.write(JSON.stringify({ ok: true, onlineChecked: true, steps: result.evidence.steps.map(s => ({ id: s.id, status: s.status, reason: s.reason, locator: s.target?.resolution })), publicationReady: false }, null, 2) + '\n');
+      return 0;
+    } catch (error) { return fail(`${error.code || 'preflight-failed'}: ${error.message}`, json); }
+  }
   const planFile = writeCapturePlan(stateDir, result.plan);
   const output = { ok: true, planFile, plan: result.plan };
   if (json) process.stdout.write(JSON.stringify(output, null, 2) + '\n');

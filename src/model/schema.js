@@ -20,7 +20,7 @@ const SCHEMA_VERSIONS = { config: 2, page: 2, userTask: 2, scenario: 1, capture:
 
 const ACTION_TYPES = ['click', 'fill', 'select', 'check', 'uncheck', 'inspect'];
 const ASSERTION_TYPES = ['url', 'visible', 'hidden', 'editable'];
-const TARGET_KEYS = ['role', 'name', 'label', 'text', 'testId', 'selector', 'exact'];
+const TARGET_KEYS = ['role', 'name', 'label', 'text', 'testId', 'selector', 'exact', 'within', 'alternatives'];
 const RISKS = ['read', 'local', 'write', 'destructive'];
 const REPLAYS = ['safe', 'requires-input', 'unsafe'];
 const CAPTURE_TIMINGS = ['before', 'after'];
@@ -33,10 +33,10 @@ const SHA256_RE = /^(sha256:)?[0-9a-f]{64}$/;
 
 const KNOWN_FIELDS = {
   page: ['schemaVersion', 'id', 'revision', 'lifecycle', 'title', 'purpose', 'route', 'dynamic', 'params', 'routeBindings',
-    'entry', 'source', 'dependencies', 'includeInManual', 'detectedActions', 'states', 'identityAssertions', 'confidence',
+    'entry', 'source', 'dependencies', 'includeInManual', 'detectedActions', 'guide', 'states', 'identityAssertions', 'confidence',
     'browser', 'status', 'analysis', 'latestCaptureId'],
   userTask: ['schemaVersion', 'id', 'revision', 'title', 'goal', 'entryPage', 'priority', 'preconditions', 'risk', 'status',
-    'approval', 'environment', 'fixtures', 'steps', 'branches', 'relatedTasks', 'completion', 'evidence', 'evidenceManifest',
+    'approval', 'environment', 'fixtures', 'writeAuthorization', 'steps', 'branches', 'relatedTasks', 'completion', 'evidence', 'evidenceManifest',
     'capturePlan', 'captureIds', 'lastCapture', 'stale', 'lastVerification', 'params', 'authProfile',
     'source', 'discovery', 'generatedAt', 'updatedAt', 'notes', 'history'],
 };
@@ -105,6 +105,11 @@ function validateTarget(c, target, path) {
   if (!isObject(target)) { c.error(path, 'invalid-target', '需要是语义定位对象。'); return; }
   for (const key of Object.keys(target)) {
     if (!TARGET_KEYS.includes(key)) c.error(`${path}.${key}`, 'invalid-target', `不支持的定位字段 ${key}。`);
+  }
+  if (target.within !== undefined) validateTarget(c, target.within, `${path}.within`);
+  if (target.alternatives !== undefined) {
+    if (!Array.isArray(target.alternatives) || target.alternatives.length > 5) c.error(path, 'invalid-target', 'alternatives 需要至多五个定位。');
+    else target.alternatives.forEach((t, i) => validateTarget(c, t, `${path}.alternatives[${i}]`));
   }
   const usable = (nonEmpty(target.role) && nonEmpty(target.name))
     || nonEmpty(target.label) || nonEmpty(target.text) || nonEmpty(target.testId) || nonEmpty(target.selector);
@@ -244,6 +249,21 @@ function validatePage(page) {
       }
     }
   }
+  if (page.guide !== undefined) {
+    if (!Array.isArray(page.guide)) c.error('guide', 'invalid-guide', 'guide 需要是数组。');
+    else {
+      const ids = new Set();
+      page.guide.forEach((item, i) => {
+        const at = `guide[${i}]`;
+        if (!isObject(item)) { c.error(at, 'invalid-guide', '需要对象'); return; }
+        if (!isSafeId(item.id) || ids.has(item.id)) c.error(at, 'invalid-guide', '需要唯一安全 id');
+        ids.add(item.id);
+        for (const field of ['title', 'instruction']) if (!nonEmpty(item[field])) c.error(at, 'invalid-guide', `${field} 必填`);
+        if (item.target) validateTarget(c, item.target, `${at}.target`);
+        if (item.taskId && !isSafeId(item.taskId)) c.error(at, 'invalid-guide', 'taskId 非法');
+      });
+    }
+  }
   if (page.identityAssertions !== undefined) validateAssertions(c, page.identityAssertions, 'identityAssertions');
   return c.result({ version: version.version });
 }
@@ -295,6 +315,14 @@ function validateUserTask(task, context = {}) {
       if (step.risk !== undefined && !RISKS.includes(step.risk)) c.error(`${where}.risk`, 'invalid-risk', `risk 需要是 ${RISKS.join(' / ')} 之一。`);
       if (step.replay !== undefined && !REPLAYS.includes(step.replay)) c.error(`${where}.replay`, 'invalid-replay', `replay 需要是 ${REPLAYS.join(' / ')} 之一。`);
       validateCaptureSpec(c, step.capture, `${where}.capture`);
+      if (step.assertionTimeoutMs !== undefined && (!Number.isInteger(step.assertionTimeoutMs) || step.assertionTimeoutMs < 1 || step.assertionTimeoutMs > 120000)) c.error(where, 'invalid-timeout', 'assertionTimeoutMs 需要是 1..120000 的整数。');
+      if (step.requires !== undefined) validateAssertions(c, step.requires, `${where}.requires`);
+      if (step.pageAfter !== undefined && !isSafeId(step.pageAfter)) c.error(where, 'invalid-action', 'pageAfter 需要页面 id');
+      if (pagesById && step.pageAfter) {
+        const afterPage = pagesById.get(step.pageAfter);
+        if (!afterPage) c.error(where, 'missing-reference', `目的页面不存在: ${step.pageAfter}`);
+        else referencedPages.add(afterPage);
+      }
       if (pagesById && nonEmpty(pageId)) {
         const page = pagesById.get(pageId);
         if (!page) c.error(`${where}.page`, 'missing-reference', `步骤引用不存在的页面: ${pageId}`);
@@ -302,13 +330,24 @@ function validateUserTask(task, context = {}) {
           referencedPages.add(page);
           const states = { default: true, ...(isObject(page.states) ? page.states : {}) };
           for (const key of ['stateBefore', 'stateAfter']) {
-            if (step[key] !== undefined && !states[step[key]]) c.error(`${where}.${key}`, 'missing-reference', `页面 ${pageId} 没有状态 ${step[key]}`);
+            if (step[key] !== undefined && !(key === 'stateAfter' && step.pageAfter ? { default: true, ...pagesById.get(step.pageAfter)?.states } : states)[step[key]]) c.error(`${where}.${key}`, 'missing-reference', `页面 ${pageId} 没有状态 ${step[key]}`);
           }
         }
       }
     });
   }
 
+  if (task.writeAuthorization !== undefined) {
+    const g = task.writeAuthorization;
+    if (!isObject(g)) c.error('writeAuthorization', 'invalid-authorization', 'writeAuthorization 需要是对象。');
+    else {
+      if (!nonEmpty(task.environment)) c.error('environment', 'required', '授权写操作需要登记测试环境。');
+      if (!nonEmpty(g.decisionRef)) c.error('writeAuthorization.decisionRef', 'required', '需要用户授权依据。');
+      try { if (new URL(g.origin).origin !== g.origin || !/^https?:/.test(g.origin)) throw new Error(); } catch { c.error('writeAuthorization.origin', 'invalid-origin', '需要完整 HTTP(S) origin。'); }
+      if (!Number.isFinite(Date.parse(g.expiresAt))) c.error('writeAuthorization.expiresAt', 'invalid-expiry', '需要有效到期时间。');
+      if (!Array.isArray(g.steps) || !g.steps.length || g.steps.some(id => !stepIds.has(id))) c.error('writeAuthorization.steps', 'missing-reference', '需要有效的步骤 id 列表。');
+    }
+  }
   const claims = task.completionClaims ?? task.completion?.claims;
   const claimsPath = task.completionClaims !== undefined ? 'completionClaims' : 'completion.claims';
   if (claims !== undefined) {

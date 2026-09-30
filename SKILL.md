@@ -39,6 +39,10 @@ Skill 自身代码与项目数据分离：**Skill 只提供能力，项目状态
 
 ---
 
+## 质量与证据工作流
+
+先阅读 [references/quality-workflow.md](references/quality-workflow.md)。现有会话授权持续有效；用户已要求修复并实践的范围无需重复确认。新任务应先明确目的、数据前提、操作与验证终点，再生成文案。
+
 ## 任务优先工作流
 
 当用户要的是“怎样完成某件事”，使用任务流程；不要把页面上的每个按钮机械地写成并列功能。页面式 `capture` / `generate` 在迁移期继续用于页面总览和静态证据。
@@ -53,9 +57,9 @@ manual inspect
 → 用户明确确认后 manual approve-tasks --input <决策.json>
 ```
 
-候选任务必须保持 `candidate`；不得代替用户批准，也不得把“请生成手册”解释成对所有候选任务的批量批准。只有 `approved` 任务才能进入后续截图计划、任务采集和发布。
+候选任务需要记录审批依据；可按用户本次或先前明确授权的范围执行 approve-tasks。范围不清楚时展示具体任务再询问。只有 approved 任务才能进入采集和发布。
 
-任务批准后，用 `manual generate task:<id> --plan --json` 把计划里的动作、风险边界（`write` 停在动作前、`destructive` 不执行）和需要浏览器的场景展示给用户；确认后执行 `manual generate task:<id> --json`。正式任务文档只能引用 `images/annotated/`，任何 raw、sanitized、缺失图片或结构化事实变化都会阻止发布；发布后可用 `manual verify <task-id>` 复核。
+任务批准后，用 `manual generate task:<id> --plan --json` 把计划里的动作、风险边界（`write` 停在动作前、`destructive` 不执行）和需要浏览器的场景展示给用户；在现有用户授权范围内执行 `manual generate task:<id> --json`。正式任务文档只能引用 `images/annotated/`，任何 raw、sanitized、缺失图片或结构化事实变化都会阻止发布；发布后可用 `manual verify <task-id>` 复核。
 
 执行候选发现或审批时，先读 [references/task-workflow.md](references/task-workflow.md)。
 
@@ -80,6 +84,8 @@ node <skill>/bin/manual.js generate <task:<id>|page:<id>> --project-root <项目
 | 2 | 参数错误 / 目标歧义 | 把 `candidates` 给用户选，用 `task:` / `page:` 前缀重新运行 |
 
 常用选项：`--plan`（只预览，不执行）、`--copy <文案.json>`（已有文案块）、`--copy-default`（不改写文案）、`--offline`（只用历史证据）、`--refresh`（强制重新采集，仅在用户要求时使用）。
+
+写操作返回 `outcome-unknown` 时，不重试提交。若已有会话确实出现结果，按 [质量与证据工作流](references/quality-workflow.md) 修正断言，并用 `capture-task --reconcile-url` 核对既有会话，再离线生成指南。
 
 `fixture-cleanup-required`（退出码 3）表示测试数据清理失败：告诉用户数据仍在测试环境的哪个命名空间，确认环境可用后 `resume`。
 
@@ -286,8 +292,7 @@ DOM 连续静止 → 冻结 CSS 动画与过渡 → 静置回流。
 
 ### 输出
 
-`<docs.imagesDir>/raw/<page-id>.png`，默认就是 `docs/manual/images/raw/chat.png`。
-截图跟手册一起入库——手册要引用它们。
+原图仅保存在 `.manual/artifacts/raw/`。手册只引用 `docs/manual/images/annotated/` 中经隐私处理并带完整性记录的发布图。
 
 ---
 
@@ -384,7 +389,7 @@ confidence: inferred        # none → inferred（源码推断）→ verified（
 browser:                    # ← capture 拥有
   verified: true
   lastCapture: '2026-09-16T08:22:59.772Z'
-  screenshot: docs/manual/images/raw/membership.png
+  screenshot: .manual/artifacts/raw/pages/membership.png
   url: http://localhost:3000/membership
   viewport: 1440x900
   deviceScaleFactor: 2

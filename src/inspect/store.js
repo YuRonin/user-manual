@@ -126,6 +126,7 @@ function renderPageYaml(page) {
     title: page.title ?? null,
     purpose: page.purpose ?? null,
     detectedActions: page.detectedActions || [],
+    ...(page.guide ? { guide: page.guide } : {}),
     entry: page.entry,
     source: page.source || [],
     dependencies: {

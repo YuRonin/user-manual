@@ -61,7 +61,8 @@ function pageSections(pack) {
     section('overview', 'overview', { pageRefs }),
     section('location', 'location', { pageRefs, captureRefs: pack.artifacts.map((a) => a.captureId) }),
   ];
-  if (pack.actions.length) out.push(section('actions', 'actions-inferred', { pageRefs }));
+  for (const item of pack.guide || []) out.push(section(`guide.${item.id}`, 'instructions', { pageRefs, taskRefs: item.taskId ? [item.taskId] : [] }));
+  if (!pack.guide?.length && pack.actions.length) out.push(section('actions', 'actions-inferred', { pageRefs }));
   return out;
 }
 

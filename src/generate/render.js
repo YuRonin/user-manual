@@ -65,7 +65,7 @@ const TEMPLATES = {
 };
 
 // render-2：正文按稳定块 ID 分段（<!-- manual:block id=… --> … <!-- /manual:block -->），供人工编辑保护的三方合并定位（P3-06）。
-const TEMPLATE_VERSION = 'render-2';
+const TEMPLATE_VERSION = 'render-3';
 
 class TemplateError extends Error {
   constructor(language) {
@@ -170,7 +170,12 @@ function renderPage(pack, copy = {}, { draft = false } = {}) {
   const location = [t.route(pack.route)];
   for (const artifact of pack.artifacts) location.push('', `![${pack.title}](${artifact.markdownHref})`);
   const blocks = [['overview', overview], ['location', location]];
-  if (pack.actions.length) blocks.push(['actions', [`## ${t.actionsInferred}`, '', ...pack.actions.map((action, i) => `${i + 1}. ${action.text}`)]]);
+  for (const [i, item] of (pack.guide || []).entries()) {
+    const lines = [`## ${i + 1}. ${item.title}`, '', item.instruction];
+    if (item.taskId) lines.push('', `[查看操作指南](tasks/${item.taskId}.md)`);
+    blocks.push([`guide.${item.id}`, lines]);
+  }
+  if (!pack.guide?.length && pack.actions.length) blocks.push(['actions', [`## ${t.actionsInferred}`, '', ...pack.actions.map((action, i) => `${i + 1}. ${action.text}`)]]);
   // 草稿头部的来源注释只用于人工核对，不进入正式文档
   return assemble(blocks, draft ? [...pack.headerComments, ''] : []);
 }

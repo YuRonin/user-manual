@@ -27,7 +27,7 @@ const SPECS = {
   },
   capture: {
     required: ['projectId', 'scenarioId', 'scenarioRevision', 'checkpoint', 'viewport', 'dpr', 'browser', 'captureMode', 'readinessPolicy'],
-    optional: ['sourceHash', 'locale', 'timezone', 'platform', 'identityRevision'],
+    optional: ['sourceHash', 'locale', 'timezone', 'platform', 'identityRevision', 'capturePipelineVersion'],
     // 缺失时不阻止生成 key，但必须显式记录不确定性（C09）。
     uncertain: ['environment', 'deployedBuild', 'dataRevision'],
   },

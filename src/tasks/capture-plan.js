@@ -67,15 +67,21 @@ function buildCapturePlan(task, pages, options = {}) {
     }
     const states = { default: implicitDefaultState(page), ...(page.states || {}) };
     const before = step.stateBefore || 'default';
-    const after = step.stateAfter || before;
+    const nextPage = task.steps[index + 1]?.page;
+    const pageAfter = step.pageAfter || (!step.stateAfter && step.action?.type === 'click' && nextPage && nextPage !== step.page ? nextPage : step.page);
+    const destination = byId.get(pageAfter);
+    if (!destination || (destination.lifecycle && destination.lifecycle !== 'active')) errors.push(`steps[${index}].pageAfter 不存在或不可用: ${pageAfter}`);
+    const afterStates = destination ? { default: implicitDefaultState(destination), ...(destination.states || {}) } : {};
+    const after = step.stateAfter || (pageAfter !== step.page ? 'default' : before);
     if (!states[before]) errors.push(`steps[${index}].stateBefore 不存在: ${before}`);
-    if (!states[after]) errors.push(`steps[${index}].stateAfter 不存在: ${after}`);
+    if (!afterStates[after]) errors.push(`steps[${index}].stateAfter 不存在: ${after}`);
     // 状态必须能被断言验证：空断言的状态无法区分"到达"与"没到达"。
-    for (const id of new Set([before, after])) {
-      if (states[id] && !(states[id].assertions || []).length) errors.push(`页面 ${page.id} 的状态 ${id} 没有任何断言。`);
+    for (const state of [states[before], afterStates[after]]) {
+      if (state && !(state.assertions || []).length) errors.push(`页面 ${page.id} 的状态没有任何断言。`);
     }
     const risk = effectiveRisk(task, step);
     let execution = executionFor(risk);
+    if (risk === 'write' && !options.preflight && require('./write-policy').permitsWrite(task, step, options.config)) execution = 'auto';
     let riskReason = null;
     if (execution === 'auto' && step.risk === undefined && step.action?.type !== 'inspect' && RISKY_TARGET_RE.test(targetLabel(step.action))) {
       execution = 'stop-before-action';
@@ -89,16 +95,20 @@ function buildCapturePlan(task, pages, options = {}) {
       route: page.route,
       stateBefore: before,
       beforeState: states[before] ? { id: before, ...states[before] } : null,
+      pageAfter,
+      requires: step.requires || [],
+      assertionTimeoutMs: step.assertionTimeoutMs || null,
+      ...(risk === 'write' && execution === 'auto' ? { writeOrigin: task.writeAuthorization.origin, writeExpiresAt: task.writeAuthorization.expiresAt } : {}),
       action: step.action,
       risk,
       riskReason,
-      replay: step.replay || REPLAY_BY_EXECUTION[execution],
+      replay: risk === 'write' ? 'requires-input' : (step.replay || REPLAY_BY_EXECUTION[execution]),
       execution,
       willExecute: execution === 'auto',
       // 跨页面步骤：执行前的 stateBefore 断言会确认已经到达新页面
       crossPage: step.page !== previousPage,
-      expectedState: execution === 'auto' ? { id: after, ...states[after] } : null,
-      capture: step.capture || null,
+      expectedState: execution === 'auto' ? { id: after, page: pageAfter, ...afterStates[after] } : null,
+      capture: step.capture ? { ...step.capture, annotations: (step.capture.annotations || []).map(a => ({ ...a, label: String(index + 1) })) } : null,
     };
   }).filter(Boolean);
 

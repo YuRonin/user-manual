@@ -72,7 +72,8 @@ async function derivePublished({ captured, rawPath, sanitizedPath, publishedPath
   const derived = await deriveImages({
     rawPath, geometry, redactions: detection.redactions, annotations: layout.annotations, theme, sanitizedPath, publishedPath: published,
   });
-  return { redactions: detection.redactions, annotations: layout.annotations, privacy, derived, published: !!published };
+  const quality = require('../generate/quality').imageQuality(captured, detection.redactions, layout.annotations);
+  return { redactions: detection.redactions, annotations: layout.annotations, privacy, quality, derived, published: !!published };
 }
 
 module.exports = { captureStable, derivePublished, sameGeometry, MAX_ATTEMPTS };

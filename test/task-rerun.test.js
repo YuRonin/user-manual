@@ -118,7 +118,7 @@ async function step(name, fn) {
       await ok(root, ['verify', 'edit-profile', '--json']);
       const firstVerify = task().lastVerification.at;
       await ok(root, ['verify', 'edit-profile', '--json']);
-      assert.strictEqual(task().status, 'verified');
+      assert.strictEqual(task().status, 'generated');
       assert.ok(task().lastVerification.at >= firstVerify);
     });
 
@@ -137,7 +137,7 @@ async function step(name, fn) {
 
     await step('stale 不是死路：inspect 标记后生成被阻止，重新 capture 清除标记', async () => {
       taskStore.writeTask(state, { ...task(), stale: { reasons: ['page-changed:profile'], detectedAt: new Date().toISOString() } });
-      assert.strictEqual(task().status, 'verified', '标记不改写 status');
+      assert.strictEqual(task().status, 'generated', '标记不改写 status');
       await failsWith(root, ['generate-task', 'edit-profile', '--json'], /evidence-stale.*page-changed:profile/, 4);
       await capture();
       assert.strictEqual(task().stale, null);

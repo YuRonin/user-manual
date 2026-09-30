@@ -341,9 +341,11 @@ function draft(ctx, task) {
   const subject = task.input.subject;
   if (subject.type === 'task') {
     const built = draftTask({ projectRoot: ctx.projectRoot, config: ctx.config, taskId: subject.id });
+    for (const warning of built.pack.quality?.warnings || []) process.stderr.write(`[manual quality] ${warning}\n`);
     return { outputs: [fileRef(ctx, built.draftFile), fileRef(ctx, built.factsFile)], copyBlocks: built.copyBlocks };
   }
   const built = draftPage({ projectRoot: ctx.projectRoot, config: ctx.config, pageId: subject.id });
+  for (const warning of built.pack.quality?.warnings || []) process.stderr.write(`[manual quality] ${warning}\n`);
   return { outputs: [fileRef(ctx, built.draftPath), fileRef(ctx, built.factsFile)] };
 }
 
@@ -374,6 +376,10 @@ function publishDoc(ctx, task) {
   const force = !!task.input.force;
   const common = { projectRoot: ctx.projectRoot, config: ctx.config, prepared, force, runId: ctx.runId, hooks: publicationHooks() };
   const published = subject.type === 'task' ? publishTaskFinal({ ...common, taskId: subject.id }) : publishPageFinal(common);
+  try {
+    const catalog = require('../generate/handbook').updateHandbook({ projectRoot: ctx.projectRoot, config: ctx.config });
+    if (catalog.warning) process.stderr.write(`[manual quality] ${catalog.warning}\n`);
+  } catch (error) { process.stderr.write(`[manual quality] catalog-update-failed: ${error.message}\n`); }
   return { outputs: [{ kind: 'release', ref: `${manualIdFor(subject.type, subject.id)}/${published.release.id}` }] };
 }
 

@@ -37,7 +37,7 @@ const TERMINAL = new Set(['succeeded', 'cancelled']);
 const DEFAULT_BUDGET = {
   navigationMs: 30000,
   assertionMs: 10000,
-  scenarioActiveMs: 120000,
+  scenarioActiveMs: 8 * 60 * 1000,
   runActiveMs: 30 * 60 * 1000,
   maxActions: 200,
 };

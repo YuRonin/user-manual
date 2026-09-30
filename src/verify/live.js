@@ -273,9 +273,13 @@ async function verifyLive({ projectRoot, config, target, session, timeoutMs = DE
       const before = await collectAssertions(provider, step.beforeState?.assertions || [], { scope: 'scenario-state', phase: 'before', stepId: step.id, idPrefix: `${step.page}:${step.stateBefore}`, timeoutMs });
       checks.push(...before);
       if (before.some((c) => c.outcome !== 'passed')) { record.status = 'failed'; stopped = 'blocked-by-failure'; continue; }
+      const required = await collectAssertions(provider, step.requires || [], { scope: 'scenario-state', phase: 'before', stepId: step.id, idPrefix: `${step.id}:requires`, timeoutMs });
+      checks.push(...required);
+      if (required.some(c => c.outcome !== 'passed')) { record.status = 'failed'; stopped = 'precondition-failed'; continue; }
       try {
-        await provider.performAction(step.action);
-        await provider.waitUntilReady();
+        const actionResult = await provider.performAction(step.action);
+        if (actionResult?.resolution?.fallback) checks.push(check(`locator:${step.id}`, 'interaction', 'inconclusive', { stepId: step.id, reason: 'locator-fallback-used' }));
+        await provider.waitUntilReady({ networkIdleTimeout: 1500 });
         checks.push(check(`action:${step.id}`, 'interaction', 'passed', { stepId: step.id, action: step.action?.type || null }));
       } catch (error) {
         checks.push(failedCheck(`action:${step.id}`, 'interaction', error, { stepId: step.id, action: step.action?.type || null, target: step.action?.target?.name || null }));
@@ -283,7 +287,7 @@ async function verifyLive({ projectRoot, config, target, session, timeoutMs = DE
         stopped = 'blocked-by-failure';
         continue;
       }
-      const after = await collectAssertions(provider, step.expectedState?.assertions || [], { scope: 'scenario-state', phase: 'after', stepId: step.id, idPrefix: `${step.page}:${step.expectedState?.id || step.stateBefore}`, timeoutMs });
+      const after = await collectAssertions(provider, step.expectedState?.assertions || [], { scope: 'scenario-state', phase: 'after', stepId: step.id, idPrefix: `${step.pageAfter || step.page}:${step.expectedState?.id || step.stateBefore}`, timeoutMs });
       checks.push(...after);
       record.validations = after.map((c) => ({ assertionId: c.assertionId, phase: 'after', outcome: c.outcome === 'passed' ? 'passed' : 'failed', scope: c.scope, checkedAt: c.checkedAt }));
       record.status = after.some((c) => c.outcome !== 'passed') ? 'failed' : 'executed';

@@ -207,8 +207,12 @@ function checkAuthState(loaded, env, root) {
     if (!state) {
       return [check('auth', 'warn', `认证档案 ${auth.activeProfile} 尚未保存`, { profile: auth.activeProfile, storageStatus: 'missing', cacheRoot: root, hint: `manual auth login --profile ${auth.activeProfile}` })];
     }
-    return [check('auth', 'ok', `认证档案 ${auth.activeProfile} 已保存（未做线上验证）`, {
+    const metadata = cache.publicMetadata(state, cache.cacheFileFor(ref));
+    const trusted = metadata.validationStatus === 'validated' && metadata.cookieExpiry !== 'expired';
+    return [check('auth', trusted ? 'ok' : 'warn', `认证档案 ${auth.activeProfile} 已保存（未做线上验证）`, {
       profile: auth.activeProfile, storageStatus: 'stored', updatedAt: state.updatedAt, cacheRoot: root,
+      validationStatus: metadata.validationStatus, cookieExpiry: metadata.cookieExpiry,
+      ...(!trusted ? { hint: '配置 auth.identityAssertions 并运行 manual auth login 验证身份；已保存的缓存不保证在线有效。' } : {}),
     })];
   } catch (error) {
     return [check('auth', 'fail', `认证档案 ${auth.activeProfile} 无法读取`, {

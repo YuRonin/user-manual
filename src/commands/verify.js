@@ -133,7 +133,7 @@ async function run(argv) {
     if (!values.all) {
       const [only] = results;
       if (only.errors.length) return fail(only.errors);
-      if (json) process.stdout.write(JSON.stringify({ ok: true, status: 'verified', scope: 'artifacts', onlineChecked: false, verificationId: only.report.id || null, ...only.extra }, null, 2) + '\n');
+      if (json) process.stdout.write(JSON.stringify({ ok: true, status: 'artifact-verified', scope: 'artifacts', onlineChecked: false, businessVerified: false, verificationId: only.report.id || null, ...only.extra }, null, 2) + '\n');
       else process.stdout.write(`[manual verify] ${only.report.target} 产物验证通过（离线：不代表当前网页行为未变，在线检查用 --live）。\n`);
       return 0;
     }

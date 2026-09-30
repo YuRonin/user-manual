@@ -31,7 +31,7 @@
 | Placeholder 原文 | 请输入你的问题 |
 | 错误提示原文 | 登录已过期，请重新登录 |
 | 路由 | `/chat`、`/artifact/:id` |
-| 文件名 / 路径 | `images/raw/chat.png` |
+| 文件名 / 路径 | `images/annotated/chat.png` |
 | 数字与单位 | 1440×900、2 倍图、50 MB |
 
 ### 典型错误

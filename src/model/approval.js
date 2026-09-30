@@ -40,6 +40,9 @@ function approvalScope(task, pages = []) {
     return {
       id: step.id,
       pageId: pageId ?? null,
+      ...(step.pageAfter ? { pageAfter: step.pageAfter } : {}),
+      ...(step.requires ? { requires: step.requires } : {}),
+      ...(step.assertionTimeoutMs ? { assertionTimeoutMs: step.assertionTimeoutMs } : {}),
       action: step.action ?? null,
       valueRef: step.valueRef ?? step.action?.valueRef ?? null,
       risk: effectiveRisk(task, step) ?? null,
@@ -47,7 +50,7 @@ function approvalScope(task, pages = []) {
       stateBefore: before,
       stateAfter: after,
       beforeAssertions: stateAssertions(pagesById, pageId, before),
-      afterAssertions: stateAssertions(pagesById, pageId, after),
+      afterAssertions: stateAssertions(pagesById, step.pageAfter || pageId, after),
     };
   });
   const claims = (task.completion?.claims || task.completionClaims || []).map((claim) => ({
@@ -61,6 +64,7 @@ function approvalScope(task, pages = []) {
     entryAssertions: stateAssertions(pagesById, task.entryPage, 'default'),
     environment: task.environment ?? null,
     fixtures: task.fixtures ?? null,
+    ...(task.writeAuthorization ? { writeAuthorization: task.writeAuthorization } : {}),
     preconditions: task.preconditions ?? [],
     steps,
     claims,
@@ -119,7 +123,7 @@ function pageObservationRevision(page) {
 
 /** 任务涉及的页面及其当前可观察定义 revision。 */
 function pageRevisionsFor(task, pages = []) {
-  const ids = new Set([task.entryPage, ...(task.steps || []).map((step) => step.pageId ?? step.page)].filter(Boolean));
+  const ids = new Set([task.entryPage, ...(task.steps || []).flatMap((step) => [step.pageId ?? step.page, step.pageAfter])].filter(Boolean));
   const out = {};
   for (const page of pages) if (ids.has(page.id)) out[page.id] = pageObservationRevision(page);
   return out;
