@@ -10,6 +10,11 @@ function imageQuality(captured, redactions, annotations) {
 function taskQuality(task,evidence = {}) {
   const warnings=[];
   if (!task.completion?.claims?.length) warnings.push('completion-unbound: 完成结果没有可验证的断言。');
+  const lastStepId=task.steps?.at(-1)?.id;
+  const claims=task.completion?.claims||[];
+  if (lastStepId && claims.length && claims.every(claim => claim.checkpoint && claim.checkpoint!==lastStepId)) {
+    warnings.push(`completion-before-final-step: 所有完成声明都停在最后一步 ${lastStepId} 之前；核对任务目标是否已被证明。`);
+  }
   for (const step of task.steps) {
     const name=step.action?.target?.name;
     const quoted=[...String(step.instruction).matchAll(/「([^」]+)」/g)].map(m=>m[1]);

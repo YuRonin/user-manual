@@ -398,7 +398,9 @@ class PlaywrightBrowserProvider extends BrowserProvider {
     }
 
     // 2. 网络空闲。轮询和 WebSocket 会让它永远达不到，所以超时是可接受的。
-    const networkIdleTimeout = Math.min(opts.timeout, opts.networkIdleTimeout ?? 15000);
+    // Long polling / SSE pages often never reach networkidle. Fonts, images and
+    // DOM stability are checked below, so keep this optional signal bounded.
+    const networkIdleTimeout = Math.min(opts.timeout, opts.networkIdleTimeout ?? 3000);
     try {
       await page.waitForLoadState('networkidle', { timeout: networkIdleTimeout });
       steps.networkIdle = 'ok';

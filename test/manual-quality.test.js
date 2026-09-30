@@ -26,6 +26,13 @@ test('图片遮挡比例产生可读性提示；目录保留人工内容',()=>{
  try { const {updateHandbook}=require('../src/generate/handbook');const config={artifacts:{stateDir:'.manual'},docs:{outputDir:'docs'}};fs.mkdirSync(path.join(root,'docs'));const file=path.join(root,'docs/index.md');fs.writeFileSync(file,'人工内容');assert.equal(updateHandbook({projectRoot:root,config}).updated,false);assert.equal(fs.readFileSync(file,'utf8'),'人工内容');fs.writeFileSync(file,'前言\n<!-- manual:catalog -->old<!-- /manual:catalog -->\n附录');updateHandbook({projectRoot:root,config});assert.match(fs.readFileSync(file,'utf8'),/^前言[\s\S]*附录$/);
  } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
+test('完成声明停在最后一步之前时提示核对任务目标',()=>{
+ const {taskQuality}=require('../src/generate/quality');
+ const t=task();t.completion.claims=[{id:'opened',text:'已打开积分中心',checkpoint:'open',assertionRefs:['opened']}];
+ assert.match(taskQuality(t).warnings.join('\n'),/completion-before-final-step/);
+ t.completion.claims[0].checkpoint='filter';
+ assert.doesNotMatch(taskQuality(t).warnings.join('\n'),/completion-before-final-step/);
+});
 test('预演不截图、不发布；缺少数据前提时动作不执行',async()=>{
  const {executeCapturePlan}=require('../src/tasks/executor');const fs=require('fs'),os=require('os'),path=require('path');const root=fs.mkdtempSync(path.join(os.tmpdir(),'manual-preflight-'));let actions=0;
  const provider={open:async url=>({status:200,finalUrl:url}),waitUntilReady:async()=>({warnings:[]}),assertCondition:async a=>{if(a.type==='visible')throw Error('empty');return {ok:true}},performAction:async()=>{actions++;return{}},screenshot:async()=>{throw Error('must not screenshot')},close:async()=>{}};

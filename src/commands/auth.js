@@ -9,10 +9,11 @@ const { createProvider } = require('../browser');
 const cache = require('../auth/cache');
 const { establishSession } = require('../auth/session');
 const { authDisabled, resolveCapabilities } = require('../auth/identity');
+const { checkAuthOnline } = require('../auth/check');
 const { probeRedirect, redirectWarning } = require('../util/redirect-probe');
 
 const KNOWN_FLAGS = new Set([
-  'projectRoot', 'profile', 'loginUrl', 'verifyPath', 'timeout', 'json', 'help',
+  'projectRoot', 'profile', 'loginUrl', 'verifyPath', 'path', 'timeout', 'json', 'help',
 ]);
 const HELP = `
 manual auth —— 管理可跨 worktree 复用的浏览器认证档案
@@ -20,6 +21,7 @@ manual auth —— 管理可跨 worktree 复用的浏览器认证档案
 用法:
   manual auth login [--profile <名称>] [--login-url <url>] [--verify-path <路径>]
   manual auth status [--profile <名称>] [--json]
+  manual auth check [--profile <名称>] [--path <受保护路径>] [--json]
   manual auth clear [--profile <名称>] [--json]
 `.trim();
 
@@ -30,15 +32,16 @@ function cacheRoot() {
 function output(payload, { json, action }) {
   if (json) process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
   else if (action === 'status') process.stdout.write(`[manual auth] ${payload.profile}: ${payload.storageStatus || payload.status}（验证: ${payload.validationStatus || 'unknown'}${payload.lastValidatedAt ? ` @ ${payload.lastValidatedAt}` : ''}）\n`);
+  else if (action === 'check') process.stdout.write(`[manual auth] ${payload.profile}: ${payload.status}（在线已检查；${payload.validationStatus}）\n`);
   else if (action === 'clear') process.stdout.write(`[manual auth] ${payload.profile}: ${payload.cleared ? '已清除' : '没有缓存'}\n`);
   else process.stdout.write(`[manual auth] ${payload.profile}: 登录状态已保存。\n`);
   return 0;
 }
 
 function fail(error, json) {
-  const payload = { ok: false, reason: error.code || 'auth-error', message: String(error.message || error) };
+  const payload = { ok: false, reason: error.code || error.reason || 'auth-error', message: String(error.message || error), ...(error.hint ? { hint: error.hint } : {}) };
   if (json) process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
-  else process.stderr.write(`[manual auth] ${payload.message}\n`);
+  else process.stderr.write(`[manual auth] ${payload.message}${payload.hint ? `\n[manual auth] ${payload.hint}` : ''}\n`);
   return exitCodeFor(error);
 }
 
@@ -52,8 +55,8 @@ async function run(argv) {
   if (values.help) { process.stdout.write(HELP + '\n'); return 0; }
   if (unknownFlags.length) return usageExit(fail(new Error(`未知参数: ${unknownFlags.join(', ')}`), json));
   const action = positional[0];
-  if (!['login', 'status', 'clear'].includes(action) || positional.length !== 1) {
-    return usageExit(fail(new Error('需要指定 login、status 或 clear。'), json));
+  if (!['login', 'status', 'check', 'clear'].includes(action) || positional.length !== 1) {
+    return usageExit(fail(new Error('需要指定 login、status、check 或 clear。'), json));
   }
 
   const projectRoot = path.resolve(values.projectRoot || process.cwd());
@@ -90,6 +93,13 @@ async function run(argv) {
     } catch (error) {
       return fail(error, json);
     }
+  }
+
+  if (action === 'check') {
+    try {
+      const result = await checkAuthOnline({ config, profile, path: values.path || values.verifyPath || config.auth.verifyPath });
+      return output({ ok: true, profile, ...result }, { json, action });
+    } catch (error) { return fail(error, json); }
   }
 
   let capabilities;

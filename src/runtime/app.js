@@ -167,6 +167,7 @@ function runStatus({ projectRoot, runId = null }) {
   if (!state) throw new RuntimeError('run-not-found', `找不到 Run ${runId}。`);
   const events = project.runStore.events(runId);
   const planTasks = new Map(state.plan.tasks.map((t) => [t.id, t]));
+  const { waitingHint } = require('../cli/run-report');
   return {
     run: {
       id: state.run.id, command: state.run.command, target: state.run.target, status: state.run.effectiveStatus,
@@ -178,6 +179,7 @@ function runStatus({ projectRoot, runId = null }) {
       reason: planTasks.get(t.id)?.reason || null,
       reuse: t.reuse ? { from: t.reuse.from, observedAt: t.reuse.observedAt, onlineChecked: false } : null,
       error: t.error ? { code: t.error.code, policy: t.error.policy, message: t.error.message } : null,
+      next: t.effectiveStatus === 'waiting_input' && t.error ? waitingHint(runId, { id: t.id, code: t.error.code }, state.plan) : null,
       outputs: t.outputRefs.map((r) => ({ kind: r.kind, ref: r.ref || null })),
     })),
     cache: state.plan.summary?.cache || [],

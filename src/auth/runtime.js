@@ -51,6 +51,7 @@ function prepareAuth(config, options = {}) {
     storageState: state?.storageState || null,
     generation: state ? state.generation : null,
     identityRevision: identityRevision(config, profile),
+    validatedAt: state?.identityRevision === identityRevision(config, profile) ? (state?.validatedAt || null) : null,
     capabilities,
   };
 }
@@ -129,7 +130,8 @@ async function refreshAuth(provider, auth, { onlyIfChanged = false } = {}) {
     if (onlyIfChanged && JSON.stringify(storageState) === JSON.stringify(auth.storageState)) {
       return { updated: false, warning: null };
     }
-    const written = cache.writeState(auth.ref, { origin: auth.expectedOrigin, storageState, identityRevision: auth.identityRevision }, { expectedGeneration: auth.generation });
+    const written = cache.writeState(auth.ref, { origin: auth.expectedOrigin, storageState, identityRevision: auth.identityRevision,
+      validatedAt: auth.validatedAt }, { expectedGeneration: auth.generation });
     auth.storageState = storageState;
     auth.generation = written.generation;
     return { updated: true, warning: null };
