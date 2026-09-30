@@ -111,7 +111,9 @@ function writeState(ref, value, { fsImpl = fs, now = () => new Date(), expectedG
       generation: currentGeneration + 1,
       // 非秘密的稳定引用：身份断言定义的 hash，不保存账号等明文
       identityRevision: value.identityRevision ?? current?.identityRevision ?? null,
-      validatedAt: value.validatedAt ?? null,
+      validatedAt: value.validatedAt === undefined
+        ? (value.identityRevision === current?.identityRevision ? (current?.validatedAt ?? null) : null)
+        : value.validatedAt,
       storageState: value.storageState,
     };
     try {

@@ -32,6 +32,7 @@ const { RuntimeError } = require('./errors');
 const { requestModel } = require('./model-request');
 const { checkpoint, publicationHooks } = require('./faults');
 const { copyFromResponse } = require('./model-response');
+const { checkAuthOnline } = require('../auth/check');
 
 const rel = (ctx, file) => path.relative(ctx.projectRoot, file).replace(/\\/g, '/');
 
@@ -168,6 +169,27 @@ function publicationGate(ctx, task) {
 
 // ---------------------------------------------------------------- capture / derive-image
 
+async function authCheck(ctx, task) {
+  const current = currentSubjectInputs(ctx, task.input.subject);
+  if (current.captureKey !== task.input.captureKey) throw new RuntimeError('run-input-changed', '认证预检对应的采集输入已变化，需要重新规划。');
+  const profile = task.input.authProfile;
+  const checked = (status) => ({ outputs: [{ kind: 'value', sha256: sha256Hex(JSON.stringify({ profile, status })), value: { profile, status } }] });
+  if (!ctx.mode.browserAllowed) return checked('offline');
+  if (ctx.mode.read && ctx.cacheStore) {
+    const found = lookup({
+      store: ctx.cacheStore, keyInfo: { kind: 'capture', key: current.captureKey, input: current.captureKeyInput, uncertainty: current.captureUncertainty },
+      subject: `capture:${subjectKey(task.input.subject)}`, mode: ctx.mode, projectRoot: ctx.projectRoot, stateDirAbs: ctx.stateDirAbs,
+      requiredScopes: ['page-identity'], privacy: { audience: ctx.config.privacy?.audience || 'public' }, cachePolicy: ctx.config.cache, now: ctx.now,
+    });
+    if (found.hit) return checked('cache-hit');
+  }
+  if (!ctx.authChecks.has(profile)) {
+    const result = await checkAuthOnline({ config: ctx.config, profile, sessionFactory: () => ctx.session(), closeSession: false });
+    ctx.authChecks.set(profile, result);
+  }
+  return checked(ctx.authChecks.get(profile).status);
+}
+
 function scopesPassed(records) {
   const all = records.flatMap((r) => r.validations || []);
   const scopes = [...new Set(all.map((v) => v.scope))];
@@ -239,6 +261,13 @@ async function capture(ctx, task) {
     warnings.push(`缓存在执行前失效（${found.reason}），重新采集。`);
   } else if (!ctx.mode.browserAllowed) {
     throw offlineMissError({ reason: 'not-found' });
+  }
+
+  // 规划时缓存可用、执行时失效：采集前补做在线认证检查。
+  const authProfile = current.scenario.authProfile;
+  if (ctx.config.auth?.enabled !== false && authProfile !== 'anonymous' && ctx.config.auth?.verifyPath &&
+      ctx.config.auth?.identityAssertions?.length && !ctx.authChecks.has(authProfile)) {
+    await authCheck(ctx, { input: { subject, authProfile, captureKey: current.captureKey } });
   }
 
   if (subject.type === 'page') {
@@ -388,6 +417,7 @@ function validate(ctx, task) {
 }
 
 const HANDLERS = {
+  'auth-check': authCheck,
   'fixture-setup': fixtureSetup,
   'fixture-cleanup': fixtureCleanup,
   analyze,

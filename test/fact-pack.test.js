@@ -58,6 +58,12 @@ test('动作句由结构化动作确定性生成；说明文字是可润色的�
   assert.match(md, /验证范围：只实际执行到第 2 步/);
   assert.strictEqual(validateTaskFinal(md, { title: p.title, stepIds: p.steps.map((s) => s.id), images, uiTexts: [...md.matchAll(/「([^」]+)」/g)].map((m) => m[1]), claims: p.claims, factPack: p }).ok, true);
 });
+test('步骤说明重复动作句时只保留新增信息', () => {
+  const p = pack({ task: task({ steps: [{ id: 'save', instruction: '点击「保存」。提交后等待确认。', page: 'profile', action: { type: 'click', target: { role: 'button', name: '保存' } } }] }), evidence: { steps: [{ id: 'save', status: 'verified' }] }, images: [] });
+  const md = renderTask(p);
+  assert.match(md, /1\. 点击「保存」\n\n   提交后等待确认。/);
+  assert.doesNotMatch(md, /点击「保存」。提交后/);
+});
 
 test('没有可见名称的目标回退到已批准的步骤说明，不编造名称', () => {
   const p = pack({ task: task({ steps: [{ id: 'x', instruction: '点击右下角的悬浮按钮', page: 'profile', action: { type: 'click', target: { testId: 'fab' } } }] }), evidence: { steps: [] }, images: [] });

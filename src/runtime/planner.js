@@ -32,6 +32,7 @@ const { captureKey } = require('../cache/keys');
 const { lookup } = require('../cache/lookup');
 const { resolveTarget } = require('./resolve-target');
 const { RuntimeError } = require('./errors');
+const { taskQuality } = require('../generate/quality');
 
 const PLAN_VERSION = 1;
 // update 复用 generate 的节点（采集 → 草稿 → 文案 → 门槛 → 发布），目标集合由影响分析给出。
@@ -151,6 +152,7 @@ function taskInputs({ task, model, config, scenario }) {
     boundaries,
     executesWrites: built.ok && built.plan.steps.some(s => s.risk === 'write' && s.willExecute),
     stepCount: (task.steps || []).length,
+    qualityWarnings: taskQuality(task).warnings.filter((warning) => warning.startsWith('completion-')),
   };
 }
 
@@ -242,6 +244,8 @@ function collectPlanningInputs({ projectRoot, config, base, targets, mode, cache
     templateVersion: TEMPLATE_VERSION,
     imageInputs: imageInputsOf(config),
     capabilities: capabilitiesFor(provider, config.browser.activeProvider),
+    auth: { enabled: config.auth?.enabled !== false, verifyPath: config.auth?.verifyPath || null,
+      hasAssertions: !!config.auth?.identityAssertions?.length },
     mode: { name: mode.name, browserAllowed: mode.browserAllowed },
     targets: resolved.map((target) => ({ type: target.type, id: target.id, ref: target.ref, key: subjectKey(target.variantScenarioId ? { ...target, scenarioId: target.variantScenarioId } : target), ...(target.scenarioId ? { scenarioId: target.scenarioId } : {}), ...(target.manualId ? { manualId: target.manualId } : {}) })),
     subjects,
@@ -264,7 +268,7 @@ function plan(snapshot, policy) {
   const copy = policy.copy || { mode: 'model' };
   const errors = [];
   const nodes = [];
-  const summary = { actions: [], browserScenarios: 0, riskBoundaries: [], cache: [], waitingFor: [] };
+  const summary = { actions: [], browserScenarios: 0, riskBoundaries: [], cache: [], waitingFor: [], warnings: [] };
   const captureByKey = new Map();
   const multi = snapshot.targets.length > 1;
   const idOf = (kind, index) => (multi ? `${kind}-t${index + 1}` : kind);
@@ -275,6 +279,7 @@ function plan(snapshot, policy) {
     const subject = s.subject;
     if (command !== 'capture' && target.scenarioId) errors.push(`scenario 目标只用于 capture：${target.ref}`);
     errors.push(...s.planErrors);
+    for (const warning of s.qualityWarnings || []) summary.warnings.push(`${subjectKey(subject)}：${warning}`);
     const needed = subject.type === 'task' ? TASK_CAPABILITIES : CAPTURE_CAPABILITIES;
     const missing = missingCapabilities(snapshot.capabilities, needed);
     if (missing.length) errors.push(`capability-missing: 当前 Browser Provider 不支持 ${missing.join(', ')}。`);
@@ -294,12 +299,26 @@ function plan(snapshot, policy) {
         summary.waitingFor.push({ node: idOf('approve', index), input: 'approval', message: s.approvalMessage });
       }
     }
+    // ---- 认证预检：缓存命中时 handler 直接跳过；缓存执行前失效时也会在线检查。
+    // 节点始终存在，避免缓存状态变化导致 resume 的 DAG 输入漂移。
+    let authId = null;
+    const authProfile = s.scenario.authProfile;
+    if (snapshot.auth?.enabled && authProfile !== 'anonymous' && snapshot.auth.verifyPath && snapshot.auth.hasAssertions) {
+      authId = add({
+        id: idOf('auth-check', index), kind: 'auth-check', dependsOn: gateDeps.slice(),
+        inputHash: revisionOf({ subject, captureKey: s.captureKey, authProfile, verifyPath: snapshot.auth.verifyPath }),
+        input: { subject, authProfile, captureKey: s.captureKey },
+        retry: { maxAttempts: 1, replay: 'safe' }, reason: 'auth-before-browser-if-cache-misses',
+      });
+    } else if (snapshot.auth?.enabled && authProfile !== 'anonymous' && !s.cache?.hit && snapshot.mode.browserAllowed) {
+      summary.warnings.push(`${subjectKey(subject)}：缺少 auth.verifyPath 或 auth.identityAssertions；运行时只能检测登录跳转，不能提前确认身份。`);
+    }
     // ---- fixture-setup（hook 类 Fixture：独立任务，写入按 Run 划分的测试数据；cleanup 在采集结束后无论成败都执行）
     let setupId = null;
     // 计划不随缓存命中与否改变形状（resume 时按原计划比较输入）：hook Fixture 总是先准备、后清理
     if (s.fixture?.kind === 'hook' && !captureByKey.get(s.captureKey)) {
       setupId = add({
-        id: idOf('fixture-setup', index), kind: 'fixture-setup', dependsOn: gateDeps.slice(),
+        id: idOf('fixture-setup', index), kind: 'fixture-setup', dependsOn: [...gateDeps, ...(authId ? [authId] : [])],
         inputHash: revisionOf({ fixture: s.fixture, scenario: s.scenario.id, subject }),
         input: { subject, fixture: s.fixture, scenarioId: s.scenario.id },
         // setup 写测试数据：中断后结果不明，不盲目重放（cleanup 按命名空间清理）
@@ -318,7 +337,7 @@ function plan(snapshot, policy) {
         ? `cache-hit${cache.stale ? '-stale' : ''}`
         : (cache?.bypassed ? `cache-${cache.bypassed}` : `capture-required:${cache?.reason || 'no-cache'}${cache?.changedFields?.length ? `(${cache.changedFields.join(',')})` : ''}`);
       captureId = add({
-        id: idOf('capture', index), kind: 'capture', dependsOn: [...gateDeps, ...(setupId ? [setupId] : [])],
+        id: idOf('capture', index), kind: 'capture', dependsOn: [...gateDeps, ...(authId ? [authId] : []), ...(setupId ? [setupId] : [])],
         inputHash: revisionOf({ captureKey: s.captureKey, subject }),
         input: {
           subject, captureKey: s.captureKey, scenario: s.scenario,

@@ -87,6 +87,7 @@ async function runRun({ runStore, runId, handlers, context = {}, signal = null, 
   let session = null;
   const ctx = {
     ...context,
+    authChecks: new Map(),
     runId,
     runDir: runStore.runDirFor(runId),
     now: clock,

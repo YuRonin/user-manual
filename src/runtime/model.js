@@ -13,7 +13,7 @@
 const { isSafeId } = require('../model/ids');
 
 // fixture-setup / fixture-cleanup：hook 类 Fixture 的测试数据准备与清理（P3-05）
-const TASK_KINDS = ['inspect', 'analyze', 'capture', 'derive-image', 'draft', 'rewrite', 'validate', 'publish', 'fixture-setup', 'fixture-cleanup'];
+const TASK_KINDS = ['inspect', 'analyze', 'auth-check', 'capture', 'derive-image', 'draft', 'rewrite', 'validate', 'publish', 'fixture-setup', 'fixture-cleanup'];
 const TASK_STATUSES = ['pending', 'running', 'waiting_input', 'succeeded', 'failed', 'interrupted', 'cancelled'];
 const RUN_STATUSES = TASK_STATUSES;
 const REPLAYS = ['safe', 'requires-input', 'unsafe'];

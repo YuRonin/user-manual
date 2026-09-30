@@ -65,7 +65,7 @@ const TEMPLATES = {
 };
 
 // render-2：正文按稳定块 ID 分段（<!-- manual:block id=… --> … <!-- /manual:block -->），供人工编辑保护的三方合并定位（P3-06）。
-const TEMPLATE_VERSION = 'render-3';
+const TEMPLATE_VERSION = 'render-4';
 
 class TemplateError extends Error {
   constructor(language) {
@@ -112,6 +112,17 @@ function blockText(pack, copy, blockId) {
   return pack.blocks[blockId]?.default ?? '';
 }
 
+/** 默认说明若重复动作句开头，只保留它新增的结果说明。 */
+function withoutRepeatedAction(note, sentence, language) {
+  if (!note || note === sentence) return '';
+  if (!note.startsWith(sentence)) return note;
+  let remainder = note.slice(sentence.length).trim().replace(/^[，,。.\s]+/, '');
+  remainder = language === 'zh-CN'
+    ? remainder.replace(/^(并|后)/, '').trim()
+    : remainder.replace(/^(and|then)\s+/i, '').trim();
+  return remainder;
+}
+
 /*
  * 生成块：每个块由成对的注释包围，块外的内容属于人工（ownership=human），生成器从不覆盖。
  * 块 ID 在同一文档内唯一且稳定（与 section / step / claim 身份绑定），不随顺序或文字变化。
@@ -144,8 +155,8 @@ function renderTask(pack, copy = {}) {
   blocks.push(['steps', [`## ${t.steps}`]]);
   pack.steps.forEach((step, index) => {
     const L = [`<!-- step:${step.id} -->`, `${index + 1}. ${step.sentence}`];
-    const note = blockText(pack, copy, `step.${step.id}`);
-    if (note && note !== step.sentence) L.push('', `   ${note}`);
+    const note = withoutRepeatedAction(blockText(pack, copy, `step.${step.id}`), step.sentence, pack.language);
+    if (note) L.push('', `   ${note}`);
     for (const ref of step.artifactRefs) L.push('', `   ![${t.stepAlt(index + 1)}](${hrefOf.get(ref)})`);
     if (step.executed === false) L.push('', `   ${t.notExecuted}`);
     blocks.push([`step.${step.id}`, L]);

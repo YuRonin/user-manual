@@ -38,7 +38,7 @@ const HELP = `
 manual generate —— 生成页面的 Markdown 使用手册
 
 用法:
-  manual generate <目标> [--copy <文案.json> | --copy-default] [--plan] [--offline | --refresh | --no-cache] [--json]
+  manual generate <目标> [更多目标...] [--copy <文案.json> | --copy-default] [--plan] [--offline | --refresh | --no-cache] [--json]
       默认：规划并执行 Runtime —— 按需采集（可复用有效缓存）→ 事实草稿 → 文案 → 发布门槛 → 发布。
       目标：task:<id> / page:<id> / manual:<manualId> / 无前缀的唯一 id。
       需要登录、审批或模型文案时停在 waiting_input（退出码 3），处理后 manual resume <runId>。
@@ -260,11 +260,11 @@ function runFinalize({ projectRoot, config, pageId, finalizeInput, acceptReview,
 
 // ---------------------------------------------------------------- Runtime（默认）
 
-async function runRuntime({ projectRoot, values, target, json }) {
+async function runRuntime({ projectRoot, values, targets, json }) {
   const flags = { offline: values.offline === true, refresh: values.refresh === true, noCache: values.noCache === true };
   try {
     const copy = copyPolicy({ copy: typeof values.copy === 'string' ? values.copy : null, copyDefault: values.copyDefault === true });
-    const options = { projectRoot, command: 'generate', targets: [target], flags, copy, acceptReview: values.acceptReview === true, force: values.force === true };
+    const options = { projectRoot, command: 'generate', targets, flags, copy, acceptReview: values.acceptReview === true, force: values.force === true };
     if (values.plan) return printPlan({ json, planned: planTargets(options) });
     return printRun({ json, result: await startRun(options), label: 'generate' });
   } catch (error) {
@@ -291,6 +291,7 @@ function printPlan({ json, planned }) {
     L.push(`  需要浏览器的场景: ${plan.summary.browserScenarios}`);
     for (const b of plan.summary.riskBoundaries) L.push(`  风险边界: ${b.subject} 在步骤 ${b.stepId} 前停止（${b.execution}）`);
     for (const w of plan.summary.waitingFor) L.push(`  可能等待: ${w.message}`);
+    for (const warning of plan.summary.warnings || []) L.push(`  提示: ${warning}`);
     for (const e of errors) L.push(`  ✗ ${e}`);
     L.push('');
     process.stdout.write(L.join('\n') + '\n');
@@ -317,15 +318,14 @@ function run(argv) {
   if (!positional[0]) {
     return usageExit(fail(['需要指定目标，例如 `manual generate task:edit-profile` 或 `manual generate chat --draft`。'], { json }));
   }
-  if (positional.length > 1) {
-    return usageExit(fail([`一次只能生成一个目标，收到: ${positional.join(', ')}`], { json }));
-  }
+  if (legacy && positional.length > 1) return usageExit(fail(['兼容分阶段命令一次只能处理一个页面；直接运行 `manual generate <目标> [更多目标...]` 可批量生成。'], { json }));
+  if (values.copy && positional.length > 1) return usageExit(fail(['批量生成请用 --copy-default 或默认模型文案流程；--copy 文件只适用于单个目标。'], { json }));
 
   const projectRoot = path.resolve(values.projectRoot || process.cwd());
   if (!fs.existsSync(projectRoot) || !fs.statSync(projectRoot).isDirectory()) {
     return fail([`--project-root 不是一个存在的目录: ${projectRoot}`], { json });
   }
-  if (!legacy) return runRuntime({ projectRoot, values, target: positional[0], json });
+  if (!legacy) return runRuntime({ projectRoot, values, targets: positional, json });
 
   const pageId = positional[0].replace(/^page:/, '');
   const loaded = loadConfig(projectRoot);

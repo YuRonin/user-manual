@@ -42,13 +42,23 @@ npx playwright install chromium
 
 ## 用法
 
-最小流程（普通用户）：
+已有 `.manual/config.yaml` 和页面模型时，直接预览并生成。需要浏览器时 Runtime 自动预检已配置身份断言的登录档案；失效后按返回的 Run ID 登录并继续。
+
+```bash
+node bin/manual.js generate page:chat --plan
+node bin/manual.js generate page:chat page:credits --copy-default
+# 若返回 auth-expired：node bin/manual.js auth login --profile default
+# 随后：node bin/manual.js resume <runId>
+```
+
+首次接入项目时：
 
 ```bash
 # 1. 初始化：同时记录手册面向外部公开还是仅内部使用
 node bin/manual.js init --base-url http://localhost:3000 --audience public
 
-# 受保护页面只需登录一次；命名档案可跨 worktree 复用
+# 受保护页面：在 .manual/config.yaml 设置 auth.verifyPath 和
+# auth.identityAssertions，再运行一次 auth login；后续失效由 Runtime 提前提示。
 node bin/manual.js auth login --profile default
 
 # 2. 扫描页面，AI 读完源码后写回标题 / 用途 / 主要操作
@@ -57,9 +67,9 @@ node bin/manual.js describe --input describe.json
 
 # 3. 一条命令生成：按需用真实浏览器采集（需要项目已经在跑，可复用有效缓存）→ 草稿 → 文案 → 发布
 node bin/manual.js generate page:chat --plan     # 先看计划：动作、风险边界、需要浏览器的场景
-node bin/manual.js generate page:chat            # 需要文案时停在 waiting_input（退出码 3）
-node bin/manual.js run-submit <runId> --request <requestId> --input copy-response.json
-node bin/manual.js resume <runId>                # → docs/manual/chat.md
+node bin/manual.js generate page:chat --copy-default   # 快速生成，不等待模型文案
+# 多篇手册可一次生成，共用 Run 与浏览器会话
+node bin/manual.js generate page:chat page:credits --copy-default
 ```
 
 任务型指南（“怎样完成某件事”）：`discover-tasks` 提出候选 → 人工 `approve-tasks` 确认 → `generate task:<id>`。写操作停在动作前，删除类操作不执行。
@@ -91,6 +101,7 @@ node bin/manual.js gc --apply --expect <planHash>
 |---|---|
 | `status [runId]` | 只读查看 Run：任务状态、等待原因、失败 code、缓存复用来源 |
 | `resume <runId> [--replan]` | 从任务快照继续；输入变了用 `--replan` 创建新 Run |
+| `run-submit <runId> --request <id> --input <响应.json>` | 向等待模型文案的 Run 提交结构化响应，再用 `resume` 继续 |
 | `generate <目标> --offline / --refresh / --no-cache` | 只用历史证据 / 强制重新采集 / 不读写缓存 |
 | `generate <目标> --copy <文案.json> / --copy-default` | 直接提供文案块 / 使用默认文案 |
 | `capture <page-id|task:<id>|scenario:<id>>` | 只采集证据，不生成文档；`scenario:` 采集空状态 / 错误态 / 其他角色 / Fixture 数据 |
