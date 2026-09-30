@@ -9,8 +9,8 @@ const { loadConfig } = require('../config/load');
 const { captureTask } = require('../tasks/capture-usecase');
 const { recordCapture } = require('../runtime/app');
 
-const KNOWN_FLAGS = new Set(['projectRoot', 'json', 'help']);
-const HELP = 'manual capture-task <task-id> [--project-root <路径>] [--json]';
+const KNOWN_FLAGS = new Set(['projectRoot', 'reconcileUrl', 'priorCaptures', 'json', 'help']);
+const HELP = 'manual capture-task <task-id> [--project-root <路径>] [--json]\nmanual capture-task <task-id> --reconcile-url <已有会话URL> --prior-captures <截图ID,截图ID,...> [--json]';
 function fail(errors, json) {
   const list = Array.isArray(errors) ? errors : [errors];
   if (json) process.stdout.write(JSON.stringify({ ok: false, errors: list }, null, 2) + '\n');
@@ -24,17 +24,19 @@ async function run(argv) {
   if (values.help) { process.stdout.write(HELP + '\n'); return 0; }
   if (unknownFlags.length) return usageExit(fail(`未知参数: ${unknownFlags.join(', ')}`, json));
   if (positional.length !== 1) return usageExit(fail('需要一个 task-id。', json));
+  if (!!values.reconcileUrl !== !!values.priorCaptures) return usageExit(fail('核对已有会话时必须同时提供 --reconcile-url 和 --prior-captures。', json));
   const projectRoot = path.resolve(values.projectRoot || process.cwd());
   const loaded = loadConfig(projectRoot);
   if (!loaded.ok) return fail(loaded.errors, json);
-  return captureTaskTarget({ projectRoot, config: loaded.config, taskId: positional[0], json });
+  const reconcile = values.reconcileUrl ? { sessionUrl: values.reconcileUrl, priorCaptureIds: String(values.priorCaptures).split(',').filter(Boolean) } : null;
+  return captureTaskTarget({ projectRoot, config: loaded.config, taskId: positional[0], json, reconcile });
 }
 
 /** capture-task 与 `capture task:<id>` 共用：执行用例 → 登记缓存 → 输出。 */
-async function captureTaskTarget({ projectRoot, config, taskId, json }) {
+async function captureTaskTarget({ projectRoot, config, taskId, json, reconcile = null }) {
   let result;
   try {
-    result = await captureTask({ projectRoot, config, taskId });
+    result = await captureTask({ projectRoot, config, taskId, reconcile });
   } catch (error) {
     if (error.errors) { fail(error.errors, json); return exitCodeForCode(error.code); }
     if (error.name === 'TaskExecutionError') {

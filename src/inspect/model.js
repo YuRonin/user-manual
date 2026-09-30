@@ -197,6 +197,7 @@ function mergePage(existing, scanned) {
     title: existing.title ?? null,
     purpose: existing.purpose ?? null,
     detectedActions: Array.isArray(existing.detectedActions) ? existing.detectedActions : [],
+    ...(existing.guide ? { guide: existing.guide } : {}),
     entry: scanned.entry,
     source,
     dependencies: normalizeDependencies(scanned.dependencies),

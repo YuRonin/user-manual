@@ -245,3 +245,9 @@ Chromium（Linux 另装 `fonts-noto-cjk`），先跑 doctor，再依次跑 unit 
 - [架构与演进约定](docs/ARCHITECTURE.md)
 - [正逆索引设计](docs/plans/2026-09-17-forward-reverse-index-design.md)
 - [正逆索引实施计划](docs/plans/2026-09-17-forward-reverse-index.md)
+
+## 手册质量改进
+
+页面支持 guide 操作说明和编号标注；任务支持 pageAfter、requires 和限定测试环境的 writeAuthorization。`manual plan-capture <id> --live` 可在发布前检查安全步骤。离线验证不会再把任务标为业务已验证；Runtime 发布后更新 index.md 导航。详见 [质量工作流](references/quality-workflow.md)。
+
+仅安装当前客户端入口：`node bin/install-compat.js --client codex`（支持 claude / all，默认 all 保持兼容）。

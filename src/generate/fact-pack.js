@@ -87,6 +87,7 @@ function buildTaskFactPack({ task, evidence, images, claims, language }) {
     steps,
     claims: claims.map(({ id, text, status, assertionRefs, checkpoint, evidence: refs }) => ({ id, text, status, assertionRefs, checkpoint: checkpoint ?? null, evidence: refs })),
     artifacts: artifacts.map(({ stepId, ...rest }) => ({ ...rest, stepId })),
+    quality: require('./quality').taskQuality(task, evidence),
     scope: { firstSkipped },
     // 证据来源：simulated（Fixture 模拟数据）时文档必须说明，声明不能写成"已验证"
     ...(evidence?.provenance && evidence.provenance !== 'live' ? { provenance: evidence.provenance } : {}),
@@ -117,10 +118,12 @@ function buildPageFactPack({ page, image = null, language, headerComments = [] }
     title: page.title,
     route: page.route,
     actions,
+    guide: page.guide || [],
+    quality: { completeness: page.guide?.length ? 'instructions' : 'overview-only', warnings: page.guide?.length ? [] : ['page-instructions-missing'] },
     artifacts,
     headerComments,
     blocks: { intro: { kind: 'intro', default: page.purpose || '' } },
-    allowedUiTerms: [...new Set([...actions.flatMap((a) => uiTerms(a.text)), ...uiTerms(page.purpose)])],
+    allowedUiTerms: [...new Set([...actions.flatMap((a) => uiTerms(a.text)), ...uiTerms(page.purpose), ...(page.guide || []).flatMap(g => uiTerms(g.instruction))])],
   });
 }
 

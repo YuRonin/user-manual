@@ -13,6 +13,7 @@ const { spawnSync } = require('child_process');
 const path = require('path');
 
 const FILES = [
+  'manual-quality.test.js',
   'revision.test.js',
   'model-schema.test.js',
   'init.test.js',

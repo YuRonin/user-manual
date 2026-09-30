@@ -101,6 +101,7 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
         spec,
         validations: validations.filter((v) => v && v.scope && v.outcome),
         // 未做隐私检测的截图明确记为 not-run，发布时按 unknown 处理
+        ...(safe ? { quality: safe.quality } : {}),
         privacy: safe ? safe.privacy : { status: 'not-run' },
         redactions: safe ? safe.redactions.map(({ kind, rect, result }) => ({ kind, rect, result })) : [],
         ...(options.fixture ? { fixture: options.fixture } : {}),
@@ -114,7 +115,8 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
     });
     store.setLatest({ [`task:${plan.taskId}:${step.id}:${timing}`]: record.id });
     const artifactOf = (kind) => record.artifacts.find((a) => a.kind === kind) || null;
-    const output = { captureId: record.id, raw: path.join(projectRoot, artifactOf('raw').path), timing, bytes: captured.shot.bytes, meta: captured.shot.meta };
+    const output = { captureId: record.id, raw: path.join(projectRoot, artifactOf('raw').path), timing, bytes: captured.shot.bytes,
+      meta: { ...captured.shot.meta, url: sanitizeUrl(captured.shot.meta?.url) } };
     if (safe) {
       output.sanitized = path.join(projectRoot, artifactOf('sanitized').path);
       output.annotated = artifactOf('published')?.path || null;
@@ -122,6 +124,7 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
       // 实际执行过检测的记录；缺这条记录的截图在发布时按 privacy unknown 处理。
       output.privacy = safe.privacy;
       output.annotations = safe.annotations;
+      output.quality = safe.quality;
       output.derivedFromRawHash = safe.derived.rawHash;
       output.geometryHash = safe.derived.geometryHash;
       output.rendererVersion = safe.derived.rendererVersion;
@@ -131,6 +134,104 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
   } catch (error) {
     store.abort(staging);
     throw error;
+  }
+}
+
+function screenshotFromRecord(record, projectRoot) {
+  const artifact = (kind) => record.artifacts.find((item) => item.kind === kind);
+  return {
+    captureId: record.id,
+    raw: path.join(projectRoot, artifact('raw').path),
+    sanitized: artifact('sanitized') ? path.join(projectRoot, artifact('sanitized').path) : null,
+    annotated: artifact('published')?.path || null,
+    timing: record.subject.timing,
+    privacy: record.privacy,
+    quality: record.quality,
+    sha256: artifact('published')?.sha256 || null,
+  };
+}
+
+function commitEvidenceManifest(stateDir, result) {
+  result.canonicalCaptureRefs = result.steps.flatMap((step) => step.screenshots.map((shot) => shot.captureId)).filter(Boolean);
+  const manifestText = JSON.stringify(result, null, 2) + '\n';
+  writeText(path.join(stateDir, 'artifacts', 'manifests', `${result.taskId}--evidence.json`), manifestText);
+  const manifestFile = path.join(stateDir, 'artifacts', 'manifests', `${result.taskId}--evidence--${sha256Hex(manifestText).slice(0, 16)}.json`);
+  if (!fs.existsSync(manifestFile)) writeText(manifestFile, manifestText);
+  result.manifestFile = manifestFile;
+  return result;
+}
+
+/** Read-only recovery after a write with unknown outcome. Never repeats task actions. */
+async function reconcileCapturePlan(plan, provider, options) {
+  const { baseUrl, stateDir, projectRoot, sessionUrl, priorCaptureIds } = options;
+  const expected = new URL(joinUrl(baseUrl, plan.entry.route));
+  const session = new URL(sessionUrl);
+  if (session.origin !== expected.origin || session.pathname !== expected.pathname || !session.searchParams.has('session')) {
+    throw new TaskExecutionError('invalid-reconcile-url', '会话 URL 必须属于当前站点与任务入口，且包含 session 参数。');
+  }
+  const shots = new Map();
+  const store = createCaptureStore({ projectRoot, stateDirAbs: stateDir });
+  let previousObservedAt = 0;
+  for (const id of priorCaptureIds) {
+    const record = store.read(id);
+    if (!record || record.kind !== 'task-step' || record.subject.taskId !== plan.taskId || record.modelRevision !== plan.modelRevision ||
+        record.scenarioId !== plan.scenario?.id || record.finalUrl?.origin !== session.origin ||
+        record.privacy?.status !== 'passed' || record.provenance?.mode !== 'live' ||
+        record.validations?.some((v) => v.outcome !== 'passed')) {
+      throw new TaskExecutionError('invalid-prior-capture', `此前截图 ${id} 与本次任务或隐私规则不匹配。`);
+    }
+    const step = plan.steps.find((item) => item.id === record.subject.stepId);
+    if (!step || step.risk === 'write' || record.subject.timing !== step.capture?.timing) {
+      throw new TaskExecutionError('invalid-prior-capture', `此前截图 ${id} 的步骤不匹配。`);
+    }
+    const observedAt = Date.parse(record.observedAt);
+    if (!Number.isFinite(observedAt) || observedAt < previousObservedAt ||
+        (previousObservedAt && observedAt - previousObservedAt > 30 * 60 * 1000) || shots.has(step.id)) {
+      throw new TaskExecutionError('invalid-prior-capture', '此前截图不属于同一条有序采集链。');
+    }
+    previousObservedAt = observedAt;
+    shots.set(step.id, record);
+  }
+  const expectedShots = plan.steps.slice(0, -1).filter((step) => step.capture).map((step) => step.id);
+  if (expectedShots.some((id) => !shots.has(id)) || shots.size !== expectedShots.length) {
+    throw new TaskExecutionError('incomplete-prior-captures', '缺少提交前的完整截图，无法核对这次任务。');
+  }
+  const last = plan.steps.at(-1);
+  if (!last || last.risk !== 'write' || !last.capture || !last.expectedState?.assertions?.length) {
+    throw new TaskExecutionError('invalid-reconcile-plan', '只支持核对最后一步为写操作且有结果断言的任务。');
+  }
+  try {
+    const opened = await provider.open(sessionUrl);
+    await provider.waitUntilReady({ networkIdleTimeout: 1500 });
+    const observation = await provider.currentObservation();
+    const navigation = validateNavigation({ requestedUrl: sessionUrl, openResult: opened, observation, expected: {} });
+    const filled = plan.steps.slice(0, -1).reverse().find((step) => step.action?.type === 'fill' && typeof step.action.value === 'string');
+    const promptValidations = filled ? await runAssertions(provider, [{ type: 'visible', target: { text: filled.action.value } }], {
+        scope: 'scenario-state', phase: 'after', stepId: filled.id, idPrefix: `${filled.id}:session-match`,
+        timeoutMs: DEFAULT_ASSERTION_TIMEOUT_MS,
+      }) : [];
+    const validations = [...navigation.validations, ...promptValidations, ...await runAssertions(provider, last.expectedState.assertions, {
+      scope: 'scenario-state', phase: 'after', stepId: last.id,
+      idPrefix: `${last.pageAfter}:${last.expectedState.id}`, timeoutMs: last.assertionTimeoutMs || DEFAULT_ASSERTION_TIMEOUT_MS,
+    })];
+    const result = {
+      version: 1, taskId: plan.taskId, capturedAt: new Date().toISOString(),
+      url: joinUrl(baseUrl, plan.entry.route), finalUrl: sanitizeUrl(navigation.finalUrl),
+      provenance: 'live', reconciliation: { mode: 'existing-session', priorCaptureIds, actionReplayed: false },
+      entryIdentity: 'url-only', validations, steps: plan.steps.slice(0, -1).map((step) => {
+        const record = shots.get(step.id);
+        return { id: step.id, page: step.page, status: record && !isUrlOnly(step.expectedState?.assertions) ? 'verified' : 'observed', action: step.action,
+          screenshots: record ? [screenshotFromRecord(record, projectRoot)] : [], validations: record?.validations || [] };
+      }),
+    };
+    const shot = await takeScreenshot(provider, stateDir, plan, last, last.capture.timing, options, validations);
+    result.steps.push({ id: last.id, page: last.page, status: 'verified', action: last.action, pageState: last.expectedState.id,
+      screenshots: [shot], validations });
+    const committed = commitEvidenceManifest(stateDir, result);
+    if (options.authRuntime?.refresh) await options.authRuntime.refresh(provider);
+    return committed;
+  } finally {
+    if (options.ownsProvider !== false) await provider.close();
   }
 }
 
@@ -148,6 +249,7 @@ async function executeCapturePlan(plan, provider, options) {
   };
   const timeoutMs = options.assertionTimeoutMs ?? DEFAULT_ASSERTION_TIMEOUT_MS;
   let activeStep = null;
+  let writeStarted = false;
   try {
     // 入口：HTTP / 最终 URL / 页面状态 → 页面身份断言。全部基于等待之后重新读取的页面事实。
     if (options.routes?.length) {
@@ -165,7 +267,7 @@ async function executeCapturePlan(plan, provider, options) {
     } catch (error) {
       throw options.authRuntime?.classify ? options.authRuntime.classify(error) : error;
     }
-    result.finalUrl = navigation.finalUrl;
+    result.finalUrl = sanitizeUrl(navigation.finalUrl);
     result.validations = [...navigation.validations];
     const entryAssertions = (plan.entry.assertions || []).filter((assertion) => assertion.type !== 'url');
     result.validations.push(...await runAssertions(provider, entryAssertions, {
@@ -175,6 +277,7 @@ async function executeCapturePlan(plan, provider, options) {
 
     for (const step of plan.steps) {
       activeStep = step;
+      options.onProgress?.(step.id);
       const record = { id: step.id, page: step.page, status: null, action: step.action, screenshots: [], validations: [] };
       result.steps.push(record);
 
@@ -187,25 +290,39 @@ async function executeCapturePlan(plan, provider, options) {
         }
         break;
       }
+      try {
+        record.validations.push(...await runAssertions(provider, step.requires || [], { scope: 'scenario-state', phase: 'before', stepId: step.id, idPrefix: `${step.id}:requires`, timeoutMs }));
+      } catch (cause) {
+        throw Object.assign(new Error(`步骤 ${step.id} 的数据或界面前提不满足：${cause.message}`), { code: 'precondition-failed', validation: cause.validation });
+      }
+      if (step.writeOrigin) {
+        const current = await provider.currentObservation();
+        if (new URL(current.url).origin !== step.writeOrigin || Date.parse(step.writeExpiresAt) <= Date.now()) throw Object.assign(new Error('写操作授权已过期或不匹配当前站点。'), { code: 'write-authorization-expired' });
+      }
       // 动作之前先确认处于 stateBefore；不满足时绝不执行动作。
       record.validations.push(...await runAssertions(provider, step.beforeState?.assertions || [], {
         scope: 'scenario-state', phase: 'before', stepId: step.id, idPrefix: `${step.page}:${step.stateBefore}`, timeoutMs,
       }));
-      if (step.capture?.timing === 'before') {
+      if (!options.preflight && step.capture?.timing === 'before') {
         record.screenshots.push(await takeScreenshot(provider, stateDir, plan, step, 'before', options, [...result.validations, ...record.validations]));
       }
+      if (step.risk === 'write') writeStarted = true;
       record.target = await provider.performAction(step.action);
-      await provider.waitUntilReady();
+      await provider.waitUntilReady({ networkIdleTimeout: 1500 });
       const afterAssertions = step.expectedState?.assertions || [];
       record.validations.push(...await runAssertions(provider, afterAssertions, {
-        scope: 'scenario-state', phase: 'after', stepId: step.id, idPrefix: `${step.page}:${step.expectedState?.id || step.stateBefore}`, timeoutMs,
+        scope: 'scenario-state', phase: 'after', stepId: step.id, idPrefix: `${step.pageAfter || step.page}:${step.expectedState?.id || step.stateBefore}`, timeoutMs: step.assertionTimeoutMs || timeoutMs,
       }));
       // 只有非 URL 断言通过才算验证了状态；只有 URL 的旧状态记为 observed。
       record.status = afterAssertions.length > 0 && !isUrlOnly(afterAssertions) ? 'verified' : 'observed';
       record.pageState = step.expectedState?.id || step.stateBefore;
-      if (step.capture?.timing === 'after') {
+      if (!options.preflight && step.capture?.timing === 'after') {
         record.screenshots.push(await takeScreenshot(provider, stateDir, plan, step, 'after', options, [...result.validations, ...record.validations]));
       }
+    }
+    if (options.preflight) {
+      if (options.authRuntime?.refresh) await options.authRuntime.refresh(provider);
+      return { ...result, onlineChecked: true, publicationReady: false };
     }
     // 旧 evidence manifest 仅作兼容视图：每张截图条目都由对应 Capture 记录生成，
     // canonicalCaptureRefs 是权威引用，不能与记录各自维护。
@@ -223,12 +340,12 @@ async function executeCapturePlan(plan, provider, options) {
     return result;
   } catch (cause) {
     let diagnostic = null;
-    if (activeStep) {
+    if (activeStep && !options.preflight) {
       try { diagnostic = await diagnosticScreenshot(provider, stateDir, plan, activeStep); } catch (_) { /* best effort */ }
     }
     throw new TaskExecutionError(
       // 保留原始分类（CaptureError.reason / 定位与断言 code / Playwright 超时）；没有分类的才记 step-failed。
-      errorCode(cause) || 'step-failed',
+      writeStarted ? 'outcome-unknown' : (errorCode(cause) || 'step-failed'),
       `任务 ${plan.taskId} 的步骤 ${activeStep?.id || '(entry)'} 失败: ${cause.message}`,
       {
         task: plan.taskId,
@@ -247,4 +364,4 @@ async function executeCapturePlan(plan, provider, options) {
   }
 }
 
-module.exports = { executeCapturePlan, TaskExecutionError, joinUrl };
+module.exports = { executeCapturePlan, reconcileCapturePlan, TaskExecutionError, joinUrl };

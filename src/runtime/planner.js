@@ -63,6 +63,7 @@ function captureKeyFields({ config, subject, scenario, sourceHash, captureMode, 
   const provider = config.browser.providers[config.browser.activeProvider] || {};
   const authProfile = scenario.authProfile || config.auth?.activeProfile;
   return {
+    capturePipelineVersion: 'quality-2',
     projectId: config.project.id || config.auth?.cacheKey || config.project.name,
     environment: `${scenario.environment || 'local'}@${new URL(config.project.baseUrl).origin}`,
     deployedBuild: config.runtime?.deployedBuild,
@@ -137,7 +138,7 @@ function fixtureInputs(stateDirAbs, config, scenario) {
 
 function taskInputs({ task, model, config, scenario }) {
   const approval = approvalState(task, model.pages);
-  const built = buildCapturePlan(task, model.pages, { scenario });
+  const built = buildCapturePlan(task, model.pages, { scenario, config });
   const boundaries = built.ok ? built.plan.steps.filter((step) => !step.willExecute).map((step) => ({ stepId: step.id, execution: step.execution, risk: step.risk, reason: step.riskReason })) : [];
   return {
     approval,
@@ -148,6 +149,7 @@ function taskInputs({ task, model, config, scenario }) {
     // 审批之外的计划错误（缺页面、断言为空、缺路由参数……）在规划期就报告。
     planErrors: built.ok || approval !== APPROVAL_STATES.APPROVED ? [] : built.errors,
     boundaries,
+    executesWrites: built.ok && built.plan.steps.some(s => s.risk === 'write' && s.willExecute),
     stepCount: (task.steps || []).length,
   };
 }
@@ -234,6 +236,7 @@ function collectPlanningInputs({ projectRoot, config, base, targets, mode, cache
   return {
     version: PLAN_VERSION,
     modelRevision: base.modelRevision,
+    capturePipelineVersion: 'quality-2',
     projectId: config.project.id || null,
     language: config.docs.language,
     templateVersion: TEMPLATE_VERSION,
@@ -322,7 +325,7 @@ function plan(snapshot, policy) {
           ...(subject.type === 'task' ? { scopeHash: s.scopeHash, definitionRevision: s.definitionRevision, pageRevisions: s.pageRevisions } : { observationRevision: s.observationRevision }),
         },
         reuse,
-        retry: { maxAttempts: 3, replay: 'safe' },
+        retry: s.executesWrites ? { maxAttempts: 1, replay: 'requires-input' } : { maxAttempts: 3, replay: 'safe' },
         reason,
       });
       captureByKey.set(s.captureKey, captureId);

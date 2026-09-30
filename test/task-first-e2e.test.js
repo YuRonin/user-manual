@@ -58,7 +58,7 @@ async function completeTask(root, stateDir, taskId) {
 
   result = runSync(['verify', taskId, '--project-root', root, '--json']);
   assert.strictEqual(result.status, 0, result.stdout + result.stderr);
-  assert.strictEqual(require('../src/tasks/store').readTask(stateDir, taskId).status, 'verified');
+  assert.strictEqual(require('../src/tasks/store').readTask(stateDir, taskId).status, 'generated');
   return evidence;
 }
 

@@ -182,6 +182,12 @@ function validateEntry(entry, index, knownIds, errors) {
     }
   }
 
+  if (entry.guide !== undefined) {
+    const checked = require('../model/schema').validatePage({ id: entry.id, route: '/', guide: entry.guide });
+    if (!checked.ok) errors.push(...checked.errors.map(e => `${where}.${e.path}: ${e.message}`));
+    else { patch.guide = entry.guide; touched = true; }
+  }
+
   if (entry.source !== undefined) {
     if (!Array.isArray(entry.source) || entry.source.some((s) => typeof s !== 'string')) {
       errors.push(`${where}.source 需要是字符串数组。`);
@@ -221,6 +227,7 @@ function validateEntry(entry, index, knownIds, errors) {
 function applyPatch(page, patch) {
   const next = {
     ...page,
+    ...(patch.guide !== undefined ? { guide: patch.guide } : {}),
     title: patch.title !== undefined ? patch.title : page.title,
     purpose: patch.purpose !== undefined ? patch.purpose : page.purpose,
     detectedActions: patch.detectedActions !== undefined ? patch.detectedActions : (page.detectedActions || []),

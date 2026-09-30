@@ -48,7 +48,7 @@ function prepareVerify({ root, config, task, pages = [], manual, markdown, facts
     return { ok: false, errors: [`document-stale: 正式文档基于较早的采集，重新生成并定稿后再验证。`] };
   }
   // 验证可以重复执行；status 与 lastVerification 只记录最近一次结果（兼容投影，不是验证的前置条件）。
-  const nextTask = { ...task, status: 'verified', lastVerification: { at: new Date().toISOString(), result: 'passed', scope: 'artifacts' } };
+  const nextTask = { ...task, status: 'generated', lastVerification: { at: new Date().toISOString(), result: 'passed', scope: 'artifacts', onlineChecked: false, businessVerified: false } };
   const checked = validateTaskFinal(markdown, facts);
   if (!checked.ok) return { ok: false, errors: [...releaseErrors, ...checked.errors] };
   // 图片按正式文档所在目录解析，核对产物位置、hash 与隐私记录（与 finalize 同一门槛）。

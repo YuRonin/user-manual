@@ -16,7 +16,7 @@ const { scopeHash, pageRevisionsFor } = require('../model/approval');
 const { deriveTaskScenario } = require('../scenarios/model');
 const { resolveScenario } = require('../scenarios/store');
 const { buildCapturePlan, writeCapturePlan } = require('./capture-plan');
-const { executeCapturePlan } = require('./executor');
+const { executeCapturePlan, reconcileCapturePlan } = require('./executor');
 const { prepareAuth, authRuntimeFor } = require('../auth/runtime');
 const { RuntimeError } = require('../runtime/errors');
 const { prepareScenarioData } = require('../scenarios/fixtures');
@@ -54,7 +54,7 @@ function taskProjection(task, pages, { capturedAt, captureIds, manifestRelative,
  * @param {object} [p.session]  BrowserSession；缺省时自行创建并关闭 provider
  * @returns {Promise<{ task, updatedTask, plan, planFile, evidence, scenario }>}
  */
-async function captureTask({ projectRoot, config, taskId, session = null, runId = null }) {
+async function captureTask({ projectRoot, config, taskId, session = null, runId = null, preflight = false, reconcile = null }) {
   const stateDir = path.join(projectRoot, config.artifacts.stateDir);
   const projectStore = createProjectStore({ stateDirAbs: stateDir, docsOutputDir: config.docs.outputDir });
   let base;
@@ -65,12 +65,12 @@ async function captureTask({ projectRoot, config, taskId, session = null, runId 
   const derived = deriveTaskScenario(task, pages, config);
   const scenario = resolveScenario(stateDir, derived, { stepIds: (task.steps || []).map((step) => step.id) });
   if (!scenario.ok) throw inputError('invalid-scenario', scenario.errors);
-  const built = buildCapturePlan(task, pages, { scenario: scenario.scenario });
+  const built = buildCapturePlan(task, pages, { scenario: scenario.scenario, config, preflight });
   if (!built.ok) {
     const APPROVAL_CODES = { pending: 'approval-required', 'legacy-unverified': 'approval-required', 'scope-changed': 'scope-changed', rejected: 'approval-rejected' };
     throw inputError(APPROVAL_CODES[built.code] || 'invalid-plan', built.errors);
   }
-  const planFile = writeCapturePlan(stateDir, built.plan);
+  const planFile = preflight ? null : writeCapturePlan(stateDir, built.plan);
 
   const profileId = config.capture.activeProfile;
   const providerId = config.browser.activeProvider;
@@ -79,7 +79,9 @@ async function captureTask({ projectRoot, config, taskId, session = null, runId 
   // Fixture 先过环境策略；Scenario 的身份决定认证档案（匿名 / 成员 / 管理员各自隔离）
   const data = prepareScenarioData({ stateDirAbs: stateDir, config, scenario: scenario.scenario, runId });
   const auth = prepareAuth(config, { profile: scenario.scenario.authProfile });
-  const execute = (provider, ownsProvider) => executeCapturePlan(built.plan, provider, {
+  const execute = (provider, ownsProvider) => (reconcile ? reconcileCapturePlan : executeCapturePlan)(built.plan, provider, {
+    preflight,
+    onProgress: (step) => process.stderr.write(`[manual capture] ${taskId}: ${step}\n`),
     routes: data.routes,
     provenanceMode: data.mode,
     fixture: data.fixture,
@@ -92,6 +94,7 @@ async function captureTask({ projectRoot, config, taskId, session = null, runId 
     // BrowserSession 负责写回认证（成功总是写，失败只在凭据变化时写）并关闭 Context
     authRuntime: authRuntimeFor(auth, { refresh: ownsProvider }),
     ownsProvider,
+    ...(reconcile ? { sessionUrl: reconcile.sessionUrl, priorCaptureIds: reconcile.priorCaptureIds } : {}),
   });
   let evidence;
   const warnings = [];
@@ -104,6 +107,7 @@ async function captureTask({ projectRoot, config, taskId, session = null, runId 
     evidence = await execute(provider, true);
   }
 
+  if (preflight) return { task, plan: built.plan, evidence, preflight: true };
   const updatedTask = taskProjection(task, pages, {
     capturedAt: evidence.capturedAt,
     captureIds: evidence.canonicalCaptureRefs,

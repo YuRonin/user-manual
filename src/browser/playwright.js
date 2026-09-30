@@ -398,7 +398,7 @@ class PlaywrightBrowserProvider extends BrowserProvider {
     }
 
     // 2. 网络空闲。轮询和 WebSocket 会让它永远达不到，所以超时是可接受的。
-    const networkIdleTimeout = Math.min(opts.timeout, 15000);
+    const networkIdleTimeout = Math.min(opts.timeout, opts.networkIdleTimeout ?? 15000);
     try {
       await page.waitForLoadState('networkidle', { timeout: networkIdleTimeout });
       steps.networkIdle = 'ok';
@@ -540,25 +540,28 @@ class PlaywrightBrowserProvider extends BrowserProvider {
   locatorFor(target) {
     if (!this.page) throw new Error('定位元素之前必须先 open()。');
     if (!target || typeof target !== 'object') throw new Error('缺少语义目标。');
-    if (target.role && target.name) return this.page.getByRole(target.role, { name: target.name, exact: true });
-    if (target.label) return this.page.getByLabel(target.label, { exact: true });
-    if (target.text) return this.page.getByText(target.text, { exact: true });
-    if (target.testId) return this.page.getByTestId(target.testId);
-    if (target.selector) return this.page.locator(target.selector);
+    const root = target.within ? this.locatorFor(target.within) : this.page;
+    if (target.role && target.name) return root.getByRole(target.role, { name: target.name, exact: target.exact !== false });
+    if (target.label) return root.getByLabel(target.label, { exact: target.exact !== false });
+    if (target.text) return root.getByText(target.text, { exact: target.exact !== false });
+    if (target.testId) return root.getByTestId(target.testId);
+    if (target.selector) return root.locator(target.selector);
     throw new Error('目标需要 role+name、label、text、testId 或 selector。');
   }
 
   async uniqueVisibleLocator(target) {
-    const locator = this.locatorFor(target);
-    const count = await locator.count();
-    const visible = [];
-    for (let index = 0; index < count; index++) {
-      const item = locator.nth(index);
-      if (await item.isVisible().catch(() => false)) visible.push(item);
+    const strategies = [target, ...(target.alternatives || [])];
+    for (const [index, strategy] of strategies.entries()) {
+      const locator = this.locatorFor({ ...strategy, within: strategy.within || target.within });
+      const visible = [];
+      for (let i = 0, count = await locator.count(); i < count; i++) {
+        const item = locator.nth(i);
+        if (await item.isVisible().catch(() => false)) visible.push(item);
+      }
+      if (visible.length > 1) throw Object.assign(new Error(`目标元素匹配到 ${visible.length} 个可见结果，请限定所在区域。`), { code: 'target-ambiguous' });
+      if (visible.length === 1) { this.lastResolution = { strategyIndex: index, fallback: index > 0 }; return visible[0]; }
     }
-    if (visible.length === 0) throw Object.assign(new Error('目标元素不存在或不可见。'), { code: 'target-not-visible' });
-    if (visible.length > 1) throw Object.assign(new Error(`目标元素匹配到 ${visible.length} 个可见结果。`), { code: 'target-ambiguous' });
-    return visible[0];
+    throw Object.assign(new Error('目标元素不存在或不可见；检查前置数据、空结果和页面状态。'), { code: 'target-not-visible' });
   }
 
   async performAction(action) {
@@ -572,7 +575,7 @@ class PlaywrightBrowserProvider extends BrowserProvider {
     else if (action.type === 'check') await locator.check();
     else if (action.type === 'uncheck') await locator.uncheck();
     else if (action.type !== 'inspect') throw new Error(`不支持的交互类型: ${action.type}`);
-    return { target: action.target, rect };
+    return { target: action.target, rect, resolution: this.lastResolution };
   }
 
   async assertCondition(assertion) {
