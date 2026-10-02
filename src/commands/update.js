@@ -218,7 +218,7 @@ async function runUpdate({ projectRoot, config, values, json, copy, project }) {
     ...textLines({ analysis, targets: planned.ok, retirement: selected.retirement, blocked }),
     ...outcomes.map((o) => `  结果  ${o.target}: ${o.result === 'updated' ? '已更新' : `未更新，保留上一版（${o.code || o.status}）`}`),
   ];
-  printRun({ json, result, label: 'update', extra: { ...impactBody(analysis), targets: outcomes, blocked, retirement: selected.retirement }, lines });
+  printRun({ json, result, label: 'update', projectRoot, extra: { ...impactBody(analysis), targets: outcomes, blocked, retirement: selected.retirement }, lines });
   return finalCode;
 }
 

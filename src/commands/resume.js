@@ -30,7 +30,7 @@ async function run(argv) {
   }
   const projectRoot = path.resolve(values.projectRoot || process.cwd());
   try {
-    return printRun({ json, result: await resumeRun({ projectRoot, runId: positional[0], replan: values.replan === true }), label: 'resume' });
+    return printRun({ json, result: await resumeRun({ projectRoot, runId: positional[0], replan: values.replan === true }), label: 'resume', projectRoot });
   } catch (error) {
     return printRuntimeError({ json, error, label: 'resume' });
   }

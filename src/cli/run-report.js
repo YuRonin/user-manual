@@ -6,6 +6,26 @@
  */
 
 const { EXIT, exitCodeForRun, exitCodeForCode } = require('./output');
+const path = require('path');
+
+function publishedDocuments(plan, summary, projectRoot, docsOutputDir) {
+  if (!projectRoot) return [];
+  if (!docsOutputDir) {
+    const loaded = require('../config/load').loadConfig(projectRoot);
+    if (!loaded.ok) return [];
+    docsOutputDir = loaded.config.docs.outputDir;
+  }
+  const succeeded = new Set(summary.succeeded || []);
+  return (plan?.tasks || [])
+    .filter((task) => task.kind === 'publish' && succeeded.has(task.id))
+    .map((task) => {
+      const subject = task.input?.subject;
+      if (!subject || !['page', 'task'].includes(subject.type)) return null;
+      const relativePath = path.join(docsOutputDir, ...(subject.type === 'task' ? ['tasks'] : []), `${subject.id}.md`);
+      return { subject: `${subject.type}:${subject.id}`, path: path.join(projectRoot, relativePath) };
+    })
+    .filter(Boolean);
+}
 
 function waitingHint(runId, waiting, plan = null) {
   if (waiting.code === 'model-input-required') return `按请求文件处理后：manual run-submit ${runId} --request <requestId> --input <响应.json>，再 manual resume ${runId}`;
@@ -21,9 +41,11 @@ function waitingHint(runId, waiting, plan = null) {
   return `处理后运行 manual resume ${runId}`;
 }
 
-function printRun({ json, result, label = 'generate', extra = {}, lines = [] }) {
+function printRun({ json, result, label = 'generate', projectRoot = null, docsOutputDir = null, extra = {}, lines = [] }) {
   const { runId, summary, plan } = result;
   const code = exitCodeForRun(summary);
+  const documents = publishedDocuments(plan, summary, projectRoot, docsOutputDir);
+  const warnings = plan?.summary?.warnings || [];
   if (json) {
     process.stdout.write(JSON.stringify({
       ok: summary.status === 'succeeded',
@@ -37,6 +59,8 @@ function printRun({ json, result, label = 'generate', extra = {}, lines = [] }) 
       interrupted: summary.interrupted,
       cache: plan?.summary?.cache || [],
       riskBoundaries: plan?.summary?.riskBoundaries || [],
+      documents,
+      warnings,
       ...extra,
     }, null, 2) + '\n');
     return code;
@@ -46,6 +70,8 @@ function printRun({ json, result, label = 'generate', extra = {}, lines = [] }) 
     L.push(`  ${item.hit ? '复用' : '采集'} ${item.subject}：${item.reason}${item.observedAt ? `（观察于 ${item.observedAt}，未在线确认）` : ''}`);
   }
   if (summary.succeeded.length) L.push(`  已完成: ${summary.succeeded.join(', ')}`);
+  for (const document of documents) L.push(`  文档 ${document.subject}: ${document.path}`);
+  for (const warning of warnings) L.push(`  提示: ${warning}`);
   for (const w of summary.waiting) L.push(`  等待 ${w.id}（${w.code}）: ${w.message}`, `    → ${waitingHint(runId, w, plan)}`);
   for (const f of summary.failed) L.push(`  失败 ${f.id}（${f.code}）: ${f.message}`);
   if (summary.interrupted.length) L.push(`  中断: ${summary.interrupted.join(', ')}（manual resume ${runId} 继续）`);
@@ -67,4 +93,4 @@ function printRuntimeError({ json, error, label }) {
   return exitCodeForCode(error.code);
 }
 
-module.exports = { printRun, printRuntimeError, waitingHint };
+module.exports = { printRun, printRuntimeError, waitingHint, publishedDocuments };

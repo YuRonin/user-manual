@@ -101,9 +101,13 @@ async function setup(baseUrl) {
       const out = await expectExit(root, ['generate', 'task:edit-profile', '--copy-default'], 0);
       assert.strictEqual(out.status, 'succeeded');
       assert.deepStrictEqual(out.succeeded, ['capture', 'draft', 'validate', 'publish']);
-      assert.ok(fs.existsSync(path.join(root, 'docs', 'manual', 'tasks', 'edit-profile.md')));
+      const taskDocument = path.join(root, 'docs', 'manual', 'tasks', 'edit-profile.md');
+      assert.ok(fs.existsSync(taskDocument));
+      assert.deepStrictEqual(out.documents, [{ subject: 'task:edit-profile', path: taskDocument }]);
+      assert.ok(Array.isArray(out.warnings));
       const status = await expectExit(root, ['status', out.runId], 0);
       assert.strictEqual(status.run.status, 'succeeded');
+      assert.deepStrictEqual(status.documents, out.documents);
       assert.deepStrictEqual(status.tasks.map((t) => [t.id, t.status]), [['capture', 'succeeded'], ['draft', 'succeeded'], ['validate', 'succeeded'], ['publish', 'succeeded']]);
       const list = await expectExit(root, ['status'], 0);
       assert.ok(list.runs.some((r) => r.id === out.runId));
@@ -130,6 +134,7 @@ async function setup(baseUrl) {
       await expectExit(root, ['run-submit', waitingRun, '--request', request.requestId, '--input', response], 0);
       const resumed = await expectExit(root, ['resume', waitingRun], 0);
       assert.strictEqual(resumed.status, 'succeeded');
+      assert.deepStrictEqual(resumed.documents, [{ subject: 'page:chat', path: path.join(root, 'docs', 'manual', 'chat.md') }]);
       assert.match(fs.readFileSync(path.join(root, 'docs', 'manual', 'chat.md'), 'utf8'), /在这里和 AI 助手对话。/);
     });
 

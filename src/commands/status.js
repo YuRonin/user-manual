@@ -15,7 +15,7 @@ const HELP = `
 manual status [runId] [--json]
     无 runId：列出最近的 Run 及其状态。
     有 runId：显示每个任务的状态、依赖、规划原因、缓存复用来源（observedAt，未在线确认）、
-    失败 / 等待的 code 与说明、产物引用。只读，不影响正在执行的 Run。
+    失败 / 等待的 code 与说明、正式文档路径、产物引用。只读，不影响正在执行的 Run。
 `.trim();
 
 function run(argv) {
@@ -47,6 +47,8 @@ function run(argv) {
       if (t.error) L.push(`      ${t.error.code}: ${t.error.message}`);
       if (t.next) L.push(`      → ${t.next}`);
     }
+    for (const document of result.documents || []) L.push(`  文档 ${document.subject}: ${document.path}`);
+    for (const warning of result.warnings || []) L.push(`  提示: ${warning}`);
     for (const r of result.recovery) L.push(`  恢复 ${r.taskId}: ${r.result}`);
     if (result.events.truncated) L.push('  事件日志末行不完整（已忽略；恢复以任务快照为准）');
   }

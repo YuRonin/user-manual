@@ -13,9 +13,9 @@ Skill 自身代码与项目数据分离：**Skill 只提供能力，项目状态
 
 已有 `.manual/config.yaml` 与目标模型时直接从下面开始，不重复 `init`、`inspect`、`describe`。
 
-1. `manual generate task:<id> --plan --json`：看缓存命中、风险边界和 `summary.warnings`。出现 `completion-before-final-step` 时，核对完成声明是否覆盖任务最后一步；只有缺少证据或模型变更时才需要浏览器。
-2. 需要浏览器且配置了 `auth.verifyPath` 与 `auth.identityAssertions` 时，Runtime 在采集前自动检查登录；失效后执行一次 `manual auth login`，再用返回的 `manual resume <runId>` 继续。单独排查登录时运行 `manual auth check --path <受保护页面路径> --json`。`auth status` 仅说明本地缓存存在。
-3. 首次快速生成用 `manual generate task:<id> --copy-default --json`；多个目标可在同一命令中列出，共用一次 Run 与浏览器会话。已有有效证据且只需重排文案时加 `--offline`。明确需要新截图时才用 `--refresh`。`--copy-default` 产物是快速草稿，交付前按[质量与证据工作流](references/quality-workflow.md)逐篇审阅。
+1. 对已有且已批准的模型，直接运行 `manual generate task:<id> --copy-default --json`。多个目标可列在同一命令中，共用一个 Run。结果的 `documents` 给出正式文档路径；检查 `warnings`、`riskBoundaries` 和 `cache`，再按[质量与证据工作流](references/quality-workflow.md)审阅成品。只有需要事先审阅新动作或风险范围时，才先运行 `--plan`。
+2. Runtime 仅在需要浏览器且已配置身份断言时预检登录。失效后运行一次 `manual auth login`，再用结果中的 Run ID 执行 `manual resume <runId>`；已有用户提供的测试凭据可按授权使用。单独排查时运行 `manual auth check --path <受保护页面路径> --json`；`auth status` 只说明缓存存在。
+3. 已有有效证据且只需修改文案时加 `--offline`；明确需要新截图时才加 `--refresh`。`--copy-default` 省去模型文案等待，但其文案必须经过读者视角审阅。
 4. `outcome-unknown` 先检查已有会话，不能重新发送；按照[质量与证据工作流](references/quality-workflow.md)核对。
 
 页面目标把 `task:<id>` 换成 `page:<id>`。页面或任务不存在时，再按[命令细节与兼容流程](references/command-workflows.md)中的 `init`、`inspect`、`describe`、`discover-tasks` 补齐。
@@ -70,7 +70,7 @@ manual inspect
 
 候选任务需要记录审批依据；可按用户本次或先前明确授权的范围执行 approve-tasks。范围不清楚时展示具体任务再询问。只有 approved 任务才能进入采集和发布。
 
-任务批准后，用 `manual generate task:<id> --plan --json` 把计划里的动作、风险边界（`write` 停在动作前、`destructive` 不执行）和需要浏览器的场景展示给用户；在现有用户授权范围内执行 `manual generate task:<id> --json`。正式任务文档只能引用 `images/annotated/`，任何 raw、sanitized、缺失图片或结构化事实变化都会阻止发布；发布后可用 `manual verify <task-id>` 复核。
+任务批准后，在现有授权范围内直接运行 `manual generate task:<id> --copy-default --json`；如需事先审阅新动作或风险范围，用 `--plan` 查看动作、风险边界（`write` 停在动作前、`destructive` 不执行）和需要浏览器的场景。正式任务文档只能引用 `images/annotated/`，任何 raw、sanitized、缺失图片或结构化事实变化都会阻止发布；发布后可用 `manual verify <task-id>` 复核。
 
 执行候选发现或审批时，先读 [references/task-workflow.md](references/task-workflow.md)。
 
@@ -88,8 +88,8 @@ node <skill>/bin/manual.js generate <task:<id>|page:<id>> --project-root <项目
 
 | 退出码 | 含义 | 怎么做 |
 |---|---|---|
-| 0 | 完成 | 报告文档路径；`cache` 里的复用项说明“使用了 observedAt 时刻的历史观察，未在线确认” |
-| 3 | 等待输入 | 看 `waiting[].code`：`model-input-required` → 读请求文件（只读其中列出的文件），按 `references/manual-writing-style.md` 第七节写响应 → `manual run-submit <runId> --request <id> --input <响应.json>` → `manual resume <runId>`；`approval-required` / `scope-changed` → 把任务展示给用户，得到明确确认后 `approve-tasks` 再 `resume`；`auth-*` → 请用户登录后 `resume`；`review-required` → 展示需确认的数字 / 承诺，用户确认后带 `--accept-review` 重新运行 |
+| 0 | 完成 | 报告 `documents` 的路径并处理 `warnings`；`cache` 里的复用项说明“使用了 observedAt 时刻的历史观察，未在线确认” |
+| 3 | 等待输入 | 看 `waiting[].code`：`model-input-required` → 读请求文件（只读其中列出的文件），按 `references/manual-writing-style.md` 第七节写响应 → `manual run-submit <runId> --request <id> --input <响应.json>` → `manual resume <runId>`；`approval-required` / `scope-changed` → 把任务展示给用户，得到明确确认后 `approve-tasks` 再 `resume`；`auth-*` → 按已获授权的登录方式完成 `auth login` 后 `resume`；`review-required` → 展示需确认的数字 / 承诺，用户确认后带 `--accept-review` 重新运行 |
 | 4 | 漂移或冲突 | `run-input-changed` → `manual resume <runId> --replan`；`merge-conflict` → 把 `proposed.md` 与逐块对照展示给用户：采用提案（合入正式文档）或把要保留的块头改为 `owner=human`，然后 `resume`；只有用户明确要求才 `--force`；`document-missing` → 问用户是重新生成（`--force`）还是下线（标 retired）；`verify` 的 failed / drift → 报告分类与差异，不要自动重新生成或接受新基线 |
 | 1 | 失败 | `manual status <runId> --json` 报告失败任务的 code 与提示；Runtime 已按策略重试过，不要自行循环重跑。例外：`network-access-denied` 是客户端沙箱禁止联网，不是网站问题，应在沙箱外重新执行同一条命令（Codex 申请提权执行，用户批准即可），不要让用户“等环境恢复” |
 | 2 | 参数错误 / 目标歧义 | 把 `candidates` 给用户选，用 `task:` / `page:` 前缀重新运行 |

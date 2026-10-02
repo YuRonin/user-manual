@@ -266,7 +266,7 @@ async function runRuntime({ projectRoot, values, targets, json }) {
     const copy = copyPolicy({ copy: typeof values.copy === 'string' ? values.copy : null, copyDefault: values.copyDefault === true });
     const options = { projectRoot, command: 'generate', targets, flags, copy, acceptReview: values.acceptReview === true, force: values.force === true };
     if (values.plan) return printPlan({ json, planned: planTargets(options) });
-    return printRun({ json, result: await startRun(options), label: 'generate' });
+    return printRun({ json, result: await startRun(options), label: 'generate', projectRoot });
   } catch (error) {
     return printRuntimeError({ json, error, label: 'generate' });
   }

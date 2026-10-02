@@ -27,14 +27,15 @@ manual describe --input describe.json                            # AI 读源码�
 ## 3. 生成：一个 Run 完成已授权的依赖
 
 ```bash
-manual generate page:chat --plan --json     # 只读计划：节点、原因、缓存命中与否、风险边界
-manual generate page:chat --json            # 执行
+manual generate page:chat --copy-default --json  # 直接执行；结果含 documents、warnings 和风险边界
+manual generate page:chat --plan --json          # 新动作或风险范围需要先审阅时使用；只读
 ```
 
 目标写法：`page:<id>` / `task:<id>` / `manual:<page|task>-<id>` / 无前缀的唯一 id；`scenario:<id>` 只用于 `capture`。
 
 Run 的节点：`(fixture-setup) → capture | derive-image → (analyze) → draft → (rewrite) → validate → publish → (fixture-cleanup)`。
 缓存命中的采集报告 `cache-hit` 与当时的 `observedAt`（历史观察，未在线确认）。
+成功的 `publish` 节点会在结果的 `documents` 中列出正式文档绝对路径；规划提醒也会随 `warnings` 返回。发布成功仍需审阅手册内容与截图。
 
 ### 等待输入（Run 状态 waiting_input）
 
