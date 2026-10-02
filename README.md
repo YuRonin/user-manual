@@ -42,10 +42,9 @@ npx playwright install chromium
 
 ## 用法
 
-已有 `.manual/config.yaml` 和页面模型时，直接预览并生成。需要浏览器时 Runtime 自动预检已配置身份断言的登录档案；失效后按返回的 Run ID 登录并继续。
+已有 `.manual/config.yaml` 和页面模型时，直接生成。结果中的 `documents` 给出正式文档路径，`warnings` 提示需要人工核对的内容；需要事先审阅新动作或风险范围时再加 `--plan`。需要浏览器时 Runtime 自动预检已配置身份断言的登录档案；失效后按返回的 Run ID 登录并继续。
 
 ```bash
-node bin/manual.js generate page:chat --plan
 node bin/manual.js generate page:chat page:credits --copy-default
 # 若返回 auth-expired：node bin/manual.js auth login --profile default
 # 随后：node bin/manual.js resume <runId>
@@ -66,8 +65,8 @@ node bin/manual.js inspect
 node bin/manual.js describe --input describe.json
 
 # 3. 一条命令生成：按需用真实浏览器采集（需要项目已经在跑，可复用有效缓存）→ 草稿 → 文案 → 发布
-node bin/manual.js generate page:chat --plan     # 先看计划：动作、风险边界、需要浏览器的场景
 node bin/manual.js generate page:chat --copy-default   # 快速生成，不等待模型文案
+# 需要事先审阅新动作或风险范围时：node bin/manual.js generate page:chat --plan
 # 多篇手册可一次生成，共用 Run 与浏览器会话
 node bin/manual.js generate page:chat page:credits --copy-default
 ```
@@ -99,7 +98,7 @@ node bin/manual.js gc --apply --expect <planHash>
 
 | 命令 | 用途 |
 |---|---|
-| `status [runId]` | 只读查看 Run：任务状态、等待原因、失败 code、缓存复用来源 |
+| `status [runId]` | 只读查看 Run：任务状态、等待原因、失败 code、缓存复用来源与正式文档路径 |
 | `resume <runId> [--replan]` | 从任务快照继续；输入变了用 `--replan` 创建新 Run |
 | `run-submit <runId> --request <id> --input <响应.json>` | 向等待模型文案的 Run 提交结构化响应，再用 `resume` 继续 |
 | `generate <目标> --offline / --refresh / --no-cache` | 只用历史证据 / 强制重新采集 / 不读写缓存 |

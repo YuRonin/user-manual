@@ -167,7 +167,10 @@ function runStatus({ projectRoot, runId = null }) {
   if (!state) throw new RuntimeError('run-not-found', `找不到 Run ${runId}。`);
   const events = project.runStore.events(runId);
   const planTasks = new Map(state.plan.tasks.map((t) => [t.id, t]));
-  const { waitingHint } = require('../cli/run-report');
+  const { waitingHint, publishedDocuments } = require('../cli/run-report');
+  const documents = publishedDocuments(state.plan, {
+    succeeded: state.tasks.filter((task) => task.status === 'succeeded').map((task) => task.id),
+  }, projectRoot, project.config.docs.outputDir);
   return {
     run: {
       id: state.run.id, command: state.run.command, target: state.run.target, status: state.run.effectiveStatus,
@@ -184,6 +187,8 @@ function runStatus({ projectRoot, runId = null }) {
     })),
     cache: state.plan.summary?.cache || [],
     riskBoundaries: state.plan.summary?.riskBoundaries || [],
+    documents,
+    warnings: state.plan.summary?.warnings || [],
     // 恢复理由与复用来源：来自事件日志（日志缺失时为空，不影响任务状态）。
     recovery: events.events.filter((e) => /^recovery:/.test(e.message || '')).map((e) => ({ taskId: e.taskId, result: e.message.slice('recovery:'.length), at: e.at })),
     events: { count: events.events.length, truncated: events.truncated, skipped: events.skipped },
