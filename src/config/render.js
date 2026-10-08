@@ -212,14 +212,17 @@ const STATE_IGNORES = [
   'runs/',
   'drafts/',
   'previews/',
+  // 模型快照与工作副本内容等价（缺失时按工作副本重建）；验证报告是一次性输出，工具不回读。
+  'snapshots/',
+  'verifications/',
   '*.bak',
 ];
 
 function renderStateGitignore() {
   return [
     '# 由 manual init 生成。',
-    '# config.yaml / project.yaml / pages/ / tasks/ / snapshots/ / current.json 应当入库；',
-    '# 下面这些是本机中间产物（锁、采集中的临时目录、原始截图、Run 状态等）。',
+    '# config.yaml / project.yaml / pages/ / tasks/ / current.json / evidence/ / releases/ / index/ 应当入库；',
+    '# 下面这些是本机中间产物（锁、采集中的临时目录、原始截图、Run 状态、模型快照、验证报告等）。',
     ...STATE_IGNORES,
     '',
   ].join('\n');

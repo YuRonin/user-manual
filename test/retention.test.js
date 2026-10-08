@@ -102,14 +102,15 @@ function tree(dir) {
       assert.deepStrictEqual(tree(state), before);
     });
 
-    await step('历史盘点逐项说明当前发布、模型恢复链与发布图，且只读', async () => {
+    await step('历史盘点逐项说明当前发布、当前快照与发布图，且只读；多次提交后只剩一份快照', async () => {
       const before = tree(state);
       const out = await expectExit(root, ['gc', '--inventory'], 0, env);
       assert.strictEqual(out.dryRun, true);
       assert.ok(out.items.some(item => item.kind === 'release' && item.reason === 'current-release'));
       assert.ok(out.items.some(item => item.kind === 'snapshot' && item.reason === 'current-model'));
       assert.ok(out.items.some(item => item.kind === 'published-image' && item.reason === 'referenced-image'));
-      assert.strictEqual(out.completeSnapshotChain, true);
+      assert.strictEqual(out.currentSnapshotPresent, true);
+      assert.strictEqual(out.items.filter(item => item.kind === 'snapshot').length, 1, 'inspect / describe / generate / capture 多次提交后只保留 current 快照');
       assert.deepStrictEqual(tree(state), before);
       const invalid = await expectExit(root, ['gc', '--inventory', '--apply'], 2, env);
       assert.strictEqual(invalid.code, 'invalid-arguments');
@@ -177,7 +178,9 @@ function tree(dir) {
       assert.strictEqual(fs.readFileSync(path.join(outside, 'precious.txt'), 'utf8'), 'keep me', '链接目标在允许根之外，未被删除');
       assert.ok(fs.existsSync(path.join(state, 'runs', waitingRun, 'run.json')));
       await expectExit(root, ['verify', 'page:chat'], 0, env);
-      assert.deepStrictEqual(planRetention({ projectRoot: root, config: config(), now: future }).items, [], '重复执行无新对象');
+      // verify 刚写的报告在"31 天后"视角下已过期，这是预期的唯一新对象
+      const again = planRetention({ projectRoot: root, config: config(), now: future }).items;
+      assert.ok(again.length >= 1 && again.every((i) => i.kind === 'verification'), JSON.stringify(again));
     });
 
     await step('原图回收后：生成需要重新采集（不伪造派生源）', async () => {

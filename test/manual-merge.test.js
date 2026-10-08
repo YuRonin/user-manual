@@ -194,7 +194,8 @@ test('人工块外说明 + 生成器改简介：两者都保留，新发布记�
   assert.match(text, /> 提示：团队版在左侧菜单。\n\n<!-- manual:block id=step.close -->/);
   const second = current(root);
   assert.notStrictEqual(second.id, first.id);
-  assert.strictEqual(first.documentHash, releases.readRelease(path.join(root, '.manual'), 'task-t', first.id).documentHash, '旧发布记录不被改写');
+  assert.strictEqual(releases.readRelease(path.join(root, '.manual'), 'task-t', first.id), null, '旧发布记录被取代后删除（不改写），历史由 Git 保存');
+  assert.strictEqual(second.previousReleaseId, first.id);
   assert.deepStrictEqual(second.acceptedEdits, [{ kind: 'human-text', anchor: 'step.open' }]);
   assert.doesNotMatch(readGeneratedBlob(path.join(root, '.manual'), second.generatedBlob), /团队版/, 'blob 只含生成内容');
 });

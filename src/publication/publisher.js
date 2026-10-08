@@ -145,8 +145,34 @@ function advance(projectRoot, stateDirAbs, journal, hooks = {}) {
   if (journal.state === 'release-committed') {
     releases.setCurrent(stateDirAbs, release);
     move('completed');
+    pruneHistory(stateDirAbs, release.manualId);
   }
   return { journal, release };
+}
+
+/**
+ * 发布完成后清理：被取代的发布记录，以及只被它们引用的生成正文 blob。
+ * 进行中事务暂存的 release.json 也算引用（它的 blob 已写、记录还没落盘）。
+ * 清理是尽力而为：失败不影响已完成的发布，残留由 manual gc 回收。
+ */
+function pruneHistory(stateDirAbs, manualId) {
+  try {
+    const removed = releases.pruneSuperseded(stateDirAbs, manualId);
+    const candidates = new Set(removed.map((r) => String(r.generatedBlob || '').replace(/^sha256:/, '')).filter(Boolean));
+    if (!candidates.size) return;
+    const keep = releases.referencedBlobs(stateDirAbs);
+    for (const journal of listJournals(stateDirAbs)) {
+      if (['completed', 'aborted'].includes(journal.state)) continue;
+      try {
+        const staged = JSON.parse(fs.readFileSync(path.join(publicationDirFor(stateDirAbs, journal.transactionId), 'release.json'), 'utf8'));
+        if (staged.generatedBlob) keep.add(String(staged.generatedBlob).replace(/^sha256:/, ''));
+      } catch (_) { return; } // 读不到进行中事务的引用：保守起见不删 blob
+    }
+    for (const hex of candidates) {
+      if (keep.has(hex) || !/^[a-f0-9]{64}$/.test(hex)) continue;
+      try { fs.unlinkSync(path.join(stateDirAbs, 'releases', 'blobs', `${hex}.md`)); } catch (_) { /* 已不存在 */ }
+    }
+  } catch (_) { /* 尽力而为 */ }
 }
 
 /**
@@ -171,7 +197,7 @@ function publish({ projectRoot, stateDirAbs, manualId, documentFile, markdown, f
   const previous = releases.readCurrentRelease(stateDirAbs, manualId);
   // baseDocHash：定稿前已把当前文档（含人工修改）三方合并进 markdown（P3-06）；只接受合并时看到的那个版本
   if (!force && previous && oldDocHash && oldDocHash !== previous.documentHash && oldDocHash !== newDocHash && oldDocHash !== baseDocHash) {
-    throw new PublicationError('publication-conflict', `${documentPath} 在上次发布之后被手工修改过；确认要覆盖请加 --force（旧版本仍保留在发布记录中）。`);
+    throw new PublicationError('publication-conflict', `${documentPath} 在上次发布之后被手工修改过；确认要覆盖请加 --force（覆盖前的版本可从 Git 历史找回）。`);
   }
   for (const journal of listJournals(stateDirAbs)) {
     if (journal.documentPath === documentPath && !['completed', 'conflict', 'aborted'].includes(journal.state)) {

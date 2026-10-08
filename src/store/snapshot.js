@@ -6,6 +6,10 @@
  *   .manual/snapshots/<hex>.json   一次提交的完整模型（页面、任务、项目元信息），写入后不再修改
  *   .manual/current.json           { revision, modelRevision, parent, updatedAt, materialized }
  *
+ * 快照是本机产物、不入库：只保留 current 指向的那一份（提交成功后清掉旧的），
+ * 因为它与工作副本（pages/ + tasks/ + project.yaml）内容等价——revision 就是内容 hash，
+ * 新克隆里缺失时由 project store 按工作副本重建。parent 只作诊断，不保证仍可读。
+ *
  * 两种 revision：
  *   revision       整个模型内容（含观察投影）的 hash，用作快照文件名；
  *   modelRevision  只含定义与决策（页面定义、分析状态、任务定义与审批）的 hash，用于 CAS：
@@ -102,6 +106,20 @@ function readSnapshot(stateDirAbs, rev) {
   return body;
 }
 
+/** 删除 current 之外的快照（只认 <64 hex>.json，其他文件不碰）。返回删除数。 */
+function pruneSnapshots(stateDirAbs, keepRevision) {
+  const dir = path.join(stateDirAbs, 'snapshots');
+  const keep = `${hexOf(keepRevision)}.json`;
+  let removed = 0;
+  let entries = [];
+  try { entries = fs.readdirSync(dir); } catch (_) { return 0; }
+  for (const name of entries) {
+    if (name === keep || !/^[a-f0-9]{64}\.json$/.test(name)) continue;
+    try { fs.unlinkSync(path.join(dir, name)); removed++; } catch (_) { /* 并发读取或权限问题：下次提交再清 */ }
+  }
+  return removed;
+}
+
 function readPointer(stateDirAbs) {
   const file = pointerFileFor(stateDirAbs);
   if (!fs.existsSync(file)) return null;
@@ -114,5 +132,5 @@ function writePointer(stateDirAbs, pointer) {
 
 module.exports = {
   SnapshotError, toJson, modelRevisionOf, contentRevisionOf, writeSnapshot, readSnapshot, readPointer, writePointer,
-  snapshotFileFor, pointerFileFor,
+  snapshotFileFor, pointerFileFor, pruneSnapshots,
 };

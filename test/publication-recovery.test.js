@@ -14,6 +14,8 @@ const path = require('path');
 
 const { publish, listJournals } = require('../src/publication/publisher');
 const { readCurrentRelease, listReleases } = require('../src/publication/release-store');
+const { loadConfig } = require('../src/config/load');
+const { planRetention } = require('../src/store/retention');
 
 const CLI = path.resolve(__dirname, '..', 'bin', 'manual.js');
 const PUBLISHER = path.resolve(__dirname, '..', 'src', 'publication', 'publisher.js');
@@ -72,14 +74,18 @@ function cli(root, args) {
 
 process.stdout.write('\npublication recovery\n');
 
-test('正常发布：文档、不可变发布记录、current 指针；旧发布保留', (root) => {
+const blobFile = (root, release) => path.join(state(root), 'releases', 'blobs', `${release.generatedBlob.slice(7)}.md`);
+
+test('正常发布：文档、不可变发布记录、current 指针；被取代的旧发布与其生成正文随即删除', (root) => {
   setup(root);
   const first = publish(input(root, 'V1\n'));
   const second = publish(input(root, 'V2\n'));
   assert.strictEqual(fs.readFileSync(doc(root), 'utf8'), 'V2\n');
   assert.strictEqual(readCurrentRelease(state(root), 'task-t').id, second.release.id);
-  assert.strictEqual(second.release.previousReleaseId, first.release.id);
-  assert.deepStrictEqual(listReleases(state(root), 'task-t').sort(), [first.release.id, second.release.id].sort());
+  assert.strictEqual(second.release.previousReleaseId, first.release.id, '保留来源 id 作诊断，记录本身由 Git 留档');
+  assert.deepStrictEqual(listReleases(state(root), 'task-t'), [second.release.id]);
+  assert.ok(!fs.existsSync(blobFile(root, first.release)), '只被旧发布引用的生成正文一起删除');
+  assert.ok(fs.existsSync(blobFile(root, second.release)));
   assert.ok(listJournals(state(root)).every((j) => j.state === 'completed'));
   assert.strictEqual(second.release.facts.factsHash, `sha256:${'f'.repeat(64)}`, '发布记录自带 facts，verify 不依赖草稿');
 });
@@ -97,7 +103,33 @@ test('相同发布复用当前记录；证据变化仍创建新记录', (root) =
   assert.strictEqual(fs.readFileSync(path.join(state(root), 'releases', 'task-t', 'current.json'), 'utf8'), pointer);
   const changed = publish({ ...params, facts: { ...params.facts, factsHash: `sha256:${'e'.repeat(64)}` } });
   assert.notStrictEqual(changed.release.id, first.release.id);
-  assert.strictEqual(listReleases(state(root), 'task-t').length, 2);
+  assert.deepStrictEqual(listReleases(state(root), 'task-t'), [changed.release.id]);
+  assert.ok(fs.existsSync(blobFile(root, changed.release)), '正文相同：旧发布删掉后 blob 仍被新发布引用，不能删');
+});
+
+test('其他手册的发布引用的生成正文不被删除', (root) => {
+  setup(root);
+  const otherDoc = path.join(root, 'docs', 'manual', 'tasks', 'o.md');
+  publish({ ...input(root, 'SHARED\n'), manualId: 'task-o', documentFile: otherDoc });
+  publish(input(root, 'SHARED\n'));
+  const second = publish(input(root, 'V2\n'));
+  assert.ok(fs.existsSync(blobFile(root, readCurrentRelease(state(root), 'task-o'))), '另一份手册仍引用同一正文');
+  assert.deepStrictEqual(listReleases(state(root), 'task-t'), [second.release.id]);
+});
+
+test('gc 把升级前积累的旧发布记录列为立即可回收，当前发布不列', (root) => {
+  setup(root);
+  const first = publish(input(root, 'V1\n'));
+  const second = publish(input(root, 'V2\n'));
+  // 模拟旧版本工具留下的历史记录与正文
+  fs.writeFileSync(path.join(state(root), 'releases', 'task-t', `${first.release.id}.json`), JSON.stringify(first.release, null, 2) + '\n');
+  fs.writeFileSync(blobFile(root, first.release), 'V1\n');
+  const plan = planRetention({ projectRoot: root, config: loadConfig(root).config });
+  const paths = plan.items.map((i) => i.path);
+  assert.ok(paths.includes(`.manual/releases/task-t/${first.release.id}.json`), JSON.stringify(plan.items));
+  assert.ok(paths.includes(`.manual/releases/blobs/${first.release.generatedBlob.slice(7)}.md`), '只被旧发布引用的正文一并回收');
+  assert.ok(!paths.includes(`.manual/releases/task-t/${second.release.id}.json`), '当前发布不回收');
+  assert.ok(!paths.includes(`.manual/releases/blobs/${second.release.generatedBlob.slice(7)}.md`));
 });
 
 test('相同发布也检查发布图完整性', (root) => {
@@ -161,7 +193,7 @@ for (const boundary of ['prepared', 'document-installed']) {
   });
 }
 
-test('发布之后手工修改正式文档：再次发布返回 publication-conflict；--force 覆盖且旧发布仍保留', (root) => {
+test('发布之后手工修改正式文档：再次发布返回 publication-conflict；--force 覆盖后只留新发布', (root) => {
   setup(root);
   const first = publish(input(root, 'V1\n'));
   fs.writeFileSync(doc(root), 'V1 + 手改\n');
@@ -169,7 +201,7 @@ test('发布之后手工修改正式文档：再次发布返回 publication-conf
   assert.strictEqual(fs.readFileSync(doc(root), 'utf8'), 'V1 + 手改\n');
   const forced = publish({ ...input(root, 'V2\n'), force: true });
   assert.strictEqual(forced.release.previousReleaseId, first.release.id);
-  assert.ok(fs.existsSync(path.join(state(root), 'releases', 'task-t', `${first.release.id}.json`)));
+  assert.deepStrictEqual(listReleases(state(root), 'task-t'), [forced.release.id]);
 });
 
 test('发布图缺失或被替换：事务作废，文档不变，也不阻塞下一次发布', (root) => {

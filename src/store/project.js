@@ -200,6 +200,7 @@ function createProjectStore({ stateDirAbs, docsOutputDir = null, lockOptions = {
     }
     const written = snap.writeSnapshot(stateDirAbs, working.model, { parent: pointer?.revision || null });
     snap.writePointer(stateDirAbs, { revision: written.revision, modelRevision: written.modelRevision, parent: pointer?.revision || null, updatedAt: new Date().toISOString(), materialized: true, source: 'working-copy-import' });
+    snap.pruneSnapshots(stateDirAbs, written.revision);
     if (docsOutputDir) writeIndexesFor(stateDirAbs, working.model, { revision: written.revision, modelRevision: written.modelRevision, docsOutputDir });
     return { model: working.model, revision: written.revision, modelRevision: written.modelRevision, imported: true };
   }
@@ -248,16 +249,41 @@ function createProjectStore({ stateDirAbs, docsOutputDir = null, lockOptions = {
       hooks.afterPointer?.();
       materialize(stateDirAbs, fresh.model, nextModel, { docsOutputDir, revision, modelRevision, hooks });
       snap.writePointer(stateDirAbs, { revision, modelRevision, parent: fresh.revision, updatedAt: new Date().toISOString(), materialized: true, kind });
+      // 物化完成后旧快照不再被任何读取路径需要（崩溃恢复只读 current 指向的那份）
+      snap.pruneSnapshots(stateDirAbs, revision);
       return { revision: written.revision, modelRevision, changed: true, model: nextModel };
     }, lockOptions);
   }
 
   /** Runtime 固定读取已提交快照（不受工作副本中未导入修改的影响）。 */
   function readCommitted() {
-    const pointer = snap.readPointer(stateDirAbs);
-    if (!pointer) return null;
-    const body = snap.readSnapshot(stateDirAbs, pointer.revision);
-    return { model: body.model, revision: body.revision, modelRevision: body.modelRevision };
+    for (let attempt = 0; ; attempt++) {
+      const pointer = snap.readPointer(stateDirAbs);
+      if (!pointer) return null;
+      try {
+        const body = snap.readSnapshot(stateDirAbs, pointer.revision);
+        return { model: body.model, revision: body.revision, modelRevision: body.modelRevision };
+      } catch (error) {
+        if (error.code !== 'snapshot-missing') throw error;
+        // 读指针与读快照之间另一个命令提交并清掉了旧快照：按新指针重读一次
+        if (attempt === 0 && snap.readPointer(stateDirAbs)?.revision !== pointer.revision) continue;
+        const restored = restoreFromWorkingCopy(pointer);
+        if (restored) return restored;
+        throw error;
+      }
+    }
+  }
+
+  /**
+   * 快照不入库：新克隆里只有工作副本与 current 指针。工作副本的内容 hash 与指针一致时，
+   * 它就是那次提交的模型本身，重建快照不会引入任何猜测；不一致（有未导入的手工修改）则不重建。
+   */
+  function restoreFromWorkingCopy(pointer) {
+    if (pointer.materialized === false) return null;
+    const working = readWorkingCopy(stateDirAbs);
+    if (!working.ok || snap.contentRevisionOf(working.model) !== pointer.revision) return null;
+    const written = snap.writeSnapshot(stateDirAbs, working.model, { parent: pointer.parent || null });
+    return { model: snap.toJson(working.model), revision: written.revision, modelRevision: written.modelRevision };
   }
 
   /** 索引缺失或过期时按当前提交重建。 */

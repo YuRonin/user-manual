@@ -22,6 +22,19 @@ manual migrate --rollback <迁移 id>             # 用完整备份恢复
 | `update` 从"计划中"变为正式命令 | — | 无 |
 | `manual gc` | 默认只列出 | 审阅后 `--apply --expect <planHash>` |
 
+## 历史产物只留当前版本
+
+早期版本把每次模型提交的完整快照、每次发布的记录和每次验证的报告都留在 `.manual/` 并入库，
+实际读取路径却只用当前版本，导致目录随使用线性膨胀（实测一个 33 页项目两周积累 161 份快照、约 44 MB）。
+原先为"恢复链"保留历史的设想没有任何命令使用，现改为：
+
+| 变化 | 影响 | 需要做什么 |
+|---|---|---|
+| 模型提交后只保留 current 指向的快照；`snapshots/` 改为本机产物 | 新克隆缺快照时按工作副本自动重建 | 已有项目执行 `git rm -r --cached .manual/snapshots`（`.manual/.gitignore` 会自动补上条目） |
+| 发布完成后删除被取代的旧发布记录及只被它引用的生成正文 | 覆盖前的版本改从 Git 历史找回 | 无 |
+| `verifications/` 改为本机产物，按 `runLogDays` 回收 | 验证结果以命令输出为准 | 已有项目执行 `git rm -r --cached .manual/verifications` |
+| `manual gc` 把旧发布记录、非当前快照列为立即可回收 | 升级前的存量一次清掉；只被旧发布引用的 Capture 按 `unreferencedCaptureDays` 回收 | `manual gc` 审阅后 `--apply --expect <planHash>` |
+
 ## 兼容入口与退出窗口
 
 以下入口继续可用，至少保留到下一个主版本；它们不再出现在 `manual --help` 与 SKILL.md 中，新项目使用右列：

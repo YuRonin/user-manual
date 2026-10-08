@@ -4,7 +4,8 @@
  * 产物保留策略与垃圾回收（P3-08）。
  *
  * 引用图的根（永不回收）：
- *   - 全部发布记录（当前与历史；发布记录元数据永久保留）及其 captureIds / artifacts / generatedBlob / 源码图快照
+ *   - 每份手册的当前发布记录（releases/<manualId>/current.json 指向的那条）及其
+ *     captureIds / artifacts / generatedBlob / 源码图快照；没有 current 指针的手册（首次发布未完成）全部记录都算根
  *   - evidence/latest.json 的当前引用、页面模型 browser.latestCaptureId、任务 lastCapture / captureIds
  *   - 当前草稿 facts 引用的图片、当前源码图 graph.json
  *   - 未结束（pending / running / waiting_input / interrupted / failed）或租约仍在的 Run：整个 Run 目录与其 outputRefs
@@ -13,7 +14,10 @@
  * 可回收（全部需要"未被引用"且超过对应天数）：
  *   staging（默认 7 天）、diagnostics（7 天）、已结束 Run 的目录（30 天）、
  *   原图 raw / sanitized（30 天，被引用的 Capture 也适用——发布图与去敏元数据保留，但之后不能再重新标注，
- *   隐私 / 主题变化需要重新采集）、未被引用的 Capture 记录及其产物（30 天）、未被引用的正文 blob / 源码图快照。
+ *   隐私 / 主题变化需要重新采集）、未被引用的 Capture 记录及其产物（30 天）、未被引用的正文 blob / 源码图快照、
+ *   验证报告（与 Run 同天数）。
+ * 立即回收（不看天数，任何读取路径都不再需要）：被取代的旧发布记录、current 之外的模型快照。
+ * 历史版本由 Git 保存——.manual 中入库的部分随提交留档，工作区不再重复保存一份。
  *
  * gc 默认 dry-run；--apply 在项目锁内重新计算计划，只删除与审阅时相同计划（planHash）中的对象，
  * 删除前逐个确认路径在允许的根目录内、不是指向外部的链接。
@@ -81,13 +85,18 @@ function collectReferences({ projectRoot, config, now }) {
   const activeRuns = new Set();
   const roots = [];
   const referenceErrors = [];
+  const supersededReleases = [];  // 绝对路径：被当前发布取代的旧记录
 
-  // 发布记录（全部）
+  // 发布记录：每份手册只有当前发布是根；没有 current 指针时保守地全部当根
   const releasesDir = path.join(stateDirAbs, 'releases');
   for (const manual of listDir(releasesDir)) {
     if (!manual.isDirectory() || manual.name === 'blobs') continue;
+    const pointerFile = path.join(releasesDir, manual.name, 'current.json');
+    const pointer = readJson(pointerFile);
+    if (fs.existsSync(pointerFile) && !pointer?.releaseId) { referenceErrors.push(`发布指针不可读: ${toPosix(path.relative(projectRoot, pointerFile))}`); continue; }
     for (const entry of listDir(path.join(releasesDir, manual.name))) {
       if (!entry.name.endsWith('.json') || entry.name === 'current.json') continue;
+      if (pointer && entry.name !== `${pointer.releaseId}.json`) { supersededReleases.push(path.join(releasesDir, manual.name, entry.name)); continue; }
       const release = readJson(path.join(releasesDir, manual.name, entry.name));
       if (!release || !validateRelease(release).ok) { referenceErrors.push(`发布记录不可读或无效: ${toPosix(path.relative(projectRoot, path.join(releasesDir, manual.name, entry.name)))}`); continue; }
       roots.push(`release:${manual.name}/${release.id}`);
@@ -166,7 +175,7 @@ function collectReferences({ projectRoot, config, now }) {
   for (const id of captures) {
     for (const artifact of records.get(id)?.artifacts || []) files.add(toPosix(artifact.path));
   }
-  return { stateDirAbs, captures, files, blobs, graphs, activeRuns, records, roots, referenceErrors };
+  return { stateDirAbs, captures, files, blobs, graphs, activeRuns, records, roots, referenceErrors, supersededReleases };
 }
 
 /**
@@ -227,6 +236,21 @@ function planRetention({ projectRoot, config, now = Date.now() }) {
       }
     }
   }
+  // 被取代的旧发布记录：读取路径只认当前发布，历史在 Git 里
+  for (const file of refs.supersededReleases) add(file, 'release', '已被当前发布取代的旧发布记录（历史版本见 Git）');
+  // current 之外的模型快照：快照与工作副本等价，只有 current 那份会被读取
+  const pointer = readJson(path.join(stateDirAbs, 'current.json'));
+  if (pointer?.revision) {
+    const keep = `${String(pointer.revision).replace(/^sha256:/, '')}.json`;
+    for (const entry of listDir(path.join(stateDirAbs, 'snapshots'))) {
+      if (entry.name !== keep && /^[a-f0-9]{64}\.json$/.test(entry.name)) add(path.join(stateDirAbs, 'snapshots', entry.name), 'snapshot', 'current 之外的模型快照');
+    }
+  }
+  // 验证报告：一次性输出，工具不回读
+  for (const entry of listDir(path.join(stateDirAbs, 'verifications'))) {
+    const file = path.join(stateDirAbs, 'verifications', entry.name);
+    if (olderThan(file, policy.runLogDays)) add(file, 'verification', `验证报告，超过 ${policy.runLogDays} 天`);
+  }
   // 未被引用的正文 blob 与源码图快照
   for (const entry of listDir(path.join(stateDirAbs, 'releases', 'blobs'))) {
     const hex = entry.name.replace(/\.md$/, '');
@@ -263,7 +287,7 @@ function historyInventory({ projectRoot, config, now = Date.now() }) {
     const current = readJson(path.join(dir, 'current.json'))?.releaseId;
     for (const entry of listDir(dir).filter(e => e.name.endsWith('.json') && e.name !== 'current.json')) {
       const file = path.join(dir, entry.name);
-      add(file, 'release', entry.name === `${current}.json` ? 'current-release' : 'historical-release-recovery');
+      add(file, 'release', entry.name === `${current}.json` ? 'current-release' : 'superseded-release');
     }
   }
   const pointer = readJson(path.join(state, 'current.json'));
@@ -275,14 +299,7 @@ function historyInventory({ projectRoot, config, now = Date.now() }) {
     if (body?.revision && entry.name === `${String(body.revision).replace(/^sha256:/, '')}.json`) snapshots.set(body.revision, { file, parent: body.parent });
     else add(file, 'snapshot', 'unreadable-model-snapshot-review-required');
   }
-  const chain = new Set();
-  let revision = pointer?.revision;
-  while (revision && snapshots.has(revision) && !chain.has(revision)) {
-    chain.add(revision);
-    revision = snapshots.get(revision).parent;
-  }
-  for (const [rev, record] of snapshots) add(record.file, 'snapshot',
-    rev === pointer?.revision ? 'current-model' : chain.has(rev) ? 'model-recovery-chain' : 'unlinked-model-snapshot');
+  for (const [rev, record] of snapshots) add(record.file, 'snapshot', rev === pointer?.revision ? 'current-model' : 'superseded-model-snapshot');
   const captureRoot = path.join(state, 'evidence', 'captures');
   for (const entry of listDir(captureRoot).filter(e => e.name.endsWith('.json'))) {
     const file = path.join(captureRoot, entry.name);
@@ -299,7 +316,7 @@ function historyInventory({ projectRoot, config, now = Date.now() }) {
     const row = summary.byKind[item.kind] || { objects: 0, bytes: 0 };
     row.objects++; row.bytes += item.bytes; summary.byKind[item.kind] = row;
   }
-  return { planHash: revisionOf(items), items, summary, completeSnapshotChain: !!pointer?.revision && !revision,
+  return { planHash: revisionOf(items), items, summary, currentSnapshotPresent: !!pointer?.revision && snapshots.has(pointer.revision),
     referenceErrors: refs.referenceErrors };
 }
 

@@ -19,11 +19,11 @@ manual gc —— 按保留策略回收不再需要的产物
 
 用法:
   manual gc [--json]                          只列出拟清理对象（默认，不删除任何文件）
-  manual gc --inventory --json               盘点历史发布、模型快照、Capture 与发布图及保留原因（只读）
+  manual gc --inventory --json               盘点发布记录、模型快照、Capture 与发布图及保留原因（只读）
   manual gc --apply [--expect <planHash>]     在项目锁内重新核对后删除；给了 --expect 时计划必须与审阅时一致
 
 保留（永不回收）:
-  全部发布记录（当前与历史）及其引用的 Capture、发布图、生成正文与源码图快照；当前引用（latest / 页面与任务投影）；
+  每份手册的当前发布记录及其引用的 Capture、发布图、生成正文与源码图快照；当前引用（latest / 页面与任务投影）；
   当前草稿引用的图片；未结束或仍在执行的 Run；config.retention.pinnedCaptures 固定的 Capture。
 
 回收（未被引用且超过天数，均可在 config.retention 中调整）:
@@ -34,6 +34,11 @@ manual gc —— 按保留策略回收不再需要的产物
                              但原图删除后不能再重新标注，隐私规则或标注主题变化需要重新采集
   unreferencedCaptureDays 30 没有任何引用的 Capture 记录及其产物、源码图快照
   未被发布记录引用的生成正文 blob
+  verifications              验证报告，与 runLogDays 同天数
+
+立即回收（不看天数）:
+  被当前发布取代的旧发布记录、current 之外的模型快照——读取路径只用当前版本，历史版本由 Git 保存。
+  发布与模型提交本身也会顺手清掉这两类，gc 主要用于升级前积累下来的存量。
 
 安全: 只删除 .manual 与配置的产物目录内的对象；指向外部的链接只删除链接本身；不调用 shell 递归删除。
 --inventory 只给历史对象列原因与大小，不改变 gc 的保留范围，也不能与 --apply 同用。

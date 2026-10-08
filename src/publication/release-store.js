@@ -7,6 +7,9 @@
  *                                                  定义 revision、图片 hash、语言 / 模板版本；写入后不改
  *   .manual/releases/<manualId>/current.json       当前发布指针（最后更新）
  *
+ * 工作区只保留每份手册的当前发布：发布完成后被取代的旧记录随即删除。所有读取方
+ * （verify / update / 三方合并 / 目录生成）只读当前发布；历史版本由 Git 保存（.manual 入库）。
+ *
  * verify 读取当前发布记录里的 facts，而不是可变的 drafts：草稿删了，已发布文档仍可检查。
  */
 
@@ -84,4 +87,40 @@ function listReleases(stateDirAbs, manualId) {
   return fs.readdirSync(dir).filter((name) => name.endsWith('.json') && name !== 'current.json').map((name) => name.slice(0, -5));
 }
 
-module.exports = { ReleaseError, manualIdFor, releasesDirFor, releaseFileFor, writeRelease, readRelease, readCurrentPointer, readCurrentRelease, setCurrent, listReleases };
+/**
+ * 删除 manualId 下当前发布之外的记录。没有 current 指针时什么也不删（发布未完成）。
+ * @returns {object[]} 被删除的发布记录（调用方据此回收不再被引用的生成正文 blob）
+ */
+function pruneSuperseded(stateDirAbs, manualId) {
+  const pointer = readCurrentPointer(stateDirAbs, manualId);
+  if (!pointer?.releaseId) return [];
+  const removed = [];
+  for (const id of listReleases(stateDirAbs, manualId)) {
+    if (id === pointer.releaseId || !isUuid(id)) continue;
+    const file = releaseFileFor(stateDirAbs, manualId, id);
+    let release = null;
+    try { release = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (_) { release = null; }
+    try { fs.unlinkSync(file); removed.push(release || { id }); } catch (_) { /* 删不掉就留给 gc */ }
+  }
+  return removed;
+}
+
+/** 所有手册当前与剩余发布记录引用的生成正文 blob（hex）。 */
+function referencedBlobs(stateDirAbs) {
+  const out = new Set();
+  const root = path.join(stateDirAbs, 'releases');
+  let manuals = [];
+  try { manuals = fs.readdirSync(root, { withFileTypes: true }); } catch (_) { return out; }
+  for (const entry of manuals) {
+    if (!entry.isDirectory() || entry.name === 'blobs' || !isSafeId(entry.name)) continue;
+    for (const id of listReleases(stateDirAbs, entry.name)) {
+      try {
+        const blob = JSON.parse(fs.readFileSync(path.join(root, entry.name, `${id}.json`), 'utf8')).generatedBlob;
+        if (blob) out.add(String(blob).replace(/^sha256:/, ''));
+      } catch (_) { /* 损坏记录由 gc / verify 报告 */ }
+    }
+  }
+  return out;
+}
+
+module.exports = { pruneSuperseded, referencedBlobs, ReleaseError, manualIdFor, releasesDirFor, releaseFileFor, writeRelease, readRelease, readCurrentPointer, readCurrentRelease, setCurrent, listReleases };

@@ -83,7 +83,7 @@ manual update --base main~3 --plan
 
 - 块外的内容属于人工，永远保留；块头写 `owner=human` 的块由人接管；
 - 发布记录保存纯生成正文（`.manual/releases/blobs/`），下次生成做"旧生成 / 当前文档 / 新生成"三方合并；
-- 同一块两边都改、人删掉生成块、块外同一位置两边都改 → `merge-conflict`（退出码 4），提案在 `runs/<runId>/merge/<manualId>/proposed.md`，逐块对照在 `conflicts.txt`。采用提案或把块改为 `owner=human` 后 `resume`；`--force` 用新生成覆盖（旧版本仍在发布记录中）。
+- 同一块两边都改、人删掉生成块、块外同一位置两边都改 → `merge-conflict`（退出码 4），提案在 `runs/<runId>/merge/<manualId>/proposed.md`，逐块对照在 `conflicts.txt`。采用提案或把块改为 `owner=human` 后 `resume`；`--force` 用新生成覆盖（覆盖前的版本可从 Git 历史找回）。
 
 ## 6. 验证
 
@@ -93,7 +93,7 @@ manual verify task:edit-profile --live     # 真实导航回放
 manual verify --all --live                 # 全部已发布手册，复用一个 Browser、每个 Scenario 独立 Context
 ```
 
-`--live` 的报告（`.manual/verifications/<id>.json`，不可变）：逐条检查（`scope` / `outcome` / `category`）、完成声明（发布时状态、本次状态）、章节结果、覆盖（已执行步骤、停止边界）、漂移（页面手册）。
+`--live` 的报告（`.manual/verifications/<id>.json`，不可变，本机产物不入库，按 `runLogDays` 回收）：逐条检查（`scope` / `outcome` / `category`）、完成声明（发布时状态、本次状态）、章节结果、覆盖（已执行步骤、停止边界）、漂移（页面手册）。
 结果与退出码：`passed` 0；`failed` / `drift` 4；需要登录 3；`inconclusive`（网络 / 超时）1。视觉差异只报告，不否定已验证行为；基线不会被自动接受。
 动态区域在 `config.yaml` 的 `verify.visual.dynamicRegions: [{ id, selector }]` 声明，只用于比较，与断言目标重叠的区域不能被忽略。
 
@@ -131,7 +131,9 @@ manual gc --json                               # dry-run：对象、原因、大
 manual gc --apply --expect <planHash>          # 项目锁内重新核对后删除
 ```
 
-默认天数（`config.retention` 可调）：staging / 诊断 7 天；已结束 Run、原图、未引用 Capture 30 天。发布记录与被引用的证据永不回收；原图回收后不能再重新标注，隐私或主题变化需要重新采集。
+默认天数（`config.retention` 可调）：staging / 诊断 7 天；已结束 Run、原图、未引用 Capture 30 天。当前发布记录与被引用的证据永不回收；原图回收后不能再重新标注，隐私或主题变化需要重新采集。
+
+工作区只保留当前版本：发布完成后，被取代的旧发布记录及只被它引用的生成正文随即删除；模型提交后只留 current 指向的快照（快照与 `pages/` + `tasks/` 等价，属本机产物不入库，新克隆中缺失时按工作副本自动重建）。历史版本由 Git 保存。升级前积累的存量用 `manual gc` 一次清理。
 
 ## 9. 故障排查
 

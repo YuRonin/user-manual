@@ -59,7 +59,34 @@ const yamlPage = (state, id) => pageStore.readPage(state, id);
     assert.strictEqual(store.indexStatus().ok, true);
   });
 
-  await test('手改工作副本 → 校验后导入新快照（parent 指向旧快照），旧快照保留', async (root) => {
+  await test('多次提交后只保留 current 指向的快照', async (root) => {
+    const state = seed(root);
+    const store = storeFor(state);
+    const base = store.load();
+    store.commit({ base, changes: { pages: [{ ...pageOf(base.model, 'chat'), title: '工作台' }] } });
+    const latest = store.load();
+    const third = store.commit({ base: latest, changes: { pages: [{ ...pageOf(latest.model, 'chat'), title: '对话' }] } });
+    assert.strictEqual(third.changed, true);
+    assert.deepStrictEqual(fs.readdirSync(path.join(state, 'snapshots')), [`${third.revision.slice(7)}.json`]);
+    assert.strictEqual(store.readCommitted().revision, third.revision);
+  });
+
+  await test('快照不入库：新克隆缺快照时按工作副本重建；工作副本有未导入修改则不猜', async (root) => {
+    const state = seed(root);
+    const loaded = storeFor(state).load();
+    const file = snap.snapshotFileFor(state, loaded.revision);
+    fs.rmSync(path.join(state, 'snapshots'), { recursive: true });
+    const restored = storeFor(state).readCommitted();
+    assert.strictEqual(restored.revision, loaded.revision);
+    assert.strictEqual(restored.modelRevision, loaded.modelRevision);
+    assert.ok(fs.existsSync(file), '重建后的快照写回本机');
+    fs.rmSync(file);
+    const pageFile = pageStore.pageFileFor(state, 'chat');
+    fs.writeFileSync(pageFile, fs.readFileSync(pageFile, 'utf8').replace('title: null', 'title: 未导入的修改'));
+    assert.throws(() => storeFor(state).readCommitted(), (e) => e.code === 'snapshot-missing');
+  });
+
+  await test('手改工作副本 → 校验后导入新快照（parent 记录旧快照），旧快照随即清除', async (root) => {
     const state = seed(root);
     const store = storeFor(state);
     const first = store.load();
@@ -70,7 +97,8 @@ const yamlPage = (state, id) => pageStore.readPage(state, id);
     assert.notStrictEqual(next.revision, first.revision);
     assert.strictEqual(snap.readPointer(state).parent, first.revision);
     assert.strictEqual(pageOf(next.model, 'chat').title, '工作台');
-    assert.ok(fs.existsSync(snap.snapshotFileFor(state, first.revision)));
+    assert.ok(!fs.existsSync(snap.snapshotFileFor(state, first.revision)), '旧快照与历史工作副本等价，不再保留');
+    assert.ok(fs.existsSync(snap.snapshotFileFor(state, next.revision)));
     assert.notStrictEqual(next.modelRevision, first.modelRevision);
   });
 

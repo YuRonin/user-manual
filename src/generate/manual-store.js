@@ -70,7 +70,7 @@ function hexOf(hash) {
  * @param {string} p.manualId
  * @param {string} p.documentFile     正式文档绝对路径
  * @param {string} p.generated        本次渲染的纯生成正文
- * @param {boolean} [p.force]         覆盖人工修改（旧版本仍在发布记录与 blob 中）
+ * @param {boolean} [p.force]         覆盖人工修改（覆盖前的版本可从 Git 历史找回）
  * @param {string} [p.runId]
  * @returns {{ markdown, generated, baseDocHash, acceptedEdits, mode, previousReleaseId }}
  */
