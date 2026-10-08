@@ -227,11 +227,11 @@ async function completeTask(root, stateDir, taskId) {
     assert.ok(nicknameMask.rect.width < 150, `昵称遮罩应只覆盖文字，实际宽度 ${nicknameMask.rect.width}`);
     // 保存未执行：编辑器声明有证据，保存结果只能是预期
     const profileDoc = fs.readFileSync(path.join(root, 'docs', 'manual', 'tasks', 'edit-profile.md'), 'utf8');
-    assert.match(profileDoc, /已验证界面结果：编辑资料面板已打开。/);
-    assert.match(profileDoc, /预期业务结果：资料保存后个人中心显示更新内容。/);
+    assert.match(profileDoc, /采集时已看到：编辑资料面板已打开。/);
+    assert.match(profileDoc, /预期会看到：资料保存后个人中心显示更新内容。/);
     assert.match(profileDoc, /验证范围/);
     const benefitsEvidence = await completeTask(root, stateDir, 'view-school-benefits');
-    assert.match(fs.readFileSync(path.join(root, 'docs', 'manual', 'tasks', 'view-school-benefits.md'), 'utf8'), /已验证界面结果：学校权益面板/);
+    assert.match(fs.readFileSync(path.join(root, 'docs', 'manual', 'tasks', 'view-school-benefits.md'), 'utf8'), /采集时已看到：学校权益面板/);
     assert.strictEqual(benefitsEvidence.steps.length, 3);
     assert.strictEqual(benefitsEvidence.steps[2].status, 'not-executed');
     assert.strictEqual(benefitsEvidence.steps[2].reason, 'stop-before-action');

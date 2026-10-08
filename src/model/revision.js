@@ -17,7 +17,7 @@ const DEFINITION_FIELDS = {
     'entry', 'source', 'includeInManual', 'detectedActions', 'guide', 'states', 'identityAssertions',
   ],
   userTask: [
-    'id', 'title', 'goal', 'entryPage', 'priority', 'preconditions', 'risk', 'environment',
+    'id', 'title', 'goal', 'entryPage', 'priority', 'preconditions', 'readerPreconditions', 'risk', 'environment',
     'fixtures', 'writeAuthorization', 'steps', 'branches', 'relatedTasks', 'completion',
   ],
   scenario: [
@@ -59,6 +59,12 @@ function pickDefinitionFields(kind, entity) {
   const picked = pick(entity || {}, fields);
   if (kind === 'userTask' && Array.isArray(picked.steps)) {
     picked.steps = picked.steps.map((step) => (step && typeof step === 'object' ? pick(step, STEP_FIELDS) : step));
+  }
+  // goalChecks 只把既有完成声明与读者核对项映射到任务目标，不改变浏览器执行或观察事实。
+  // 它仍会进入 FactPack.quality 并改变 factsHash，促使重新审阅和发布正文。
+  if (kind === 'userTask' && picked.completion) {
+    picked.completion = { ...picked.completion };
+    delete picked.completion.goalChecks;
   }
   return dropUndefined(picked);
 }

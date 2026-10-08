@@ -38,7 +38,10 @@ function buildTaskDraft(task, evidence, context = {}) {
   const errors = [];
   const images = [];
   for (const record of evidence?.steps || []) {
+    const step = task.steps?.find((item) => item.id === record.id);
     for (const shot of record.screenshots || []) {
+      // 证据中仍保留截图；标注误导时可显式不放进面向读者的正文。
+      if (step?.capture?.readerVisible === false) continue;
       const artifactPath = toPosix(shot.annotated);
       if (!shot.annotated || !artifactPath.includes('/images/annotated/')) {
         errors.push(`步骤 ${record.id} 的正式图片必须来自 annotated 目录。`);
@@ -60,7 +63,7 @@ function buildTaskDraft(task, evidence, context = {}) {
       }
       const markdownHref = toMarkdownHref({ manualFile: finalPath, artifactFile });
       // sha256 固定草稿时的图片内容；privacy 只能来自采集时实际执行的检测记录，缺失即 unknown。
-      images.push({ artifactPath, markdownHref, sha256, privacy, ...(shot.captureId ? { captureId: shot.captureId } : {}), stepId: record.id });
+      images.push({ artifactPath, markdownHref, sha256, privacy, ...(shot.timing ? { timing: shot.timing } : {}), ...(step?.capture?.readerCaption ? { readerCaption: step.capture.readerCaption } : {}), ...(shot.captureId ? { captureId: shot.captureId } : {}), stepId: record.id });
     }
   }
   if (images.length === 0) errors.push('任务指南至少需要一张 annotated 关键状态截图。');
@@ -71,7 +74,7 @@ function buildTaskDraft(task, evidence, context = {}) {
   const claims = computeClaims(task, evidence);
   let pack;
   try {
-    pack = buildTaskFactPack({ task, evidence, images, claims, language: context.language || 'zh-CN' });
+    pack = buildTaskFactPack({ task, evidence, images, claims, language: context.language || 'zh-CN', entryPage: context.entryPage });
   } catch (error) {
     return { ok: false, errors: [`${error.code}: ${error.message}`] };
   }

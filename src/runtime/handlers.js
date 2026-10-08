@@ -257,10 +257,10 @@ async function capture(ctx, task) {
       restoreProjection(ctx, subject, found.outputRefs, found.observedAt, current);
       return { outputs: found.outputRefs, warnings, reused: { from: found.reusedFrom, observedAt: found.observedAt, stale: found.stale } };
     }
-    if (!ctx.mode.browserAllowed) throw offlineMissError(found);
+    if (!ctx.mode.browserAllowed) throw offlineMissError(found, subjectKey(subject));
     warnings.push(`缓存在执行前失效（${found.reason}），重新采集。`);
   } else if (!ctx.mode.browserAllowed) {
-    throw offlineMissError({ reason: 'not-found' });
+    throw offlineMissError({ reason: 'not-found' }, subjectKey(subject));
   }
 
   // 规划时缓存可用、执行时失效：采集前补做在线认证检查。

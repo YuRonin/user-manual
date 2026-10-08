@@ -96,9 +96,22 @@ function lookup({ store, keyInfo, subject = null, mode, projectRoot, stateDirAbs
 }
 
 /** offline 模式下没有可用证据：明确报错而不是悄悄生成。 */
-function offlineMissError(result) {
-  const { RuntimeError } = require('../runtime/errors');
-  return new RuntimeError('cache-miss-offline', `离线模式下没有可复用的历史证据（${result.reason}）。去掉 --offline 以重新采集。`, { cacheReason: result.reason });
+function offlineMissDescription(result, subject = null) {
+  const reason = result?.reason || 'not-found';
+  const fields = Array.isArray(result?.changedFields) ? result.changedFields : [];
+  const changed = fields.length ? `；变化字段：${fields.join(', ')}` : '';
+  const identity = fields.includes('identityRevision')
+    ? '认证身份断言定义已变化，旧采集不能作为当前身份的在线证据。' : '';
+  const taskId = /^task:([a-z0-9-]+)$/.exec(subject || '')?.[1];
+  const reword = taskId
+    ? `若只修改文案，可用 manual generate-task ${taskId} 从任务既有证据重新生成草稿；定稿前仍会检查证据有效性。`
+    : '';
+  return `没有可复用的历史证据（${reason}${changed}），离线模式不能重新采集。${identity}${reword}若要重新验证，请核对采集计划后去掉 --offline。`;
 }
 
-module.exports = { MISS_REASONS, lookup, offlineMissError };
+function offlineMissError(result, subject = null) {
+  const { RuntimeError } = require('../runtime/errors');
+  return new RuntimeError('cache-miss-offline', offlineMissDescription(result, subject), { cacheReason: result.reason, changedFields: result.changedFields || [] });
+}
+
+module.exports = { MISS_REASONS, lookup, offlineMissDescription, offlineMissError };

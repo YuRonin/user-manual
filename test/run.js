@@ -32,6 +32,7 @@ const FILES = [
   'project-lock.test.js',
   'project-store.test.js',
   'discover-tasks.test.js',
+  'task-guide.test.js',
   'capture-plan.test.js',
   'task-executor.test.js',
   'page-validation.test.js',

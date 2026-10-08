@@ -10,15 +10,16 @@ const path = require('path');
 const { parseArgs } = require('../cli/args');
 const { EXIT, usageExit } = require('../cli/output');
 const { loadConfig } = require('../config/load');
-const { planRetention, applyRetention } = require('../store/retention');
+const { planRetention, historyInventory, applyRetention } = require('../store/retention');
 
-const KNOWN_FLAGS = new Set(['projectRoot', 'apply', 'expect', 'json', 'help']);
+const KNOWN_FLAGS = new Set(['projectRoot', 'apply', 'inventory', 'expect', 'json', 'help']);
 
 const HELP = `
 manual gc —— 按保留策略回收不再需要的产物
 
 用法:
   manual gc [--json]                          只列出拟清理对象（默认，不删除任何文件）
+  manual gc --inventory --json               盘点历史发布、模型快照、Capture 与发布图及保留原因（只读）
   manual gc --apply [--expect <planHash>]     在项目锁内重新核对后删除；给了 --expect 时计划必须与审阅时一致
 
 保留（永不回收）:
@@ -35,6 +36,7 @@ manual gc —— 按保留策略回收不再需要的产物
   未被发布记录引用的生成正文 blob
 
 安全: 只删除 .manual 与配置的产物目录内的对象；指向外部的链接只删除链接本身；不调用 shell 递归删除。
+--inventory 只给历史对象列原因与大小，不改变 gc 的保留范围，也不能与 --apply 同用。
 `.trim();
 
 function fail(message, { json, code = 'gc-failed' }) {
@@ -43,12 +45,16 @@ function fail(message, { json, code = 'gc-failed' }) {
 }
 
 function run(argv) {
-  const { values, positional, unknownFlags } = parseArgs(argv, { known: KNOWN_FLAGS, booleans: ['apply'] });
+  const { values, positional, unknownFlags } = parseArgs(argv, { known: KNOWN_FLAGS, booleans: ['apply', 'inventory'] });
   const json = values.json === true;
   if (values.help) { process.stdout.write(HELP + '\n'); return 0; }
   if (unknownFlags.length || positional.length) { fail(`未知参数: ${[...unknownFlags, ...positional].join(', ')}`, { json, code: 'invalid-arguments' }); return usageExit(); }
   if (values.expect !== undefined && (typeof values.expect !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(values.expect))) {
     fail('--expect 需要 dry-run 输出的 planHash（sha256:…）。', { json, code: 'invalid-arguments' });
+    return usageExit();
+  }
+  if (values.inventory && (values.apply || values.expect !== undefined)) {
+    fail('--inventory 只能只读运行，不能与 --apply 或 --expect 同用。', { json, code: 'invalid-arguments' });
     return usageExit();
   }
   const projectRoot = path.resolve(values.projectRoot || process.cwd());
@@ -57,8 +63,17 @@ function run(argv) {
   if (!loaded.ok) { fail(loaded.errors.join('；'), { json, code: 'invalid-config' }); return EXIT.FAILED; }
   const config = loaded.config;
 
+  if (values.inventory) {
+    const inventory = historyInventory({ projectRoot, config });
+    if (json) process.stdout.write(JSON.stringify({ ok: true, dryRun: true, ...inventory }, null, 2) + '\n');
+    else process.stdout.write(`[manual gc] 已盘点 ${inventory.summary.objects} 个历史产物，共 ${(inventory.summary.bytes / 1024 / 1024).toFixed(1)} MB；使用 --inventory --json 查看逐项原因（未删除任何文件）。\n`);
+    return 0;
+  }
+
   if (!values.apply) {
-    const plan = planRetention({ projectRoot, config });
+    let plan;
+    try { plan = planRetention({ projectRoot, config }); }
+    catch (error) { fail(error.message, { json, code: error.code || 'gc-failed' }); return EXIT.FAILED; }
     if (json) process.stdout.write(JSON.stringify({ ok: true, dryRun: true, ...plan }, null, 2) + '\n');
     else {
       const L = ['', `[manual gc] 拟清理 ${plan.summary.objects} 个对象，共 ${(plan.summary.bytes / 1024).toFixed(1)} KB（未删除任何文件）`];

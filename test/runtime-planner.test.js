@@ -224,6 +224,15 @@ try {
     assert.deepStrictEqual(planFor(root, ['page:chat'], { flags: { offline: true } }).errors, []);
   });
 
+  test('离线采集身份约束变化时给出安全的文案重发指引', () => {
+    const { snapshot } = planFor(root, ['task:edit-profile'], { flags: { offline: true }, cache: false });
+    snapshot.subjects['task:edit-profile'].cache = { hit: false, reason: 'input-changed', changedFields: ['identityRevision'] };
+    const planned = plan(snapshot, { command: 'generate', copy: { mode: 'default' } });
+    assert.match(planned.errors.join('\n'), /identityRevision/);
+    assert.match(planned.errors.join('\n'), /generate-task/);
+    assert.doesNotMatch(planned.errors.join('\n'), /cookie|token|密码/i);
+  });
+
   test('共享采集去重：两个目标指向同一任务时只采集一次；DAG 检查重复 / 未知依赖 / 循环', () => {
     const { plan: p, errors } = planFor(root, ['task:edit-profile', 'manual:task-edit-profile']);
     assert.deepStrictEqual(errors, []);

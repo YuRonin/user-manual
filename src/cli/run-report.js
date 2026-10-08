@@ -36,7 +36,7 @@ function waitingHint(runId, waiting, plan = null) {
   if (waiting.code === 'review-required') return `确认文案属实后用 --accept-review 重新运行 generate，或修改文案后 resume --replan`;
   if (['auth-missing', 'auth-expired', 'login-required'].includes(waiting.code)) {
     const profile = plan?.tasks?.find((task) => task.id === waiting.id)?.input?.authProfile;
-    return `先运行 manual auth login${profile ? ` --profile ${profile}` : ''}，再运行 manual resume ${runId}`;
+    return `运行 manual auth login${profile ? ` --profile ${profile}` : ''} --resume ${runId}，登录后自动继续原 Run`;
   }
   return `处理后运行 manual resume ${runId}`;
 }

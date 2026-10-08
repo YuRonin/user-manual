@@ -15,7 +15,7 @@
 
 const { revisionOf } = require('../util/hash');
 const { definitionRevision } = require('../model/revision');
-const { approvalState, approvalMessage, scopeHash, pageRevisionsFor, pageObservationRevision, APPROVAL_STATES } = require('../model/approval');
+const { approvalState, approvalMessage, scopeHash, compatiblePageRevisionsFor, pageObservationRevision, APPROVAL_STATES } = require('../model/approval');
 const { deriveTaskScenario, derivePageScenario } = require('../scenarios/model');
 const { resolveScenario, readScenario, scenariosDirFor } = require('../scenarios/store');
 const { readFixture, fixtureRevision, dataRevisionFor } = require('../scenarios/fixtures');
@@ -29,7 +29,7 @@ const { TEMPLATE_VERSION } = require('../generate/render');
 const { DEFAULT_READY_OPTIONS } = require('../browser/provider');
 const { capabilitiesFor, missingCapabilities } = require('../browser/capabilities');
 const { captureKey } = require('../cache/keys');
-const { lookup } = require('../cache/lookup');
+const { lookup, offlineMissDescription } = require('../cache/lookup');
 const { resolveTarget } = require('./resolve-target');
 const { RuntimeError } = require('./errors');
 const { taskQuality } = require('../generate/quality');
@@ -146,7 +146,7 @@ function taskInputs({ task, model, config, scenario }) {
     approvalMessage: approval === APPROVAL_STATES.APPROVED ? null : approvalMessage(approval, task.id),
     scopeHash: scopeHash(task, model.pages),
     definitionRevision: definitionRevision('userTask', task),
-    pageRevisions: pageRevisionsFor(task, model.pages),
+    pageRevisions: compatiblePageRevisionsFor(task, model.pages, task.lastCapture?.pageRevisions),
     // 审批之外的计划错误（缺页面、断言为空、缺路由参数……）在规划期就报告。
     planErrors: built.ok || approval !== APPROVAL_STATES.APPROVED ? [] : built.errors,
     boundaries,
@@ -350,7 +350,7 @@ function plan(snapshot, policy) {
       captureByKey.set(s.captureKey, captureId);
       summary.cache.push({ node: captureId, subject: subjectKey(subject), hit: !!cache?.hit, reason, observedAt: reuse?.observedAt || null, uncertainty: s.captureUncertainty });
       if (!reuse) {
-        if (!snapshot.mode.browserAllowed) errors.push(`cache-miss-offline: ${subjectKey(subject)} 没有可复用的历史证据（${cache?.reason || 'not-found'}），离线模式不能重新采集。`);
+        if (!snapshot.mode.browserAllowed) errors.push(`cache-miss-offline: ${subjectKey(subject)} ${offlineMissDescription(cache, subjectKey(subject))}`);
         summary.browserScenarios += 1;
         summary.actions.push(`采集 ${subjectKey(subject)}（Scenario ${s.scenario.id}）`);
       } else {

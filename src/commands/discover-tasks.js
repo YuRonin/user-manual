@@ -74,7 +74,7 @@ function run(argv) {
     : existingPages.pages.filter((page) => page.id === positional[0]);
   if (selected.length === 0) return fail(`找不到页面: ${positional[0]}`, json);
 
-  const worklist = buildDiscoveryWorklist(selected);
+  const worklist = buildDiscoveryWorklist(selected, base.model.tasks);
   if (!values.input) {
     const output = { ok: true, phase: 'worklist', worklist };
     if (json) process.stdout.write(JSON.stringify(output, null, 2) + '\n');
@@ -92,6 +92,7 @@ function run(argv) {
   const current = { tasks: base.model.tasks };
   const existingById = new Map(current.tasks.map((task) => [task.id, task]));
   const selectedIds = new Set(selected.map((page) => page.id));
+  const selectedPages = new Map(selected.map((page) => [page.id, page]));
   const knownPageIds = new Set(existingPages.pages.map((page) => page.id));
   const seen = new Set();
   const candidates = [];
@@ -116,6 +117,18 @@ function run(argv) {
     const { approval: _ignored, lastCapture: _noCapture, ...rest } = input;
     const task = { ...rest, status: 'candidate', approval: { status: 'pending', scopeHash: null } };
     if (Array.isArray(task.steps)) {
+      task.steps = task.steps.map((step, stepIndex) => {
+        if (!step || typeof step !== 'object' || !step.guideStep) return step;
+        const page = selectedPages.get(step.page || task.entryPage);
+        const guide = (page?.guide || []).find(item => item.id === step.guideStep);
+        if (!guide?.target) {
+          errors.push(`${where}.steps[${stepIndex}].guideStep 找不到带目标的页面指南步骤: ${step.guideStep}`);
+          return step;
+        }
+        const { guideStep: _guideStep, ...explicit } = step;
+        return { id: guide.id, instruction: guide.instruction, page: page.id,
+          ...explicit, action: { ...explicit.action, target: explicit.action?.target || guide.target } };
+      });
       task.steps.forEach((step, stepIndex) => {
         if (step?.page && !knownPageIds.has(step.page)) {
           errors.push(`${where}.steps[${stepIndex}].page 不存在: ${step.page}`);

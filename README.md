@@ -46,8 +46,7 @@ npx playwright install chromium
 
 ```bash
 node bin/manual.js generate page:chat page:credits --copy-default
-# 若返回 auth-expired：node bin/manual.js auth login --profile default
-# 随后：node bin/manual.js resume <runId>
+# 若返回 auth-expired：node bin/manual.js auth login --profile default --resume <runId>
 ```
 
 首次接入项目时：
@@ -71,7 +70,7 @@ node bin/manual.js generate page:chat --copy-default   # 快速生成，不等�
 node bin/manual.js generate page:chat page:credits --copy-default
 ```
 
-任务型指南（“怎样完成某件事”）：`discover-tasks` 提出候选 → 人工 `approve-tasks` 确认 → `generate task:<id>`。写操作停在动作前，删除类操作不执行。
+任务型指南（“怎样完成某件事”）：先用 `task-guide "要完成的目标"` 找入口，再用 `task-guide "要完成的目标" --page <page-id>` 取得只读建模工作表；`discover-tasks` 保存候选 → 人工 `approve-tasks` 确认 → `generate task:<id>`。生成后用 `review-task <id> --preview` 核对目标覆盖、截图和读者视图。写操作停在动作前，删除类操作不执行。
 
 持续维护：
 

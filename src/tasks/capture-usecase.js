@@ -8,6 +8,7 @@
  * 不做输出；失败抛带 code 的错误（TaskExecutionError / CaptureError / RuntimeError）。
  */
 
+const fs = require('fs');
 const path = require('path');
 
 const { createProvider } = require('../browser');
@@ -16,7 +17,7 @@ const { scopeHash, pageRevisionsFor } = require('../model/approval');
 const { deriveTaskScenario } = require('../scenarios/model');
 const { resolveScenario } = require('../scenarios/store');
 const { buildCapturePlan, writeCapturePlan } = require('./capture-plan');
-const { executeCapturePlan, reconcileCapturePlan } = require('./executor');
+const { executeCapturePlan, reconcileCapturePlan, continueReadOnlyCapturePlan } = require('./executor');
 const { prepareAuth, authRuntimeFor } = require('../auth/runtime');
 const { RuntimeError } = require('../runtime/errors');
 const { prepareScenarioData } = require('../scenarios/fixtures');
@@ -54,7 +55,7 @@ function taskProjection(task, pages, { capturedAt, captureIds, manifestRelative,
  * @param {object} [p.session]  BrowserSession；缺省时自行创建并关闭 provider
  * @returns {Promise<{ task, updatedTask, plan, planFile, evidence, scenario }>}
  */
-async function captureTask({ projectRoot, config, taskId, session = null, runId = null, preflight = false, reconcile = null }) {
+async function captureTask({ projectRoot, config, taskId, session = null, runId = null, preflight = false, reconcile = null, continueUrl = null }) {
   const stateDir = path.join(projectRoot, config.artifacts.stateDir);
   const projectStore = createProjectStore({ stateDirAbs: stateDir, docsOutputDir: config.docs.outputDir });
   let base;
@@ -79,7 +80,22 @@ async function captureTask({ projectRoot, config, taskId, session = null, runId 
   // Fixture 先过环境策略；Scenario 的身份决定认证档案（匿名 / 成员 / 管理员各自隔离）
   const data = prepareScenarioData({ stateDirAbs: stateDir, config, scenario: scenario.scenario, runId });
   const auth = prepareAuth(config, { profile: scenario.scenario.authProfile });
-  const execute = (provider, ownsProvider) => (reconcile ? reconcileCapturePlan : executeCapturePlan)(built.plan, provider, {
+  if (reconcile && continueUrl) throw inputError('invalid-arguments', ['--reconcile-url 与 --continue-url 不能同时使用。']);
+  let priorEvidence = null;
+  let allowRefresh = false;
+  if (continueUrl) {
+    if (!task.evidenceManifest || !task.lastCapture?.captureIds?.length) throw inputError('invalid-prior-capture', ['任务缺少上一轮证据清单。']);
+    try { priorEvidence = JSON.parse(fs.readFileSync(path.join(projectRoot, task.evidenceManifest), 'utf8')); }
+    catch (_) { throw inputError('invalid-prior-capture', ['上一轮证据清单不可读。']); }
+    allowRefresh = priorEvidence.steps?.length === built.plan.steps.length;
+    if (allowRefresh && JSON.stringify(task.lastCapture.pageRevisions) !== JSON.stringify(pageRevisionsFor(task, pages))) {
+      throw inputError('continuation-page-changed', ['页面状态或断言在上次采集后变化，不能只读刷新旧证据。']);
+    }
+    if (allowRefresh && task.lastCapture.scenarioRevision !== scenario.scenario.revision) {
+      throw inputError('continuation-scenario-changed', ['任务场景在上次采集后变化，不能只读刷新旧证据。']);
+    }
+  }
+  const execute = (provider, ownsProvider) => (continueUrl ? continueReadOnlyCapturePlan : reconcile ? reconcileCapturePlan : executeCapturePlan)(built.plan, provider, {
     preflight,
     onProgress: (step) => process.stderr.write(`[manual capture] ${taskId}: ${step}\n`),
     routes: data.routes,
@@ -95,6 +111,7 @@ async function captureTask({ projectRoot, config, taskId, session = null, runId 
     authRuntime: authRuntimeFor(auth, { refresh: ownsProvider }),
     ownsProvider,
     ...(reconcile ? { sessionUrl: reconcile.sessionUrl, priorCaptureIds: reconcile.priorCaptureIds } : {}),
+    ...(continueUrl ? { sessionUrl: continueUrl, priorEvidence, priorCaptureIds: task.lastCapture.captureIds, allowRefresh } : {}),
   });
   let evidence;
   const warnings = [];

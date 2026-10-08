@@ -35,7 +35,9 @@ function blobFileFor(stateDirAbs, hash) {
 function writeGeneratedBlob(stateDirAbs, markdown) {
   const hex = sha256Hex(markdown);
   const file = blobFileFor(stateDirAbs, hex);
-  if (!fs.existsSync(file)) {
+  if (fs.existsSync(file)) {
+    if (sha256Hex(fs.readFileSync(file)) !== hex) throw new Error(`generated-blob-conflict: ${file} 的内容与文件名 hash 不一致。`);
+  } else {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     writeFileAtomic(file, markdown);
   }

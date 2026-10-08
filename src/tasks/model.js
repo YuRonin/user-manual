@@ -105,6 +105,33 @@ function validateTask(input) {
       errors.push('completion.verification 需要是 expected 或 verified。');
     }
     const claims = input.completion.claims;
+    if (input.completion.readerChecks !== undefined &&
+        (!Array.isArray(input.completion.readerChecks) || input.completion.readerChecks.some(item => !nonEmpty(item)))) {
+      errors.push('completion.readerChecks 需要是非空字符串数组。');
+    }
+    if (input.completion.goalChecks !== undefined) {
+      const items = input.completion.goalChecks;
+      const claimsById = new Set((Array.isArray(input.completion.claims) ? input.completion.claims : []).map(item => item?.id));
+      const readerChecks = new Set(Array.isArray(input.completion.readerChecks) ? input.completion.readerChecks : []);
+      if (!Array.isArray(items) || items.length === 0) errors.push('completion.goalChecks 需要是非空数组。');
+      else {
+        const seen = new Set();
+        items.forEach((item, index) => {
+          const where = `completion.goalChecks[${index}]`;
+          if (!item || !nonEmpty(item.id) || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(item.id) || seen.has(item.id)) errors.push(`${where}.id 需要是唯一的小写连字符 id。`);
+          else seen.add(item.id);
+          if (!nonEmpty(item?.text)) errors.push(`${where}.text 需要说明对应的任务目标。`);
+          const claimRefs = item?.claimIds || [];
+          const readerRefs = item?.readerChecks || [];
+          if (!Array.isArray(claimRefs) || !Array.isArray(readerRefs) || (!claimRefs.length && !readerRefs.length)) {
+            errors.push(`${where} 需要 claimIds 或 readerChecks。`);
+          } else {
+            if (claimRefs.some(id => !claimsById.has(id))) errors.push(`${where}.claimIds 引用了不存在的完成声明。`);
+            if (readerRefs.some(value => !readerChecks.has(value))) errors.push(`${where}.readerChecks 必须引用现有读者核对项的原文。`);
+          }
+        });
+      }
+    }
     if (claims !== undefined) {
       if (!Array.isArray(claims)) errors.push('completion.claims 需要是数组。');
       else {

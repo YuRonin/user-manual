@@ -24,6 +24,7 @@ const path = require('path');
 
 const { revisionOf } = require('../util/hash');
 const { isUuid } = require('../model/ids');
+const { validateCapture, validateRelease } = require('../model/schema');
 
 const DAY = 24 * 60 * 60 * 1000;
 const DEFAULT_RETENTION = { stagingDays: 7, diagnosticsDays: 7, runLogDays: 30, rawDays: 30, unreferencedCaptureDays: 30, pinnedCaptures: [] };
@@ -79,6 +80,7 @@ function collectReferences({ projectRoot, config, now }) {
   const graphs = new Set();
   const activeRuns = new Set();
   const roots = [];
+  const referenceErrors = [];
 
   // 发布记录（全部）
   const releasesDir = path.join(stateDirAbs, 'releases');
@@ -87,7 +89,7 @@ function collectReferences({ projectRoot, config, now }) {
     for (const entry of listDir(path.join(releasesDir, manual.name))) {
       if (!entry.name.endsWith('.json') || entry.name === 'current.json') continue;
       const release = readJson(path.join(releasesDir, manual.name, entry.name));
-      if (!release) continue;
+      if (!release || !validateRelease(release).ok) { referenceErrors.push(`发布记录不可读或无效: ${toPosix(path.relative(projectRoot, path.join(releasesDir, manual.name, entry.name)))}`); continue; }
       roots.push(`release:${manual.name}/${release.id}`);
       for (const id of release.captureIds || []) captures.add(id);
       for (const artifact of release.artifacts || []) files.add(toPosix(artifact.path));
@@ -97,12 +99,23 @@ function collectReferences({ projectRoot, config, now }) {
     }
   }
   // 当前引用
-  const latest = readJson(path.join(stateDirAbs, 'evidence', 'latest.json'));
+  const latestFile = path.join(stateDirAbs, 'evidence', 'latest.json');
+  const latest = readJson(latestFile);
+  if (fs.existsSync(latestFile) && !latest) referenceErrors.push('evidence/latest.json 不可读');
   for (const id of Object.values(latest?.refs || {})) captures.add(id);
   // 模型投影（页面 / 任务 YAML 由 project store 物化；直接读取快照避免依赖加载）
   try {
-    const { createProjectStore } = require('./project');
+    const { createProjectStore, readWorkingCopy } = require('./project');
+    const { contentRevisionOf } = require('./snapshot');
     const committed = createProjectStore({ stateDirAbs, docsOutputDir: config.docs.outputDir }).readCommitted();
+    const working = readWorkingCopy(stateDirAbs);
+    if (!working.ok) throw Object.assign(new Error(working.errors.join('；')), { code: 'working-model-invalid' });
+    if (committed && contentRevisionOf(working.model) !== committed.revision) {
+      throw Object.assign(new Error('工作副本与已提交快照不同，请先导入或修复模型。'), { code: 'working-model-uncommitted' });
+    }
+    if (!committed && ((working.model.pages || []).length || (working.model.tasks || []).length)) {
+      throw Object.assign(new Error('存在页面或任务工作副本，但没有已提交快照。'), { code: 'model-snapshot-missing' });
+    }
     for (const page of committed?.model?.pages || []) {
       if (page.browser?.latestCaptureId) captures.add(page.browser.latestCaptureId);
       if (page.browser?.published?.artifactPath) files.add(toPosix(page.browser.published.artifactPath));
@@ -111,7 +124,7 @@ function collectReferences({ projectRoot, config, now }) {
       for (const id of [...(task.captureIds || []), ...(task.lastCapture?.captureIds || [])]) captures.add(id);
       if (task.evidenceManifest) files.add(toPosix(task.evidenceManifest));
     }
-  } catch (_) { /* 模型不可读时只按其它根保守处理：见 plan 中的 modelUnreadable */ }
+  } catch (error) { referenceErrors.push(`当前模型不可读: ${error.code || error.message}`); }
   // 草稿 facts
   for (const file of walkFiles(path.join(stateDirAbs, 'drafts')).filter((f) => f.endsWith('.facts.json'))) {
     const facts = readJson(file);
@@ -147,12 +160,13 @@ function collectReferences({ projectRoot, config, now }) {
   for (const entry of listDir(captureDir)) {
     if (!entry.name.endsWith('.json')) continue;
     const record = readJson(path.join(captureDir, entry.name));
-    if (record?.id) records.set(record.id, record);
+    if (record?.id && validateCapture(record).ok) records.set(record.id, record);
+    else referenceErrors.push(`Capture 记录不可读: ${toPosix(path.relative(projectRoot, path.join(captureDir, entry.name)))}`);
   }
   for (const id of captures) {
     for (const artifact of records.get(id)?.artifacts || []) files.add(toPosix(artifact.path));
   }
-  return { stateDirAbs, captures, files, blobs, graphs, activeRuns, records, roots };
+  return { stateDirAbs, captures, files, blobs, graphs, activeRuns, records, roots, referenceErrors };
 }
 
 /**
@@ -162,6 +176,11 @@ function collectReferences({ projectRoot, config, now }) {
 function planRetention({ projectRoot, config, now = Date.now() }) {
   const policy = retentionOf(config);
   const refs = collectReferences({ projectRoot, config, now });
+  if (refs.referenceErrors.length) {
+    const error = new Error(`引用图不完整，拒绝生成回收计划：${refs.referenceErrors.join('；')}`);
+    error.code = 'retention-reference-unavailable';
+    throw error;
+  }
   const { stateDirAbs } = refs;
   const items = [];
   const rel = (abs) => toPosix(path.relative(projectRoot, abs));
@@ -230,6 +249,60 @@ function planRetention({ projectRoot, config, now = Date.now() }) {
   };
 }
 
+/** Read-only inventory of historical objects; these are not gc deletion candidates. */
+function historyInventory({ projectRoot, config, now = Date.now() }) {
+  const refs = collectReferences({ projectRoot, config, now });
+  const state = refs.stateDirAbs;
+  const items = [];
+  const add = (file, kind, reason) => items.push({
+    path: toPosix(path.relative(projectRoot, file)), kind, reason, bytes: sizeOf(file),
+  });
+  const releaseRoot = path.join(state, 'releases');
+  for (const manual of listDir(releaseRoot).filter(entry => entry.isDirectory() && entry.name !== 'blobs')) {
+    const dir = path.join(releaseRoot, manual.name);
+    const current = readJson(path.join(dir, 'current.json'))?.releaseId;
+    for (const entry of listDir(dir).filter(e => e.name.endsWith('.json') && e.name !== 'current.json')) {
+      const file = path.join(dir, entry.name);
+      add(file, 'release', entry.name === `${current}.json` ? 'current-release' : 'historical-release-recovery');
+    }
+  }
+  const pointer = readJson(path.join(state, 'current.json'));
+  const snapshotDir = path.join(state, 'snapshots');
+  const snapshots = new Map();
+  for (const entry of listDir(snapshotDir).filter(e => e.name.endsWith('.json'))) {
+    const file = path.join(snapshotDir, entry.name);
+    const body = readJson(file);
+    if (body?.revision && entry.name === `${String(body.revision).replace(/^sha256:/, '')}.json`) snapshots.set(body.revision, { file, parent: body.parent });
+    else add(file, 'snapshot', 'unreadable-model-snapshot-review-required');
+  }
+  const chain = new Set();
+  let revision = pointer?.revision;
+  while (revision && snapshots.has(revision) && !chain.has(revision)) {
+    chain.add(revision);
+    revision = snapshots.get(revision).parent;
+  }
+  for (const [rev, record] of snapshots) add(record.file, 'snapshot',
+    rev === pointer?.revision ? 'current-model' : chain.has(rev) ? 'model-recovery-chain' : 'unlinked-model-snapshot');
+  const captureRoot = path.join(state, 'evidence', 'captures');
+  for (const entry of listDir(captureRoot).filter(e => e.name.endsWith('.json'))) {
+    const file = path.join(captureRoot, entry.name);
+    const id = readJson(file)?.id;
+    add(file, 'capture', refs.captures.has(id) ? 'referenced-capture' : 'unreferenced-capture-retention');
+  }
+  for (const file of walkFiles(path.join(projectRoot, config.artifacts.annotatedDir))) {
+    const relative = toPosix(path.relative(projectRoot, file));
+    add(file, 'published-image', refs.files.has(relative) ? 'referenced-image' : 'unreferenced-image-retention');
+  }
+  items.sort((a, b) => a.path.localeCompare(b.path));
+  const summary = { objects: items.length, bytes: items.reduce((n, item) => n + item.bytes, 0), byKind: {} };
+  for (const item of items) {
+    const row = summary.byKind[item.kind] || { objects: 0, bytes: 0 };
+    row.objects++; row.bytes += item.bytes; summary.byKind[item.kind] = row;
+  }
+  return { planHash: revisionOf(items), items, summary, completeSnapshotChain: !!pointer?.revision && !revision,
+    referenceErrors: refs.referenceErrors };
+}
+
 /** 允许删除的根目录（项目内）：状态目录与各产物目录。 */
 function allowedRoots(projectRoot, config) {
   const list = [config.artifacts.stateDir, config.artifacts.rawDir, config.artifacts.taskRawDir, config.artifacts.sanitizedDir, config.artifacts.diagnosticsDir, config.artifacts.annotatedDir]
@@ -288,4 +361,4 @@ function applyRetention({ projectRoot, config, expectedPlanHash = null, now = Da
   }, { name: 'project', ...lockOptions });
 }
 
-module.exports = { DEFAULT_RETENTION, retentionOf, collectReferences, planRetention, applyRetention, safeTarget, allowedRoots };
+module.exports = { DEFAULT_RETENTION, retentionOf, collectReferences, planRetention, historyInventory, applyRetention, safeTarget, allowedRoots };

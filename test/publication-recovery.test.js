@@ -84,6 +84,41 @@ test('正常发布：文档、不可变发布记录、current 指针；旧发布
   assert.strictEqual(second.release.facts.factsHash, `sha256:${'f'.repeat(64)}`, '发布记录自带 facts，verify 不依赖草稿');
 });
 
+test('相同发布复用当前记录；证据变化仍创建新记录', (root) => {
+  setup(root);
+  const params = input(root);
+  const first = publish(params);
+  const pointer = fs.readFileSync(path.join(state(root), 'releases', 'task-t', 'current.json'), 'utf8');
+  const again = publish(params);
+  assert.strictEqual(again.reused, true);
+  assert.strictEqual(again.release.id, first.release.id);
+  assert.deepStrictEqual(listReleases(state(root), 'task-t'), [first.release.id]);
+  assert.strictEqual(listJournals(state(root)).length, 1);
+  assert.strictEqual(fs.readFileSync(path.join(state(root), 'releases', 'task-t', 'current.json'), 'utf8'), pointer);
+  const changed = publish({ ...params, facts: { ...params.facts, factsHash: `sha256:${'e'.repeat(64)}` } });
+  assert.notStrictEqual(changed.release.id, first.release.id);
+  assert.strictEqual(listReleases(state(root), 'task-t').length, 2);
+});
+
+test('相同发布也检查发布图完整性', (root) => {
+  setup(root);
+  const params = input(root);
+  publish(params);
+  fs.writeFileSync(path.join(root, IMAGE), 'swapped');
+  assert.throws(() => publish(params), (error) => error.code === 'publication-assets-invalid');
+  assert.strictEqual(listReleases(state(root), 'task-t').length, 1);
+});
+
+test('生成正文 blob 损坏时拒绝重复发布', (root) => {
+  setup(root);
+  const params = input(root);
+  const first = publish(params);
+  const blob = path.join(state(root), 'releases', 'blobs', `${first.release.generatedBlob.slice(7)}.md`);
+  fs.writeFileSync(blob, 'corrupt');
+  assert.throws(() => publish(params), /generated-blob-conflict/);
+  assert.strictEqual(listReleases(state(root), 'task-t').length, 1);
+});
+
 for (const boundary of ['prepared', 'assets-installed', 'document-installed', 'release-committed']) {
   test(`在 ${boundary} 之后被杀：读者看到完整的旧版或新版；repair 完成且重复恢复不产生第二条记录`, (root) => {
     setup(root);

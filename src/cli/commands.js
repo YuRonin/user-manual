@@ -18,6 +18,8 @@ const COMMANDS = [
   { name: 'run-submit', module: 'run-submit', summary: '提交宿主模型对交接请求的响应，解除等待' },
   { name: 'approve-tasks', module: 'approve-tasks', summary: '人工确认、调整或拒绝候选用户任务' },
   { name: 'discover-tasks', module: 'discover-tasks', summary: '从页面证据提出候选用户任务，等待人工确认' },
+  { name: 'task-guide', module: 'task-guide', summary: '从任务目标生成只读建模工作表与页面候选' },
+  { name: 'review-task', module: 'review-task', summary: '只读审阅目标覆盖、完成证据与逐步截图' },
   { name: 'plan-capture', module: 'plan-capture', summary: '为已批准任务生成可审阅的安全截图计划' },
   { name: 'capture-task', module: 'capture-task', summary: '按安全边界执行任务步骤并采集原始证据' },
   { name: 'generate-task', module: 'generate-task', summary: '生成并校验任务型指南' },

@@ -129,6 +129,35 @@ function pageRevisionsFor(task, pages = []) {
   return out;
 }
 
+/** A newly declared state cannot invalidate a task that never refers to it. */
+function compatiblePageRevisionsFor(task, pages = [], captured = {}) {
+  const current = pageRevisionsFor(task, pages);
+  const out = { ...current };
+  for (const page of pages) {
+    const oldRevision = captured[page.id];
+    if (!oldRevision || !current[page.id] || current[page.id] === oldRevision) continue;
+    const referenced = new Set(task.entryPage === page.id ? ['default'] : []);
+    for (const step of task.steps || []) {
+      const beforePage = step.pageId ?? step.page;
+      const afterPage = step.pageAfter || beforePage;
+      const before = step.stateBefore || 'default';
+      if (beforePage === page.id) referenced.add(before);
+      if (afterPage === page.id) referenced.add(step.stateAfter || before);
+    }
+    const removable = Object.keys(page.states || {}).filter((id) => !referenced.has(id));
+    // Bound the compatibility check. A larger change stays stale until recaptured.
+    if (!removable.length || removable.length > 12) continue;
+    for (let mask = 1; mask < 2 ** removable.length; mask++) {
+      const states = { ...page.states };
+      for (let bit = 0; bit < removable.length; bit++) if (mask & (1 << bit)) delete states[removable[bit]];
+      const candidate = { ...page, states };
+      if (!Object.keys(states).length) delete candidate.states;
+      if (pageObservationRevision(candidate) === oldRevision) { out[page.id] = oldRevision; break; }
+    }
+  }
+  return out;
+}
+
 const LEGACY_EVIDENCE_STATUSES = ['captured', 'generated', 'verified'];
 
 /**
@@ -147,7 +176,7 @@ function evidenceFreshness(task, pages = []) {
     return { status: 'missing', reasons: ['never-captured'] };
   }
   if (last.scopeHash !== scopeHash(task, pages)) reasons.push('scope-changed');
-  const current = pageRevisionsFor(task, pages);
+  const current = compatiblePageRevisionsFor(task, pages, last.pageRevisions);
   for (const [pageId, rev] of Object.entries(last.pageRevisions || {})) {
     if (current[pageId] !== rev) reasons.push(`page-changed:${pageId}`);
   }
@@ -180,4 +209,5 @@ function checkEvidenceUsable(task, pages = []) {
 module.exports = {
   APPROVAL_STATES, approvalScope, scopeHash, approve, approvalState, approvalMessage,
   pageObservationRevision, pageRevisionsFor, evidenceFreshness, checkEvidenceUsable,
+  compatiblePageRevisionsFor,
 };

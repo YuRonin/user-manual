@@ -63,16 +63,16 @@ async function main() {
   });
 
   await test('停在第三方 SSO 主机不算登录完成', async () => {
-    const page = fakePage('https://sso.other.test/authorize');
+    const page = fakePage('https://sso.other.test/authorize?code=private-code');
     const provider = providerWith([page]);
     await assert.rejects(
       provider.waitForAuthentication({ loginUrl: 'https://app.test/login', timeout: 60, pollInterval: 10 }),
-      (error) => error.code === 'auth-timeout' && error.message.includes('https://sso.other.test/authorize'),
+      (error) => error.code === 'auth-timeout' && error.message.includes('https://sso.other.test/…') && !error.message.includes('private-code'),
     );
   });
 
   await test('窗口在保存前被关闭时立即报 auth-window-closed', async () => {
-    const page = fakePage('https://app.test/login');
+    const page = fakePage('https://app.test/login?state=private-state');
     const provider = providerWith([page]);
     setTimeout(() => { page.closed = true; }, 20);
     const started = Date.now();
@@ -84,13 +84,14 @@ async function main() {
   });
 
   await test('等待过程输出进度', async () => {
-    const page = fakePage('https://app.test/login');
+    const page = fakePage('https://app.test/login?state=private-state');
     const provider = providerWith([page]);
     const messages = [];
     setTimeout(() => { page.current = 'https://app.test/chat'; }, 30);
     await provider.waitForAuthentication({ loginUrl: 'https://app.test/login', timeout: 2000, pollInterval: 10, onProgress: (m) => messages.push(m) });
     assert.ok(messages.some((m) => m.includes('已打开登录页')));
     assert.ok(messages.some((m) => m.includes('检测到已离开登录页')));
+    assert.ok(messages.every((m) => !m.includes('private-state')));
   });
 
   await test('probeRedirect 识别 http → https 并给出修改建议', async () => {

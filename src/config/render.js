@@ -211,6 +211,7 @@ const STATE_IGNORES = [
   // Run 状态、事件日志、模型交接文件（可能含业务文案）和草稿都是本机产物；分享用去敏导出。
   'runs/',
   'drafts/',
+  'previews/',
   '*.bak',
 ];
 

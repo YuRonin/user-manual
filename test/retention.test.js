@@ -102,6 +102,51 @@ function tree(dir) {
       assert.deepStrictEqual(tree(state), before);
     });
 
+    await step('历史盘点逐项说明当前发布、模型恢复链与发布图，且只读', async () => {
+      const before = tree(state);
+      const out = await expectExit(root, ['gc', '--inventory'], 0, env);
+      assert.strictEqual(out.dryRun, true);
+      assert.ok(out.items.some(item => item.kind === 'release' && item.reason === 'current-release'));
+      assert.ok(out.items.some(item => item.kind === 'snapshot' && item.reason === 'current-model'));
+      assert.ok(out.items.some(item => item.kind === 'published-image' && item.reason === 'referenced-image'));
+      assert.strictEqual(out.completeSnapshotChain, true);
+      assert.deepStrictEqual(tree(state), before);
+      const invalid = await expectExit(root, ['gc', '--inventory', '--apply'], 2, env);
+      assert.strictEqual(invalid.code, 'invalid-arguments');
+      assert.deepStrictEqual(tree(state), before);
+    });
+
+    await step('引用记录或当前模型损坏时 gc 拒绝规划与应用', async () => {
+      const releaseFile = path.join(state, 'releases', 'page-chat', `${released.id}.json`);
+      const pointer = JSON.parse(fs.readFileSync(path.join(state, 'current.json'), 'utf8'));
+      const snapshotFile = path.join(state, 'snapshots', `${pointer.revision.replace(/^sha256:/, '')}.json`);
+      for (const file of [releaseFile, snapshotFile]) {
+        const original = fs.readFileSync(file);
+        try {
+          fs.writeFileSync(file, '{broken');
+          const out = await expectExit(root, ['gc'], 1, env);
+          assert.strictEqual(out.code, 'retention-reference-unavailable');
+          const apply = await expectExit(root, ['gc', '--apply'], 1, env);
+          assert.strictEqual(apply.code, 'retention-reference-unavailable');
+          assert.ok(fs.existsSync(path.join(root, released.documentPath)));
+        } finally { fs.writeFileSync(file, original); }
+      }
+    });
+
+    await step('未提交的页面工作副本存在时 gc 不按旧快照清理', async () => {
+      const pageFile = path.join(state, 'pages', 'chat.yaml');
+      const original = fs.readFileSync(pageFile);
+      try {
+        fs.appendFileSync(pageFile, '\n# pending human edit\n');
+        // 注释不改变模型；改动真实字段才能形成未提交的引用图分歧。
+        const changed = fs.readFileSync(pageFile, 'utf8').replace('title: 工作台', 'title: 改动中的工作台');
+        fs.writeFileSync(pageFile, changed);
+        const out = await expectExit(root, ['gc'], 1, env);
+        assert.strictEqual(out.code, 'retention-reference-unavailable');
+        assert.match(out.errors[0], /working-model-uncommitted/);
+      } finally { fs.writeFileSync(pageFile, original); }
+    });
+
     let plan;
     await step('31 天后：列出 staging / 诊断 / 已结束 Run / 未引用 Capture / 原图；保留发布记录、发布图、活动 Run', () => {
       plan = planRetention({ projectRoot: root, config: config(), now: future });

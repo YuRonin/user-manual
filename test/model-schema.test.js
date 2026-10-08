@@ -97,6 +97,13 @@ test('risk / replay / capture timing / stepId 安全字符 / 重复 stepId', () 
   assert.ok(hasError(r, 'steps[0].capture.timing', 'invalid-capture'));
   assert.ok(hasError(r, 'steps[2].id', 'duplicate-id'));
 });
+test('读者前提与截图图注只接受非空文字', () => {
+  const base=task();
+  assert.equal(schema.validateUserTask(task({readerPreconditions:['已登录'],steps:[{...base.steps[0],capture:{...base.steps[0].capture,readerCaption:'编辑面板已打开。'}}]})).ok,true);
+  assert.ok(hasError(schema.validateUserTask(task({readerPreconditions:['']})), 'readerPreconditions','invalid-preconditions'));
+  assert.ok(hasError(schema.validateUserTask(task({steps:[{...base.steps[0],capture:{timing:'after',readerCaption:'  '}}]})), 'steps[0].capture.readerCaption','invalid-capture'));
+  assert.ok(hasError(schema.validateUserTask(task({steps:[{...base.steps[0],capture:{timing:'after',readerVisible:'no'}}]})), 'steps[0].capture.readerVisible','invalid-capture'));
+});
 
 test('引用存在性：页面、状态、claim 断言、checkpoint', () => {
   const step = task().steps[0];
@@ -113,6 +120,13 @@ test('引用存在性：页面、状态、claim 断言、checkpoint', () => {
   // 执行器生成的断言 id 也可被引用
   const auto = schema.validateUserTask(task({ completion: { description: 'x', claims: [{ id: 'c', text: 't', assertionRefs: ['user-center:editor-open#0'] }] } }), { pages: [page()] });
   assert.deepStrictEqual(codes(auto), []);
+});
+
+test('读者核对项只接受非空文字，不被当作证据断言', () => {
+  const valid = task({ completion: { ...task().completion, readerChecks: ['打开题目预览并核对数量。'] } });
+  assert.equal(schema.validateUserTask(valid, { pages: [page()] }).ok, true);
+  const invalid = task({ completion: { ...task().completion, readerChecks: [''] } });
+  assert.ok(hasError(schema.validateUserTask(invalid, { pages: [page()] }), 'completion.readerChecks', 'invalid-reader-checks'));
 });
 
 test('页面路径必须是项目根相对路径', () => {

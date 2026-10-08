@@ -35,7 +35,7 @@ const KNOWN_FIELDS = {
   page: ['schemaVersion', 'id', 'revision', 'lifecycle', 'title', 'purpose', 'route', 'dynamic', 'params', 'routeBindings',
     'entry', 'source', 'dependencies', 'includeInManual', 'detectedActions', 'guide', 'states', 'identityAssertions', 'confidence',
     'browser', 'status', 'analysis', 'latestCaptureId'],
-  userTask: ['schemaVersion', 'id', 'revision', 'title', 'goal', 'entryPage', 'priority', 'preconditions', 'risk', 'status',
+  userTask: ['schemaVersion', 'id', 'revision', 'title', 'goal', 'entryPage', 'priority', 'preconditions', 'readerPreconditions', 'risk', 'status',
     'approval', 'environment', 'fixtures', 'writeAuthorization', 'steps', 'branches', 'relatedTasks', 'completion', 'evidence', 'evidenceManifest',
     'capturePlan', 'captureIds', 'lastCapture', 'stale', 'lastVerification', 'params', 'authProfile',
     'source', 'discovery', 'generatedAt', 'updatedAt', 'notes', 'history'],
@@ -171,6 +171,12 @@ function validateCaptureSpec(c, capture, path) {
   if (capture.mode !== undefined && !CAPTURE_MODES.includes(capture.mode)) {
     c.error(`${path}.mode`, 'invalid-capture', `capture.mode 需要是 ${CAPTURE_MODES.join(' / ')} 之一。`);
   }
+  if (capture.readerCaption !== undefined && !nonEmpty(capture.readerCaption)) {
+    c.error(`${path}.readerCaption`, 'invalid-capture', 'readerCaption 需要非空文字。');
+  }
+  if (capture.readerVisible !== undefined && typeof capture.readerVisible !== 'boolean') {
+    c.error(`${path}.readerVisible`, 'invalid-capture', 'readerVisible 需要布尔值。');
+  }
   if (capture.annotations !== undefined) {
     if (!Array.isArray(capture.annotations)) { c.error(`${path}.annotations`, 'invalid-capture', 'annotations 需要是数组。'); return; }
     capture.annotations.forEach((annotation, index) => {
@@ -286,6 +292,9 @@ function validateUserTask(task, context = {}) {
     if (!nonEmpty(task[field])) c.error(field, 'required', `${field} 需要是非空字符串。`);
   }
   if (task.risk !== undefined && !RISKS.includes(task.risk)) c.error('risk', 'invalid-risk', `risk 需要是 ${RISKS.join(' / ')} 之一。`);
+  if (task.readerPreconditions !== undefined && (!Array.isArray(task.readerPreconditions) || task.readerPreconditions.some((item) => !nonEmpty(item)))) {
+    c.error('readerPreconditions', 'invalid-preconditions', 'readerPreconditions 需要非空文字数组。');
+  }
   if (task.approval !== undefined && task.approval !== null) {
     if (!isObject(task.approval) || !APPROVAL_STATUSES.includes(task.approval.status)) {
       c.error('approval.status', 'invalid-approval', `approval.status 需要是 ${APPROVAL_STATUSES.join(' / ')} 之一。`);
@@ -349,6 +358,34 @@ function validateUserTask(task, context = {}) {
     }
   }
   const claims = task.completionClaims ?? task.completion?.claims;
+  if (task.completion?.readerChecks !== undefined) {
+    const checks = task.completion.readerChecks;
+    if (!Array.isArray(checks) || checks.some(item => !nonEmpty(item))) {
+      c.error('completion.readerChecks', 'invalid-reader-checks', 'readerChecks 需要是非空字符串数组。');
+    }
+  }
+  if (task.completion?.goalChecks !== undefined) {
+    const items = task.completion.goalChecks;
+    const claimIds = new Set((Array.isArray(claims) ? claims : []).map(item => item?.id));
+    const readerChecks = new Set(Array.isArray(task.completion.readerChecks) ? task.completion.readerChecks : []);
+    if (!Array.isArray(items) || items.length === 0) c.error('completion.goalChecks', 'invalid-goal-checks', 'goalChecks 需要是非空数组。');
+    else {
+      const seen = new Set();
+      items.forEach((item, index) => {
+        const where = `completion.goalChecks[${index}]`;
+        if (!isObject(item) || !isSafeId(item.id) || seen.has(item.id)) c.error(`${where}.id`, 'invalid-goal-checks', '需要唯一的小写连字符 id。');
+        else seen.add(item.id);
+        if (!nonEmpty(item?.text)) c.error(`${where}.text`, 'invalid-goal-checks', '需要说明对应的任务目标。');
+        const claimRefs = item?.claimIds || [];
+        const readerRefs = item?.readerChecks || [];
+        if (!Array.isArray(claimRefs) || !Array.isArray(readerRefs) || (!claimRefs.length && !readerRefs.length)) c.error(where, 'invalid-goal-checks', '需要 claimIds 或 readerChecks。');
+        else {
+          if (claimRefs.some(id => !claimIds.has(id))) c.error(`${where}.claimIds`, 'missing-reference', '引用了不存在的完成声明。');
+          if (readerRefs.some(value => !readerChecks.has(value))) c.error(`${where}.readerChecks`, 'missing-reference', '必须引用现有读者核对项的原文。');
+        }
+      });
+    }
+  }
   const claimsPath = task.completionClaims !== undefined ? 'completionClaims' : 'completion.claims';
   if (claims !== undefined) {
     if (!Array.isArray(claims)) c.error(claimsPath, 'invalid-claim', '需要是数组。');

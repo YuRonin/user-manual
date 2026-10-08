@@ -67,6 +67,16 @@ function validateTaskFinal(markdown, facts, { renderedFromPack = false } = {}) {
   if (got.images.some((i) => i.kind === 'html')) errors.push('正式文档不允许原始 HTML 图片。');
   if (!renderedFromPack && JSON.stringify(got.uiTexts) !== JSON.stringify(facts.uiTexts)) errors.push('已确认的 UI 原文发生变化。');
   checkClaims(got, facts, errors, templateFor(language));
+  const readerChecks = facts.factPack?.readerChecks || [];
+  const template = templateFor(language);
+  const completionBlock = /<!-- manual:block id=completion -->([\s\S]*?)<!-- \/manual:block -->/.exec(markdown)?.[1] || '';
+  const readerChecksText = [`### ${template.readerChecks}`, '', ...readerChecks.map(item => `- ${item}`)].join('\n');
+  if (readerChecks.length && !completionBlock.includes(readerChecksText)) {
+    errors.push('读者核对项缺失或发生变化。');
+  }
+  if (!readerChecks.length && completionBlock.includes(`### ${template.readerChecks}`)) {
+    errors.push('文档出现事实包中没有的读者核对项。');
+  }
   return errors.length ? { ok: false, errors } : { ok: true };
 }
 

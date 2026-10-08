@@ -123,7 +123,7 @@ const writeJson = (file, value) => { fs.writeFileSync(file, JSON.stringify(value
       await ok(root, ['verify', 'edit-profile']);
       const doc = fs.readFileSync(path.join(docs, 'tasks', 'edit-profile.md'), 'utf8');
       assert.match(doc, /1\. 点击「编辑资料」\n\n {3}「编辑资料」在个人信息卡片右上角。/);
-      assert.match(doc, /已验证界面结果：编辑资料面板已打开。/);
+      assert.match(doc, /采集时已看到：编辑资料面板已打开。/);
     });
 
     await step('6 删除 drafts 后已发布版本仍可验证', async () => {

@@ -115,8 +115,8 @@ async function step(name, fn) {
       await ok(root, ['generate-task', 'edit-profile', '--finalize', draft, '--json']);
       await ok(root, ['verify', 'edit-profile', '--json']);
       const doc = fs.readFileSync(path.join(docs, 'tasks', 'edit-profile.md'), 'utf8');
-      assert.match(doc, /已验证界面结果：编辑资料面板已打开。/);
-      assert.match(doc, /预期业务结果：资料已保存。/);
+      assert.match(doc, /采集时已看到：编辑资料面板已打开。/);
+      assert.match(doc, /预期会看到：资料已保存。/);
     });
 
     await step('Markdown 渲染冒烟：所有正式文档的图片按文档位置可打开，且都在 annotated 发布目录', async () => {
@@ -159,7 +159,7 @@ async function step(name, fn) {
       const cases = [
         ['privacy-unknown', () => { const r = JSON.parse(originalRelease); delete r.facts.images[0].privacy; fs.writeFileSync(releaseFile, JSON.stringify(r)); }],
         ['hash-mismatch', () => { const img = path.join(root, originalFacts.images[0].artifactPath); fs.writeFileSync(`${img}.orig`, fs.readFileSync(img)); fs.copyFileSync(path.join(root, require('js-yaml').load(fs.readFileSync(path.join(state, 'pages', 'chat.yaml'), 'utf8')).browser.screenshot), img); }],
-        ['验证等级被改动', () => { fs.writeFileSync(manual, originalDoc.replace('预期业务结果：资料已保存。', '已验证界面结果：资料已保存。')); }],
+        ['验证等级被改动', () => { fs.writeFileSync(manual, originalDoc.replace('预期会看到：资料已保存。', '采集时已看到：资料已保存。')); }],
         ['document-modified', () => { fs.writeFileSync(manual, `${originalDoc}\n补充一句说明。\n`); }],
       ];
       for (const [expected, tamper] of cases) {

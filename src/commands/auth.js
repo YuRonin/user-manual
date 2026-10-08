@@ -11,15 +11,17 @@ const { establishSession } = require('../auth/session');
 const { authDisabled, resolveCapabilities } = require('../auth/identity');
 const { checkAuthOnline } = require('../auth/check');
 const { probeRedirect, redirectWarning } = require('../util/redirect-probe');
+const { openProject, resumeRun, changedInputs } = require('../runtime/app');
+const { printRun, printRuntimeError } = require('../cli/run-report');
 
 const KNOWN_FLAGS = new Set([
-  'projectRoot', 'profile', 'loginUrl', 'verifyPath', 'path', 'timeout', 'json', 'help',
+  'projectRoot', 'profile', 'loginUrl', 'verifyPath', 'path', 'timeout', 'resume', 'json', 'help',
 ]);
 const HELP = `
 manual auth —— 管理可跨 worktree 复用的浏览器认证档案
 
 用法:
-  manual auth login [--profile <名称>] [--login-url <url>] [--verify-path <路径>]
+  manual auth login [--profile <名称>] [--login-url <url>] [--verify-path <路径>] [--resume <Run ID>]
   manual auth status [--profile <名称>] [--json]
   manual auth check [--profile <名称>] [--path <受保护路径>] [--json]
   manual auth clear [--profile <名称>] [--json]
@@ -49,7 +51,15 @@ function resolveUrl(baseUrl, value) {
   return value ? new URL(String(value), `${baseUrl}/`).href : null;
 }
 
-async function run(argv) {
+function authRecoveryTarget(state, profile, defaultProfile) {
+  const planTasks = new Map((state?.plan?.tasks || []).map((task) => [task.id, task]));
+  return (state?.tasks || []).find((task) =>
+    task.effectiveStatus === 'waiting_input' &&
+    ['auth-missing', 'auth-expired', 'login-required'].includes(task.error?.code) &&
+    (planTasks.get(task.id)?.input?.authProfile || defaultProfile) === profile);
+}
+
+async function run(argv, services = {}) {
   const { values, positional, unknownFlags } = parseArgs(argv, { known: KNOWN_FLAGS });
   const json = values.json === true;
   if (values.help) { process.stdout.write(HELP + '\n'); return 0; }
@@ -65,6 +75,22 @@ async function run(argv) {
   const { config } = loaded;
   const profile = String(values.profile || config.auth.activeProfile);
   const ref = { root: cacheRoot(), cacheKey: config.auth.cacheKey, profile };
+
+  if (values.resume === '') return fail(Object.assign(new Error('--resume 缺少 Run ID。'), { code: 'invalid-arguments' }), json);
+  if (values.resume && action !== 'login') return fail(Object.assign(new Error('--resume 只适用于 auth login。'), { code: 'invalid-arguments' }), json);
+
+  if (values.resume) {
+    try {
+      const project = (services.openProject || openProject)(projectRoot);
+      const state = project.runStore.read(String(values.resume));
+      if (!state) throw Object.assign(new Error(`找不到 Run ${values.resume}。`), { code: 'run-not-found' });
+      if (!authRecoveryTarget(state, profile, config.auth.activeProfile)) {
+        throw Object.assign(new Error(`Run ${values.resume} 没有等待认证档案 ${profile} 的任务；先用 manual status ${values.resume} 查看等待原因。`), { code: 'auth-resume-unavailable' });
+      }
+      const { changed } = (services.changedInputs || changedInputs)({ projectRoot, project, state });
+      if (changed.length) throw Object.assign(new Error(`Run ${values.resume} 的输入已变化（${changed.join(', ')}）。先运行 manual resume ${values.resume} --replan；未打开登录窗口。`), { code: 'run-input-changed' });
+    } catch (error) { return fail(error, json); }
+  }
 
   if (authDisabled(config, profile)) {
     // 匿名 / 未启用认证：不读、不写、不清理任何认证缓存。
@@ -109,20 +135,21 @@ async function run(argv) {
   const activeProvider = config.browser.providers[activeId];
   // 先查 baseUrl 是否被重定向到另一个协议 / 主机：这是登录后"CLI 一直等不到"的头号原因，打开浏览器前就说清楚。
   const preflight = [];
-  const redirect = redirectWarning(config.project.baseUrl, await probeRedirect(config.project.baseUrl));
+  const redirect = redirectWarning(config.project.baseUrl, await (services.probeRedirect || probeRedirect)(config.project.baseUrl));
   if (redirect) {
     preflight.push(redirect);
     process.stderr.write(`[manual auth] ⚠ ${redirect}\n`);
   }
-  const provider = createProvider({
+  const provider = (services.createProvider || createProvider)({
     id: `${activeId}-auth`,
     profile: profileConfig,
     providerConfig: { ...activeProvider, type: 'playwright', headless: false },
   });
+  let saved;
   try {
     const loginUrl = resolveUrl(config.project.baseUrl, values.loginUrl || config.auth.loginUrl);
     const verifyUrl = resolveUrl(config.project.baseUrl, values.verifyPath || config.auth.verifyPath);
-    const result = await establishSession({
+    const result = await (services.establishSession || establishSession)({
       provider,
       loginUrl,
       verifyUrl,
@@ -139,13 +166,21 @@ async function run(argv) {
       validatedAt: result.validatedAt,
     });
     const warnings = [...preflight, ...(result.validationStatus === 'validated' ? [] : ['未配置 auth.identityAssertions：登录状态已保存，但未经身份断言确认（validationStatus=unvalidated）。'])];
-    return output({ ok: true, status: 'stored', profile, finalUrl: result.finalUrl, warnings, ...cache.publicMetadata(state, cache.cacheFileFor(ref)) }, { json, action });
+    saved = { ok: true, status: 'stored', profile, warnings, ...cache.publicMetadata(state, cache.cacheFileFor(ref)) };
   } catch (error) {
     if (redirect && error.code === 'auth-timeout') error.message += ` 另外：${redirect}`;
     return fail(error, json);
   } finally {
     await provider.close();
   }
+  if (!values.resume) return output(saved, { json, action });
+  if (!json) output(saved, { json: false, action });
+  try {
+    return printRun({ json, result: await (services.resumeRun || resumeRun)({ projectRoot, runId: String(values.resume) }), label: 'resume', projectRoot,
+      extra: { auth: { status: 'stored', profile, validationStatus: saved.validationStatus } } });
+  } catch (error) {
+    return printRuntimeError({ json, error, label: 'resume' });
+  }
 }
 
-module.exports = { run, HELP, KNOWN_FLAGS, resolveUrl };
+module.exports = { run, HELP, KNOWN_FLAGS, resolveUrl, authRecoveryTarget };

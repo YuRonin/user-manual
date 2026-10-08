@@ -10,6 +10,8 @@ const yaml = require('js-yaml');
 const CLI = path.resolve(__dirname, '..', 'bin', 'manual.js');
 const cache = require('../src/auth/cache');
 const { establishSession } = require('../src/auth/session');
+const { authRecoveryTarget, run: runAuth } = require('../src/commands/auth');
+const { waitingHint } = require('../src/cli/run-report');
 
 let passed = 0;
 const failures = [];
@@ -109,6 +111,122 @@ async function main() {
     const result = run(root, cacheRoot, ['auth', 'explode']);
     assert.strictEqual(result.status, 2, '不支持的子命令是参数错误（C08）');
     assert.match(result.stderr, /login|status|clear/);
+  });
+
+  await test('登录续跑只匹配等待当前认证档案的 Run', async (root, cacheRoot) => {
+    init(root, cacheRoot);
+    const state = {
+      plan: { tasks: [{ id: 'capture-chat', input: { authProfile: 'teacher' } }] },
+      tasks: [{ id: 'capture-chat', effectiveStatus: 'waiting_input', error: { code: 'auth-expired' } }],
+    };
+    assert.strictEqual(authRecoveryTarget(state, 'teacher', 'default')?.id, 'capture-chat');
+    assert.strictEqual(authRecoveryTarget(state, 'default', 'default'), undefined);
+    assert.match(waitingHint('run-1', { id: 'capture-chat', code: 'auth-expired' }, state.plan), /auth login --profile teacher --resume run-1/);
+    const missing = run(root, cacheRoot, ['auth', 'login', '--resume', '00000000-0000-4000-8000-000000000000', '--json']);
+    assert.notStrictEqual(missing.status, 0);
+    assert.strictEqual(JSON.parse(missing.stdout).reason, 'run-not-found');
+    assert.strictEqual(fs.existsSync(cacheRoot), false, '无效 Run 不打开登录窗口或写认证状态');
+  });
+
+  await test('登录保存私有状态并关闭窗口后自动继续原 Run', async (root, cacheRoot) => {
+    const config = init(root, cacheRoot);
+    const runId = '00000000-0000-4000-8000-000000000001';
+    const priorCacheRoot = process.env.MANUAL_AUTH_CACHE_DIR;
+    const priorWrite = process.stdout.write;
+    const chunks = [];
+    const events = [];
+    process.env.MANUAL_AUTH_CACHE_DIR = cacheRoot;
+    process.stdout.write = (chunk) => { chunks.push(String(chunk)); return true; };
+    try {
+      const exit = await runAuth(['login', '--resume', runId, '--project-root', root, '--json'], {
+        openProject: () => ({ runStore: { read: () => ({
+          plan: { tasks: [{ id: 'auth-check', input: { authProfile: 'default' } }] },
+          tasks: [{ id: 'auth-check', effectiveStatus: 'waiting_input', error: { code: 'auth-expired' } }],
+        }) } }),
+        changedInputs: () => ({ changed: [] }),
+        probeRedirect: async () => null,
+        createProvider: () => ({ close: async () => { events.push('closed'); } }),
+        establishSession: async () => ({ storageState: { cookies: [{ name: 'sid', value: 'secret-cookie' }], origins: [] },
+          finalUrl: 'https://app.example.com/chat?session=secret-session', validationStatus: 'validated', identityRevision: 'id', validatedAt: new Date().toISOString() }),
+        resumeRun: async ({ runId: id }) => {
+          assert.strictEqual(id, runId);
+          assert.deepStrictEqual(events, ['closed']);
+          assert.ok(cache.readState({ root: cacheRoot, cacheKey: config.auth.cacheKey, profile: 'default' }));
+          events.push('resumed');
+          return { runId, plan: { tasks: [] }, summary: { status: 'succeeded', succeeded: [], pending: [], waiting: [], failed: [], interrupted: [] } };
+        },
+      });
+      assert.strictEqual(exit, 0);
+      assert.deepStrictEqual(events, ['closed', 'resumed']);
+      const printed = chunks.join('');
+      assert.strictEqual(JSON.parse(printed).status, 'succeeded');
+      assert.ok(!printed.includes('secret-cookie'));
+      assert.ok(!printed.includes('secret-session'));
+    } finally {
+      process.stdout.write = priorWrite;
+      if (priorCacheRoot === undefined) delete process.env.MANUAL_AUTH_CACHE_DIR;
+      else process.env.MANUAL_AUTH_CACHE_DIR = priorCacheRoot;
+    }
+  });
+
+  await test('档案不匹配或输入变化时不打开登录窗口', async (root, cacheRoot) => {
+    init(root, cacheRoot);
+    const runId = '00000000-0000-4000-8000-000000000002';
+    const priorCacheRoot = process.env.MANUAL_AUTH_CACHE_DIR;
+    const priorWrite = process.stdout.write;
+    const chunks = [];
+    let opened = false;
+    process.env.MANUAL_AUTH_CACHE_DIR = cacheRoot;
+    process.stdout.write = (chunk) => { chunks.push(String(chunk)); return true; };
+    const state = { plan: { tasks: [{ id: 'auth-check', input: { authProfile: 'teacher' } }] },
+      tasks: [{ id: 'auth-check', effectiveStatus: 'waiting_input', error: { code: 'auth-expired' } }] };
+    const services = { openProject: () => ({ runStore: { read: () => state } }),
+      changedInputs: () => ({ changed: ['auth-check'] }), createProvider: () => { opened = true; throw new Error('should not open'); } };
+    try {
+      let exit = await runAuth(['login', '--resume', runId, '--project-root', root, '--json'], services);
+      assert.notStrictEqual(exit, 0);
+      assert.strictEqual(JSON.parse(chunks.pop()).reason, 'auth-resume-unavailable');
+      exit = await runAuth(['login', '--profile', 'teacher', '--resume', runId, '--project-root', root, '--json'], services);
+      assert.notStrictEqual(exit, 0);
+      assert.strictEqual(JSON.parse(chunks.pop()).reason, 'run-input-changed');
+      assert.strictEqual(opened, false);
+      assert.strictEqual(fs.existsSync(cacheRoot), false);
+    } finally {
+      process.stdout.write = priorWrite;
+      if (priorCacheRoot === undefined) delete process.env.MANUAL_AUTH_CACHE_DIR;
+      else process.env.MANUAL_AUTH_CACHE_DIR = priorCacheRoot;
+    }
+  });
+
+  await test('登录 JSON 不暴露完整会话 URL，窗口关闭时不保存状态', async (root, cacheRoot) => {
+    const config = init(root, cacheRoot);
+    const priorCacheRoot = process.env.MANUAL_AUTH_CACHE_DIR;
+    const priorWrite = process.stdout.write;
+    const chunks = [];
+    let closed = 0;
+    process.env.MANUAL_AUTH_CACHE_DIR = cacheRoot;
+    process.stdout.write = (chunk) => { chunks.push(String(chunk)); return true; };
+    const services = { probeRedirect: async () => null, createProvider: () => ({ close: async () => { closed++; } }),
+      establishSession: async () => ({ storageState: { cookies: [], origins: [] }, finalUrl: 'https://app.example.com/chat?session=private-id', validationStatus: 'validated' }) };
+    try {
+      let exit = await runAuth(['login', '--project-root', root, '--json'], services);
+      assert.strictEqual(exit, 0);
+      const result = JSON.parse(chunks.pop());
+      assert.strictEqual(result.finalUrl, undefined);
+      assert.ok(!JSON.stringify(result).includes('private-id'));
+      const ref = { root: cacheRoot, cacheKey: config.auth.cacheKey, profile: 'default' };
+      const beforeFailure = cache.readState(ref);
+      services.establishSession = async () => { throw Object.assign(new Error('登录窗口已关闭'), { code: 'auth-window-closed' }); };
+      exit = await runAuth(['login', '--project-root', root, '--json'], services);
+      assert.notStrictEqual(exit, 0);
+      assert.strictEqual(JSON.parse(chunks.pop()).reason, 'auth-window-closed');
+      assert.strictEqual(closed, 2);
+      assert.deepStrictEqual(cache.readState(ref), beforeFailure);
+    } finally {
+      process.stdout.write = priorWrite;
+      if (priorCacheRoot === undefined) delete process.env.MANUAL_AUTH_CACHE_DIR;
+      else process.env.MANUAL_AUTH_CACHE_DIR = priorCacheRoot;
+    }
   });
 
   process.stdout.write(`\n${passed} passed, ${failures.length} failed\n`);

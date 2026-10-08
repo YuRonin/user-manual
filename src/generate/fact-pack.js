@@ -41,7 +41,7 @@ function seal(pack) {
  * @param {Array}  p.claims         computeClaims 的结果
  * @param {string} p.language
  */
-function buildTaskFactPack({ task, evidence, images, claims, language }) {
+function buildTaskFactPack({ task, evidence, images, claims, language, entryPage = null }) {
   const template = templateFor(language);
   const seen = new Set();
   for (const step of task.steps || []) {
@@ -83,11 +83,13 @@ function buildTaskFactPack({ task, evidence, images, claims, language }) {
       captureIds: evidence?.canonicalCaptureRefs || task.lastCapture?.captureIds || null,
     }),
     title: task.title,
-    preconditions: task.preconditions || [],
+    entry: entryPage ? { title: entryPage.title, route: entryPage.route } : null,
+    preconditions: task.readerPreconditions || task.preconditions || [],
     steps,
     claims: claims.map(({ id, text, status, assertionRefs, checkpoint, evidence: refs }) => ({ id, text, status, assertionRefs, checkpoint: checkpoint ?? null, evidence: refs })),
+    readerChecks: task.completion?.readerChecks || [],
     artifacts: artifacts.map(({ stepId, ...rest }) => ({ ...rest, stepId })),
-    quality: require('./quality').taskQuality(task, evidence),
+    quality: require('./quality').taskQuality(task, evidence, { entryPage }),
     scope: { firstSkipped },
     // 证据来源：simulated（Fixture 模拟数据）时文档必须说明，声明不能写成"已验证"
     ...(evidence?.provenance && evidence.provenance !== 'live' ? { provenance: evidence.provenance } : {}),

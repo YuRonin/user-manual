@@ -22,7 +22,7 @@ const { newUuid } = require('../model/ids');
 const releases = require('./release-store');
 const { validateRelease } = require('../model/schema');
 const { currentSourceBaseline } = require('../update/baseline');
-const { writeGeneratedBlob } = require('../generate/manual-store');
+const { writeGeneratedBlob, readGeneratedBlob } = require('../generate/manual-store');
 
 const STATES = ['prepared', 'assets-installed', 'document-installed', 'release-committed', 'completed'];
 
@@ -99,6 +99,14 @@ function checkAssets(projectRoot, artifacts) {
     else if (hash !== String(artifact.sha256).replace(/^sha256:/, '')) problems.push(`hash-mismatch: ${artifact.path}`);
   }
   return problems;
+}
+
+/** 相同文档、证据和基线重复生成时复用当前发布记录。 */
+function samePublication(previous, candidate) {
+  if (!previous) return false;
+  const fields = ['manualId', 'documentPath', 'documentHash', 'factsHash', 'captureIds', 'definitionRevisions',
+    'language', 'templateRevision', 'artifacts', 'sourceBaseline', 'generatedBlob', 'acceptedEdits', 'sections', 'facts'];
+  return fields.every((field) => JSON.stringify(previous[field] ?? null) === JSON.stringify(candidate[field] ?? null));
 }
 
 /** 按 journal 从当前状态推进到 completed。publish 与 reconcile 共用。 */
@@ -197,6 +205,11 @@ function publish({ projectRoot, stateDirAbs, manualId, documentFile, markdown, f
   const checked = validateRelease(release);
   if (!checked.ok) {
     throw new PublicationError('invalid-release', `发布记录不完整，未写入任何文件: ${checked.errors.map((e) => `${e.path} ${e.message}`).join('；')}`);
+  }
+  if (oldDocHash === newDocHash && samePublication(previous, release) && readGeneratedBlob(stateDirAbs, release.generatedBlob) !== null) {
+    const problems = checkAssets(projectRoot, release.artifacts);
+    if (problems.length) throw new PublicationError('publication-assets-invalid', `发布图不完整：${problems.join('；')}`);
+    return { transactionId: null, release: previous, reused: true };
   }
   writeGeneratedBlob(stateDirAbs, generated ?? markdown);
   const dir = publicationDirFor(stateDirAbs, transactionId, runId);

@@ -11,9 +11,11 @@ node <skill>/bin/manual.js discover-tasks <page-id> \
   --project-root <业务项目根目录> --json
 ```
 
-`--all` 可以替代单个页面 ID。读取 `worklist[].read` 中的源码，并结合页面的 `title`、`purpose`、`detectedActions` 和浏览器验证状态提出候选任务。优先保留有明确结果、需要多个动作、入口不明显或存在阻断分支的目标；导航动作、重复入口和没有独立结果的按钮通常不单独成任务。
+`--all` 可以替代单个页面 ID。先看 `worklist[].stepHints`（页面指南的步骤线索）、`assertionHints`（页面状态断言）、`preconditionHints`（同入口任务已写的前提）和 `existingTasks`（避免重复建模），再读取 `worklist[].read` 中与候选相关的源码，结合页面的 `title`、`purpose`、`detectedActions` 和浏览器验证状态提出候选任务。`page.browserObservation` 只指向**入口页面**的真实 Capture；其余线索都标为 `verified: false`，属于模型或已有任务推断。已有断言也要核对是否证明该任务的目标，不能把页面已验证等同于任务完成。步骤目标与动作类型仍需核对。优先保留有明确结果、需要多个动作、入口不明显或存在阻断分支的目标；导航动作、重复入口和没有独立结果的按钮通常不单独成任务。
 
 把候选写成 JSON 文件：
+
+若步骤直接沿用入口页 `guide` 中带目标的条目，可写 `{ "guideStep": "practice", "action": { "type": "click" } }`。写入时工具会填入该指南的步骤 ID、说明、页面和目标；动作类型必须由建模者明确给出，也可显式覆盖说明或目标。引用不存在或无目标、缺少动作类型时整批拒绝。此简写只减少候选输入字段，仍是 `candidate`，需要人工核对并批准。
 
 ```json
 {

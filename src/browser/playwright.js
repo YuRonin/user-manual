@@ -761,10 +761,16 @@ class PlaywrightBrowserProvider extends BrowserProvider {
       return /^https?:$/.test(parsed.protocol) && hostOf(parsed) === appHost && !LOGIN_PATH_RE.test(parsed.pathname);
     };
     const progress = (message) => { if (typeof onProgress === 'function') onProgress(message); };
+    const displayUrl = (value) => {
+      try {
+        const parsed = new URL(String(value));
+        return `${parsed.origin}${LOGIN_PATH_RE.test(parsed.pathname) ? '/login' : '/…'}`;
+      } catch (_) { return '(未知页面)'; }
+    };
 
     const deadline = Date.now() + timeout;
     let lastUrls = [];
-    progress(`已打开登录页 ${this.page.url()}，请在弹出的浏览器窗口中完成登录（最长等待 ${Math.round(timeout / 1000)} 秒）。`);
+    progress(`已打开登录页 ${displayUrl(this.page.url())}，请在弹出的浏览器窗口中完成登录（最长等待 ${Math.round(timeout / 1000)} 秒）。`);
     for (;;) {
       const browserGone = this.browser && typeof this.browser.isConnected === 'function' && !this.browser.isConnected();
       const pages = browserGone ? [] : this.context.pages().filter((page) => !page.isClosed());
@@ -773,17 +779,17 @@ class PlaywrightBrowserProvider extends BrowserProvider {
       }
       const urls = pages.map((page) => page.url());
       if (urls.join('\n') !== lastUrls.join('\n')) {
-        progress(`当前页面：${urls.join('，')}`);
+        progress(`当前页面：${urls.map(displayUrl).join('，')}`);
         lastUrls = urls;
       }
       const landed = pages.find((page) => authenticated(page.url()));
       if (landed) {
         this.page = landed;
-        progress(`检测到已离开登录页：${landed.url()}，正在保存登录状态…`);
+        progress(`检测到已离开登录页：${displayUrl(landed.url())}，正在保存登录状态…`);
         break;
       }
       if (Date.now() >= deadline) {
-        throw Object.assign(new Error(`等待登录完成超时。最后停留在：${urls.join('，')}；登录成功的判据是回到 ${appHost} 且路径不是登录页。`), { code: 'auth-timeout' });
+        throw Object.assign(new Error(`等待登录完成超时。最后停留在：${urls.map(displayUrl).join('，')}；登录成功的判据是回到 ${appHost} 且路径不是登录页。`), { code: 'auth-timeout' });
       }
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
     }

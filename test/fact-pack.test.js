@@ -53,8 +53,8 @@ test('动作句由结构化动作确定性生成；说明文字是可润色的�
   assert.deepStrictEqual(Object.keys(p.blocks), ['intro', 'step.open', 'step.nickname', 'step.save']);
   const md = renderTask(p);
   assert.match(md, /<!-- step:open -->\n1\. 点击「编辑资料」\n\n {3}在右上角点击「编辑资料」按钮/);
-  assert.match(md, /<!-- claim:editor-opened -->\n已验证界面结果：编辑面板已打开。/);
-  assert.match(md, /<!-- claim:saved -->\n预期业务结果：资料已保存。/);
+  assert.match(md, /<!-- claim:editor-opened -->\n采集时已看到：编辑面板已打开。/);
+  assert.match(md, /<!-- claim:saved -->\n预期会看到：资料已保存。/);
   assert.match(md, /验证范围：只实际执行到第 2 步/);
   assert.strictEqual(validateTaskFinal(md, { title: p.title, stepIds: p.steps.map((s) => s.id), images, uiTexts: [...md.matchAll(/「([^」]+)」/g)].map((m) => m[1]), claims: p.claims, factPack: p }).ok, true);
 });
@@ -69,6 +69,17 @@ test('没有可见名称的目标回退到已批准的步骤说明，不编造�
   const p = pack({ task: task({ steps: [{ id: 'x', instruction: '点击右下角的悬浮按钮', page: 'profile', action: { type: 'click', target: { testId: 'fab' } } }] }), evidence: { steps: [] }, images: [] });
   assert.strictEqual(p.steps[0].sentence, '点击右下角的悬浮按钮');
   assert.strictEqual(p.steps[0].sentenceSource, 'instruction');
+});
+
+test('读者核对项进入事实包与完成段，改动使旧草稿失效', () => {
+  const original = pack();
+  const withCheck = pack({ task: task({ completion: { description: '完成', readerChecks: ['核对新昵称是否正确。'] } }) });
+  assert.deepStrictEqual(withCheck.readerChecks, ['核对新昵称是否正确。']);
+  assert.notStrictEqual(withCheck.factsHash, original.factsHash);
+  assert.match(renderTask(withCheck), /请核对任务结果[\s\S]*核对新昵称是否正确。/);
+  const facts = { title: withCheck.title, stepIds: withCheck.steps.map(step => step.id), images, uiTexts: [], claims: withCheck.claims, factPack: withCheck };
+  const removed = renderTask(withCheck).replace(/### 请核对任务结果\n\n- 核对新昵称是否正确。\n/, '');
+  assert.ok(validateTaskFinal(removed, facts, { renderedFromPack: true }).errors.includes('读者核对项缺失或发生变化。'));
 });
 
 test('重复 stepId 与证据中多出的步骤直接拒绝；文档遗漏步骤无法通过校验', () => {
@@ -99,7 +110,7 @@ test('语言由模板决定：en-US 输出英文结构，未知语言 unsupporte
   const md = renderTask(pack({ language: 'en-US' }));
   assert.match(md, /## Steps/);
   assert.match(md, /1\. Click 「编辑资料」/);
-  assert.match(md, /Verified in the UI: 编辑面板已打开。/);
+  assert.match(md, /Observed during capture: 编辑面板已打开。/);
   assert.doesNotMatch(md, /操作步骤|完成标志/);
   assert.throws(() => pack({ language: 'ja-JP' }), (e) => e.code === 'unsupported-template');
   assert.throws(() => templateFor('fr-FR'), /unsupported-template/);

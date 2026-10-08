@@ -235,6 +235,100 @@ async function reconcileCapturePlan(plan, provider, options) {
   }
 }
 
+/** Validate that an existing evidence chain is an unchanged prefix ending in one write. */
+function validateReadOnlyContinuation(plan, prior, priorCaptureIds, { allowRefresh = false } = {}) {
+  const prefix = plan.steps.slice(0, -1);
+  const last = plan.steps.at(-1);
+  const refresh = allowRefresh && prior?.steps?.length === plan.steps.length;
+  if (!last || !['read', 'local'].includes(last.risk) || !last.willExecute ||
+      !['click', 'inspect'].includes(last.action?.type) || last.capture?.timing !== 'after' ||
+      !last.expectedState?.assertions?.length || isUrlOnly(last.expectedState.assertions) ||
+      prefix.at(-1)?.risk !== 'write' ||
+      !prefix.some(step => step.action?.type === 'fill' && typeof step.action.value === 'string' && step.action.value.length > 0) ||
+      prior?.provenance !== 'live' ||
+      !Array.isArray(prior.steps) || prior.steps.length !== (refresh ? plan.steps.length : prefix.length) ||
+      prior.steps.at(-1)?.status !== 'verified' ||
+      prior.steps[prefix.length - 1]?.status !== 'verified' ||
+      !prior.steps[prefix.length - 1]?.validations?.some(v => v.scope === 'scenario-state' && v.check !== 'page-state' && v.outcome === 'passed')) {
+    throw new TaskExecutionError('invalid-continuation-plan', '只读续采需要已有会话中的已验证提交，且最后一步只能是带结果断言和截图的读取动作。');
+  }
+  if (prior.taskId !== plan.taskId || (refresh ? plan.steps : prefix).some((step, index) =>
+    step.id !== prior.steps[index].id || step.page !== prior.steps[index].page ||
+    JSON.stringify(step.action) !== JSON.stringify(prior.steps[index].action))) {
+    throw new TaskExecutionError('continuation-prefix-changed', '已有证据的步骤或动作与当前任务前缀不同；不能复用旧截图。');
+  }
+  const refs = prior.steps.flatMap(step => (step.screenshots || []).map(shot => shot.captureId));
+  if (JSON.stringify(refs) !== JSON.stringify(priorCaptureIds) ||
+      JSON.stringify(refs) !== JSON.stringify(prior.canonicalCaptureRefs || [])) {
+    throw new TaskExecutionError('invalid-prior-capture', '已有证据与任务登记的 Capture 链不一致。');
+  }
+  return { prefix, last, refresh };
+}
+
+/** Continue only the final read action in a known session; never replay the write prefix. */
+async function continueReadOnlyCapturePlan(plan, provider, options) {
+  const { baseUrl, stateDir, projectRoot, sessionUrl, priorEvidence, priorCaptureIds } = options;
+  try {
+    const expected = new URL(joinUrl(baseUrl, plan.entry.route));
+    const session = new URL(sessionUrl);
+    if (session.origin !== expected.origin || session.pathname !== expected.pathname || !session.searchParams.has('session')) {
+      throw new TaskExecutionError('invalid-reconcile-url', '会话 URL 必须属于当前站点与任务入口，且包含 session 参数。');
+    }
+    const { prefix, last, refresh } = validateReadOnlyContinuation(plan, priorEvidence, priorCaptureIds, { allowRefresh: options.allowRefresh });
+    if (priorEvidence.finalUrl?.origin !== session.origin || priorEvidence.finalUrl?.pathname !== session.pathname) {
+      throw new TaskExecutionError('invalid-prior-capture', '已有证据与本次会话的站点或页面不一致。');
+    }
+    const store = createCaptureStore({ projectRoot, stateDirAbs: stateDir });
+    const restored = priorEvidence.steps.map((step) => ({ ...step, screenshots: (step.screenshots || []).map((shot) => {
+      const record = store.read(shot.captureId);
+      if (!record || record.kind !== 'task-step' || record.subject?.taskId !== plan.taskId ||
+          record.subject?.stepId !== step.id || record.privacy?.status !== 'passed' ||
+          record.provenance?.mode !== 'live' || record.validations?.some(v => v.outcome !== 'passed')) {
+        throw new TaskExecutionError('invalid-prior-capture', `已有截图 ${shot.captureId} 不可复用。`);
+      }
+      return screenshotFromRecord(record, projectRoot);
+    }) }));
+    const opened = await provider.open(sessionUrl);
+    await provider.waitUntilReady({ networkIdleTimeout: 1500 });
+    const observation = await provider.currentObservation();
+    const navigation = validateNavigation({ requestedUrl: sessionUrl, openResult: opened, observation, expected: {} });
+    const filled = prefix.slice(0, -1).reverse().find(step => step.action?.type === 'fill' && typeof step.action.value === 'string');
+    const promptValidations = filled ? await runAssertions(provider, [{ type: 'visible', target: { text: filled.action.value } }], {
+      scope: 'scenario-state', phase: 'after', stepId: filled.id, idPrefix: `${filled.id}:session-match`, timeoutMs: DEFAULT_ASSERTION_TIMEOUT_MS,
+    }) : [];
+    const write = prefix.at(-1);
+    const writeValidations = await runAssertions(provider, write.expectedState?.assertions || [], {
+      scope: 'scenario-state', phase: 'after', stepId: write.id,
+      idPrefix: `${write.pageAfter}:${write.expectedState?.id}`, timeoutMs: write.assertionTimeoutMs || DEFAULT_ASSERTION_TIMEOUT_MS,
+    });
+    const before = await runAssertions(provider, last.beforeState?.assertions || [], {
+      scope: 'scenario-state', phase: 'before', stepId: last.id,
+      idPrefix: `${last.page}:${last.stateBefore}`, timeoutMs: DEFAULT_ASSERTION_TIMEOUT_MS,
+    });
+    const target = await provider.performAction(last.action);
+    await provider.waitUntilReady({ networkIdleTimeout: 1500 });
+    const after = await runAssertions(provider, last.expectedState.assertions, {
+      scope: 'scenario-state', phase: 'after', stepId: last.id,
+      idPrefix: `${last.pageAfter}:${last.expectedState.id}`, timeoutMs: last.assertionTimeoutMs || DEFAULT_ASSERTION_TIMEOUT_MS,
+    });
+    const validations = [...navigation.validations, ...promptValidations, ...writeValidations];
+    const shot = await takeScreenshot(provider, stateDir, plan, last, 'after', options, [...validations, ...before, ...after]);
+    const result = {
+      version: 1, taskId: plan.taskId, capturedAt: new Date().toISOString(),
+      url: joinUrl(baseUrl, plan.entry.route), finalUrl: sanitizeUrl(navigation.finalUrl), provenance: 'live',
+      reconciliation: { mode: refresh ? 'read-only-refresh' : 'read-only-continuation', priorCaptureIds, actionReplayed: false, observedStep: last.id },
+      entryIdentity: 'url-only', validations,
+      steps: [...(refresh ? restored.slice(0, -1) : restored), { id: last.id, page: last.page, status: 'verified', action: last.action, target,
+        pageState: last.expectedState.id, screenshots: [shot], validations: [...before, ...after] }],
+    };
+    const committed = commitEvidenceManifest(stateDir, result);
+    if (options.authRuntime?.refresh) await options.authRuntime.refresh(provider);
+    return committed;
+  } finally {
+    if (options.ownsProvider !== false) await provider.close();
+  }
+}
+
 async function executeCapturePlan(plan, provider, options) {
   const { baseUrl, stateDir } = options;
   const result = {
@@ -364,4 +458,4 @@ async function executeCapturePlan(plan, provider, options) {
   }
 }
 
-module.exports = { executeCapturePlan, reconcileCapturePlan, TaskExecutionError, joinUrl };
+module.exports = { executeCapturePlan, reconcileCapturePlan, continueReadOnlyCapturePlan, validateReadOnlyContinuation, TaskExecutionError, joinUrl };

@@ -97,8 +97,8 @@ process.stdout.write('\ncompletion claims\n');
     await test('草稿分开渲染已验证界面结果与预期业务结果，并说明验证范围', () => {
       const draft = buildTaskDraft(task(CLAIMS), evidence(), ctx);
       assert.strictEqual(draft.ok, true, draft.errors?.join('\n'));
-      assert.match(draft.markdown, /<!-- claim:editor-opened -->\n已验证界面结果：编辑面板已打开。/);
-      assert.match(draft.markdown, /<!-- claim:profile-saved -->\n预期业务结果：资料已保存。/);
+      assert.match(draft.markdown, /<!-- claim:editor-opened -->\n采集时已看到：编辑面板已打开。/);
+      assert.match(draft.markdown, /<!-- claim:profile-saved -->\n预期会看到：资料已保存。/);
       assert.match(draft.markdown, /验证范围/);
       assert.deepStrictEqual(draft.facts.claims.map((c) => [c.id, c.status]), [['editor-opened', 'verified'], ['profile-saved', 'not_run']]);
       assert.strictEqual(validateTaskFinal(draft.markdown, draft.facts).ok, true);
@@ -106,12 +106,12 @@ process.stdout.write('\ncompletion claims\n');
 
     await test('定稿不能把预期结果改成已验证，也不能新增未引用的声明', () => {
       const draft = buildTaskDraft(task(CLAIMS), evidence(), ctx);
-      const promoted = draft.markdown.replace('预期业务结果：资料已保存。', '已验证界面结果：资料已保存。');
+      const promoted = draft.markdown.replace('预期会看到：资料已保存。', '采集时已看到：资料已保存。');
       let result = validateTaskFinal(promoted, draft.facts);
       assert.strictEqual(result.ok, false);
       assert.match(result.errors.join('\n'), /claim/);
 
-      const extra = draft.markdown + '\n<!-- claim:invented -->\n已验证界面结果：已自动通知管理员。\n';
+      const extra = draft.markdown + '\n<!-- claim:invented -->\n采集时已看到：已自动通知管理员。\n';
       result = validateTaskFinal(extra, draft.facts);
       assert.strictEqual(result.ok, false);
       assert.match(result.errors.join('\n'), /unsupported-claim/);

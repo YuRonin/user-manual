@@ -113,7 +113,7 @@ const snapshot = (file) => ({ bytes: fs.readFileSync(file, 'utf8'), mtime: fs.st
       }
       const task = fs.readFileSync(doc('tasks/edit-profile.md'), 'utf8');
       assert.match(task, /<!-- manual:block id=step.open-editor -->/);
-      assert.match(task, /已验证界面结果：编辑资料面板已打开。/);
+      assert.match(task, /采集时已看到：编辑资料面板已打开。/);
       await expectExit(root, ['verify', '--all'], 0, env);
       const record = JSON.parse(fs.readFileSync(path.join(state, 'evidence', 'captures', `${releases.readCurrentRelease(state, 'page-chat').captureIds[0]}.json`), 'utf8'));
       assert.ok(record.validations.every((v) => v.outcome === 'passed') && record.privacy.status === 'passed' && record.provenance.mode === 'live');
