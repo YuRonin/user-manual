@@ -67,6 +67,10 @@ function startServer() {
       res.end('<h1>帮助中心</h1>');
       return;
     }
+    if (req.url === '/hover-source') {
+      res.end('<button aria-label="云盘" onmouseenter="document.querySelector(\'#search\').hidden=false">云盘</button><input id="search" placeholder="搜索我的文件" hidden>');
+      return;
+    }
     res.end('<h1>首页</h1>');
   });
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({
@@ -220,6 +224,21 @@ function storageFor(baseUrl, role) {
       await server.close();
     }
     assert.strictEqual(sharedBrowser.isConnected(), false);
+  });
+
+  await test('真实 Chromium：hover 动作展开子菜单而不点击', async () => {
+    const server = await startServer();
+    const session = createBrowserSession();
+    try {
+      await session.withScenario({ id: 'hover', providerConfig, profile }, async (provider) => {
+        await provider.open(`${server.baseUrl}/hover-source`);
+        await provider.performAction({ type: 'hover', target: { role: 'button', name: '云盘' } });
+        assert.strictEqual(await provider.page.getByPlaceholder('搜索我的文件').isVisible(), true);
+      });
+    } finally {
+      await session.close();
+      await server.close();
+    }
   });
 
   await test('凭据未变化的失败 Scenario 不写认证缓存；成功时刷新（generation CAS）', async () => {

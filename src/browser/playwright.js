@@ -572,6 +572,7 @@ class PlaywrightBrowserProvider extends BrowserProvider {
     const locator = await this.uniqueVisibleLocator(action.target);
     const rect = await locator.boundingBox();
     if (action.type === 'click') await locator.click();
+    else if (action.type === 'hover') await locator.hover();
     else if (action.type === 'fill') await locator.fill(String(action.value ?? ''));
     else if (action.type === 'select') await locator.selectOption(action.value);
     else if (action.type === 'check') await locator.check();

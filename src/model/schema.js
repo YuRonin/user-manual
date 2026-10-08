@@ -18,7 +18,7 @@ const { isSafeId, isUuid, isAssertionRef } = require('./ids');
 
 const SCHEMA_VERSIONS = { config: 2, page: 2, userTask: 2, scenario: 1, capture: 1, release: 1, run: 1 };
 
-const ACTION_TYPES = ['click', 'fill', 'select', 'check', 'uncheck', 'inspect'];
+const ACTION_TYPES = ['click', 'hover', 'fill', 'select', 'check', 'uncheck', 'inspect'];
 const ASSERTION_TYPES = ['url', 'visible', 'hidden', 'editable'];
 const TARGET_KEYS = ['role', 'name', 'label', 'text', 'testId', 'selector', 'exact', 'within', 'alternatives'];
 const RISKS = ['read', 'local', 'write', 'destructive'];

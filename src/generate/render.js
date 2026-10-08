@@ -32,6 +32,7 @@ const TEMPLATES = {
     quote: (text) => `「${text}」`,
     action: {
       click: (t) => `点击${t}`,
+      hover: (t) => `将指针移到${t}`,
       fill: (t) => `在${t}中填写内容`,
       select: (t) => `在${t}中选择选项`,
       check: (t) => `勾选${t}`,
@@ -58,6 +59,7 @@ const TEMPLATES = {
     quote: (text) => `「${text}」`,
     action: {
       click: (t) => `Click ${t}`,
+      hover: (t) => `Hover over ${t}`,
       fill: (t) => `Fill in ${t}`,
       select: (t) => `Choose an option in ${t}`,
       check: (t) => `Check ${t}`,
