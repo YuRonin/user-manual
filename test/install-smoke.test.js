@@ -74,7 +74,8 @@ function browsersPath() {
       assert.ok(paths.includes('bin/manual.js') && paths.includes('package.json') && paths.includes('SKILL.md'));
       assert.deepStrictEqual(paths.filter((p) => /^(\.manual|node_modules|test-results|\.auth)/.test(p)), []);
       fs.mkdirSync(tool);
-      const untar = spawnSync('tar', ['-xzf', path.join(work, info.filename), '-C', tool, '--strip-components=1'], { encoding: 'utf8' });
+      // 用相对路径并以 work 为工作目录：Windows 上 PATH 里的 GNU tar（Git 自带）会把 "C:\..." 的盘符当成远程主机名
+      const untar = spawnSync('tar', ['-xzf', info.filename, '-C', path.basename(tool), '--strip-components=1'], { cwd: work, encoding: 'utf8' });
       assert.strictEqual(untar.status, 0, untar.stderr);
       // 依赖：CI 中由 npm ci 安装；这里链接到仓库的 node_modules（等价于一次干净安装的结果）
       fs.symlinkSync(path.join(REPO, 'node_modules'), path.join(tool, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');

@@ -14,7 +14,7 @@ const yaml = require('js-yaml');
 
 const fx = require('./fixtures');
 const { startServer } = require('./server');
-const { resumeRun, runStatus } = require('../src/runtime/app');
+const { resumeRun, runStatus, INTERRUPT_MESSAGE } = require('../src/runtime/app');
 const { submitModelResponse } = require('../src/runtime/model-response');
 const { loadConfig } = require('../src/config/load');
 const { listReleases } = require('../src/publication/release-store');
@@ -181,7 +181,9 @@ const recovery = (root, runId) => runStatus({ projectRoot: root, runId }).recove
 
     await test('SIGINT：CLI 中断当前任务并释放浏览器，状态记 interrupted；resume 继续完成', async () => {
       const root = await fresh();
-      const child = spawn(process.execPath, [CLI, 'generate', 'task:edit-profile', '--copy-default', '--json', '--project-root', root], { stdio: ['ignore', 'pipe', 'pipe'] });
+      // Windows 上 child.kill('SIGINT') 直接终止进程、不触发处理器：改用 IPC 中断消息走同一取消路径；其他平台仍发真实 SIGINT
+      const viaIpc = process.platform === 'win32';
+      const child = spawn(process.execPath, [CLI, 'generate', 'task:edit-profile', '--copy-default', '--json', '--project-root', root], { stdio: ['ignore', 'pipe', 'pipe', ...(viaIpc ? ['ipc'] : [])] });
       let stdout = '';
       child.stdout.on('data', (d) => { stdout += d; });
       const exited = new Promise((resolve) => child.on('close', (status) => resolve(status)));
@@ -194,7 +196,8 @@ const recovery = (root, runId) => runStatus({ projectRoot: root, runId }).recove
         if (dir && fs.existsSync(path.join(dir, 'capture.json')) && JSON.parse(fs.readFileSync(path.join(dir, 'capture.json'), 'utf8')).status === 'running') break;
         await new Promise((r) => setTimeout(r, 25));
       }
-      child.kill('SIGINT');
+      if (viaIpc) child.send(INTERRUPT_MESSAGE);
+      else child.kill('SIGINT');
       const status = await exited;
       assert.strictEqual(status, 1, stdout);
       const out = JSON.parse(stdout);

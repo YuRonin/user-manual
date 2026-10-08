@@ -71,7 +71,8 @@ const TEMPLATES = {
 
 // render-2：正文按稳定块 ID 分段（<!-- manual:block id=… --> … <!-- /manual:block -->），供人工编辑保护的三方合并定位（P3-06）。
 // render-13：面向读者的帮助中心结构——入口并入步骤，正文不暴露采集与验证范围等维护信息。
-const TEMPLATE_VERSION = 'render-13';
+// render-14：页面指南标题恢复编号，与截图标注 ①②③ 对应。
+const TEMPLATE_VERSION = 'render-14';
 
 class TemplateError extends Error {
   constructor(language) {
@@ -221,8 +222,9 @@ function renderPage(pack, copy = {}, { draft = false } = {}) {
   const location = [t.pageEntry(`[${pack.title}](${pack.route})`)];
   for (const artifact of pack.artifacts) location.push(...figure(artifact, pack.title, artifact.markdownHref));
   const blocks = [['overview', overview], ['location', location]];
-  for (const item of pack.guide || []) {
-    const lines = [`## ${item.title}`, '', item.instruction];
+  // 编号与截图标注一致：标注按 guide 下标 i + 1 编号（含没有 target 的条目），标题用同一编号
+  for (const [i, item] of (pack.guide || []).entries()) {
+    const lines = [`## ${i + 1}. ${item.title}`, '', item.instruction];
     if (item.taskId) lines.push('', `[${t.guideLink}](tasks/${item.taskId}.md)`);
     blocks.push([`guide.${item.id}`, lines]);
   }

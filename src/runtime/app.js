@@ -72,13 +72,32 @@ function contextFor(projectRoot, project, mode) {
   return { projectRoot, config: project.config, stateDirAbs: project.stateDirAbs, mode, cacheStore: project.cacheStore };
 }
 
-/** SIGINT / SIGTERM → 取消当前 Run；返回清理函数。 */
+/** IPC 中断消息：父进程用 child.send(INTERRUPT_MESSAGE) 请求与 SIGINT 相同的取消。 */
+const INTERRUPT_MESSAGE = { type: 'manual:interrupt' };
+
+/**
+ * SIGINT / SIGTERM → 取消当前 Run；返回清理函数。
+ * Windows 上 child.kill('SIGINT') 直接终止进程、不触发处理器，以编程方式中断时改走 IPC 消息
+ * （仅在带 IPC 通道启动时监听，且不让通道阻止进程退出）。控制台 Ctrl+C 在各平台仍走 SIGINT。
+ */
 function cancellation() {
   const controller = new AbortController();
   const onSignal = () => controller.abort();
+  const onMessage = (message) => { if (message?.type === INTERRUPT_MESSAGE.type) controller.abort(); };
   process.once('SIGINT', onSignal);
   process.once('SIGTERM', onSignal);
-  return { signal: controller.signal, dispose: () => { process.removeListener('SIGINT', onSignal); process.removeListener('SIGTERM', onSignal); } };
+  if (process.channel) {
+    process.on('message', onMessage);
+    process.channel.unref();
+  }
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      process.removeListener('SIGINT', onSignal);
+      process.removeListener('SIGTERM', onSignal);
+      process.removeListener('message', onMessage);
+    },
+  };
 }
 
 async function execute({ projectRoot, project, runId, mode, verifyInputs = null, sessionFactory = undefined }) {
@@ -225,4 +244,4 @@ function recordCapture({ projectRoot, subject, captureIds, extraRefs = [], obser
   }
 }
 
-module.exports = { openProject, copyPolicy, planTargets, startRun, executePlanned, resumeRun, runStatus, recordCapture, changedInputs };
+module.exports = { INTERRUPT_MESSAGE, openProject, copyPolicy, planTargets, startRun, executePlanned, resumeRun, runStatus, recordCapture, changedInputs };
