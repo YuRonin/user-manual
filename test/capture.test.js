@@ -561,6 +561,44 @@ async function main() {
     }
   });
 
+  /** 写一份页面的显式 Scenario（.manual/scenarios/page-<id>.yaml）。 */
+  function writePageScenario(root, pageId, entryLines) {
+    const dir = path.join(root, '.manual', 'scenarios');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `page-${pageId}.yaml`), [
+      'schemaVersion: 1', `id: page-${pageId}`, 'environment: local', 'authProfile: anonymous',
+      'entry:', `  pageId: ${pageId}`, ...entryLines.map((line) => `  ${line}`), 'checkpoints: []', '',
+    ].join('\n'));
+  }
+
+  await test('显式 Scenario 的 entry.path / entry.query 决定打开的具体地址', async () => {
+    const root = await prepareProject(server.baseUrl);
+    try {
+      // /chat/abc 在测试服务器上是 404——这里要验证的是路径后缀与查询串都拼进了打开的地址
+      writePageScenario(root, 'chat', ['path: /chat/abc', 'query:', '  id: "7"']);
+      const r = await run('capture', root, ['chat']);
+      assert.strictEqual(r.status, 1);
+      assert.match(r.stderr, new RegExp(`${server.baseUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/chat/abc\\?id=7`));
+      assert.match(r.stderr, /404/);
+      assert.ok(noShot(root, 'chat'), '失败时不应产出截图');
+    } finally {
+      fx.cleanup(root);
+    }
+  });
+
+  await test('entry.path 越出页面路由时拒绝采集，不打开别的页面', async () => {
+    const root = await prepareProject(server.baseUrl);
+    try {
+      writePageScenario(root, 'chat', ['path: /login']);
+      const r = await run('capture', root, ['chat']);
+      assert.strictEqual(r.status, 1);
+      assert.match(r.stderr, /entry\.path/);
+      assert.ok(noShot(root, 'chat'), '越界时不应产出截图');
+    } finally {
+      fx.cleanup(root);
+    }
+  });
+
   await test('未知 page id：列出可用的页面', async () => {
     const root = await prepareProject(server.baseUrl);
     try {

@@ -5,7 +5,7 @@ const { writeText } = require('../util/fsx');
 const { effectiveRisk } = require('./model');
 const { approvalState, approvalMessage, scopeHash, pageRevisionsFor, APPROVAL_STATES } = require('../model/approval');
 const { definitionRevision } = require('../model/revision');
-const { resolveRouteTemplate } = require('../scenarios/model');
+const { resolveEntryLocation } = require('../scenarios/model');
 
 // 执行前的保守分类：步骤没有显式声明风险、却对着"保存/删除/提交/支付"这类目标动作时，
 // 不把它当作 read/local 自动执行，而是停在动作之前等人确认。
@@ -50,12 +50,16 @@ function buildCapturePlan(task, pages, options = {}) {
   }
   const params = options.params || options.scenario?.entry?.params || task.params || {};
   let entryRoute = null;
+  let entrySearch = '';
   if (entryPage) {
-    const resolved = resolveRouteTemplate(entryPage.route, params);
-    if (resolved.ok) entryRoute = resolved.route;
+    // 显式 Scenario 可用 entry.path / entry.query 打开具体内容；query 只用于打开，不进入 route 与证据
+    // 显式传入的 params 优先于 Scenario 的 path（与页面采集的 --params 覆盖一致）
+    const entry = { ...(options.scenario?.entry || {}), params, ...(options.params ? { path: undefined } : {}) };
+    const resolved = resolveEntryLocation(entryPage.route, entry);
+    if (resolved.ok) { entryRoute = resolved.route; entrySearch = resolved.search; }
     else {
       if (resolved.missing.length) errors.push(`入口页面 ${entryPage.id} 是动态路由 ${entryPage.route}，缺少参数: ${resolved.missing.join(', ')}`);
-      if (resolved.invalid.length) errors.push(`路由参数格式不对（catch-all 需要字符串数组）: ${resolved.invalid.join(', ')}`);
+      if (resolved.invalid.length) errors.push(`入口无法解析（catch-all 需要字符串数组；entry.path 需在入口页面路由之内）: ${resolved.invalid.join(', ')}`);
     }
   }
 
@@ -128,6 +132,7 @@ function buildCapturePlan(task, pages, options = {}) {
       entry: {
         page: entryPage.id,
         route: entryRoute,
+        ...(entrySearch ? { search: entrySearch } : {}),
         routeTemplate: entryPage.route,
         params,
         state: 'default',

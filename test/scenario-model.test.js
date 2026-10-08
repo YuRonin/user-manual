@@ -5,7 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { resolveRouteTemplate, derivePageScenario, deriveTaskScenario, authProfileFor } = require('../src/scenarios/model');
+const { resolveRouteTemplate, resolveEntryLocation, derivePageScenario, deriveTaskScenario, authProfileFor } = require('../src/scenarios/model');
 const { resolveScenario } = require('../src/scenarios/store');
 const { validateScenario } = require('../src/model/schema');
 const { reconcile } = require('../src/inspect/model');
@@ -77,6 +77,57 @@ test('显式 Scenario 文件覆盖默认值；无效文件被拒绝', () => {
     const invalid = resolveScenario(dir, derived);
     assert.strictEqual(invalid.ok, false);
     assert.match(invalid.errors.join('\n'), /authProfile/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('入口位置：entry.path 打开路由前缀下的具体内容，entry.query 追加查询串', () => {
+  assert.deepStrictEqual(resolveEntryLocation('/s', { path: '/s/abc123' }), { ok: true, route: '/s/abc123', search: '' });
+  assert.deepStrictEqual(resolveEntryLocation('/s', { path: '/s' }), { ok: true, route: '/s', search: '' }, '等于前缀也可以');
+  assert.deepStrictEqual(resolveEntryLocation('/activities/detail', { query: { id: 'a1', tab: '学生' } }),
+    { ok: true, route: '/activities/detail', search: '?id=a1&tab=%E5%AD%A6%E7%94%9F' });
+  assert.deepStrictEqual(resolveEntryLocation('/a/:code', { params: { code: 'x' }, query: { from: 'qr' } }), { ok: true, route: '/a/x', search: '?from=qr' });
+  assert.deepStrictEqual(resolveEntryLocation('/a/:code', { params: {} }, { code: 'cli' }), { ok: true, route: '/a/cli', search: '' }, '命令行参数覆盖');
+  assert.deepStrictEqual(resolveEntryLocation('/docs/:slug*', { path: '/docs/a/b' }).route, '/docs/a/b', '动态模板按静态前缀判断');
+  assert.deepStrictEqual(resolveEntryLocation('/', { path: '/anything' }).ok, true, '根路由的前缀是 /');
+});
+
+test('入口位置：entry.path 不能越出页面路由（防止借 Scenario 打开别的页面）', () => {
+  for (const p of ['/settings', '/sx', '/s-other/1', '/']) {
+    const resolved = resolveEntryLocation('/s', { path: p });
+    assert.strictEqual(resolved.ok, false, p);
+    assert.match(resolved.invalid[0], /entry\.path/);
+  }
+  assert.strictEqual(resolveEntryLocation('/a/:code', { path: '/b/1' }).ok, false);
+});
+
+test('入口位置 schema：path 必须是站内路径，不与 params 混用；query 值必须是字符串', () => {
+  const base = { schemaVersion: 1, id: 'page-s', environment: 'local', authProfile: 'anonymous', checkpoints: [] };
+  const errorsOf = (entry) => validateScenario({ ...base, entry: { pageId: 's', ...entry } }).errors.map((e) => e.path);
+  assert.deepStrictEqual(errorsOf({ path: '/s/abc', query: { id: '1' } }), []);
+  assert.deepStrictEqual(errorsOf({ path: '/s/abc', params: {} }), [], '空 params 不算混用');
+  for (const bad of ['s/abc', '//evil.example/x', '/s/abc?x=1', '/s/abc#top', '/s/../settings', '/s/./a', '/s/a b', '/s\\a', 42]) {
+    assert.deepStrictEqual(errorsOf({ path: bad }), ['entry.path'], String(bad));
+  }
+  assert.deepStrictEqual(errorsOf({ path: '/s/abc', params: { id: 'x' } }), ['entry.path']);
+  assert.deepStrictEqual(errorsOf({ query: 'id=1' }), ['entry.query']);
+  assert.deepStrictEqual(errorsOf({ query: { id: 1 } }), ['entry.query.id']);
+});
+
+test('入口位置：改 entry 会改变 Scenario revision（缓存不会误用其他内容的截图）', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'manual-scenario-entry-'));
+  try {
+    fs.mkdirSync(path.join(dir, 'scenarios'));
+    const file = path.join(dir, 'scenarios', 'page-user-center.yaml');
+    const write = (suffix) => fs.writeFileSync(file, [
+      'schemaVersion: 1', 'id: page-user-center', 'environment: local', 'authProfile: member',
+      'entry:', '  pageId: user-center', `  path: /user-center/${suffix}`, 'checkpoints: []', '',
+    ].join('\n'));
+    write('a');
+    const first = resolveScenario(dir, derivePageScenario(page, config));
+    write('b');
+    const second = resolveScenario(dir, derivePageScenario(page, config));
+    assert.strictEqual(first.ok && second.ok, true);
+    assert.notStrictEqual(first.scenario.revision, second.scenario.revision);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 

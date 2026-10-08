@@ -18,10 +18,10 @@ const path = require('path');
 
 const { createProjectStore } = require('../store/project');
 const { normalizePage, isActivePage } = require('../inspect/model');
-const { derivePageScenario, deriveTaskScenario } = require('../scenarios/model');
+const { derivePageScenario, deriveTaskScenario, resolveEntryLocation } = require('../scenarios/model');
 const { resolveScenario } = require('../scenarios/store');
 const { buildCapturePlan, implicitDefaultState } = require('../tasks/capture-plan');
-const { resolveRoute, joinUrl } = require('../evidence/capture-page');
+const { joinUrl } = require('../evidence/capture-page');
 const { validateNavigation, assertWithin, DEFAULT_ASSERTION_TIMEOUT_MS } = require('../evidence/validate-page');
 const { computeClaims } = require('../evidence/claims');
 const { prepareAuth, classifyAuthFailure } = require('../auth/runtime');
@@ -223,9 +223,11 @@ async function verifyLive({ projectRoot, config, target, session, timeoutMs = DE
     const resolved = resolveScenario(stateDirAbs, derivePageScenario(page, config), { stepIds: [] });
     if (!resolved.ok) throw new RuntimeError('invalid-scenario', resolved.errors.join('；'));
     scenario = resolved.scenario;
-    const route = resolveRoute(page.route, scenario.entry?.params || page.params || {});
-    if (!route.ok) throw new RuntimeError('invalid-arguments', `页面 ${page.id} 缺少路由参数：${route.missing.join(', ')}`);
-    url = joinUrl(config.project.baseUrl, route.route);
+    // 与采集相同的入口解析：显式 Scenario 的 path / query 打开同一条具体内容
+    const entry = scenario.entry?.path !== undefined || scenario.entry?.params ? scenario.entry : { ...scenario.entry, params: page.params || {} };
+    const route = resolveEntryLocation(page.route, entry);
+    if (!route.ok) throw new RuntimeError('invalid-arguments', `页面 ${page.id} 的入口无法解析：${[...route.missing, ...route.invalid].join(', ')}`);
+    url = joinUrl(config.project.baseUrl, route.route) + route.search;
     expected = { statuses: scenario.expected?.httpStatuses, state: scenario.expected?.state };
     identityAssertions = (page.states?.default?.assertions || implicitDefaultState(page).assertions || []).filter((a) => a.type !== 'url');
   } else {
@@ -236,7 +238,7 @@ async function verifyLive({ projectRoot, config, target, session, timeoutMs = DE
     const built = buildCapturePlan(task, model.pages, { scenario });
     if (!built.ok) throw new RuntimeError(built.code === 'scope-changed' ? 'scope-changed' : 'invalid-plan', built.errors.join('；'));
     plan = built.plan;
-    url = joinUrl(config.project.baseUrl, plan.entry.route);
+    url = joinUrl(config.project.baseUrl, plan.entry.route) + (plan.entry.search || '');
     expected = plan.entry.expected || {};
     identityAssertions = (plan.entry.assertions || []).filter((a) => a.type !== 'url');
   }

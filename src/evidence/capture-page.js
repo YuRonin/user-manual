@@ -17,7 +17,7 @@ const { createProvider } = require('../browser');
 const { CaptureError, REASON } = require('../browser/errors');
 const { DEFAULT_READY_OPTIONS } = require('../browser/provider');
 const { CONFIDENCE, ANALYSIS, normalizePage, isActivePage } = require('../inspect/model');
-const { resolveRouteTemplate, derivePageScenario } = require('../scenarios/model');
+const { resolveRouteTemplate, resolveEntryLocation, derivePageScenario } = require('../scenarios/model');
 const { readIndexes, findForwardPage } = require('../inspect/index-store');
 const { prepareAuth, classifyAuthFailure, refreshAuth } = require('../auth/runtime');
 const { validateNavigation, runAssertions } = require('./validate-page');
@@ -113,21 +113,37 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
   const providerConfig = config.browser.providers[providerId];
   if (!providerConfig) throw inputError('invalid-arguments', [`Browser Provider "${providerId}" 不在 config 的 browser.providers 里。`]);
 
+  const params = typeof options.params === 'string' ? parseParams(options.params) : (options.params || {});
+
+  // Scenario：显式指定（Scenario 变体，如空状态 / 错误态 / 其他角色）或页面默认（含 .manual/scenarios 覆盖）。
+  // 先定 Scenario 再拼地址：显式 Scenario 的 entry（params / path / query）决定打开哪条具体内容。
+  let scenario = options.scenario || null;
+  let explicitScenario = !!scenario;
+  if (!scenario) {
+    const resolved = resolveScenario(stateDirAbs, derivePageScenario(page, config, { params }), { stepIds: [] });
+    if (!resolved.ok) throw inputError('invalid-scenario', resolved.errors);
+    scenario = resolved.scenario;
+    explicitScenario = resolved.explicit;
+  }
+
   // ---- 要打开的地址
   let url;
-  const params = typeof options.params === 'string' ? parseParams(options.params) : (options.params || {});
   if (options.url) {
     url = options.url;
   } else {
-    const resolved = resolveRoute(effectiveRoute, params);
+    const resolved = resolveEntryLocation(effectiveRoute, scenario.entry, params);
+    if (!resolved.ok && resolved.invalid.some((item) => item.startsWith('entry.path'))) {
+      throw inputError('invalid-scenario', [`Scenario ${scenario.id} 的 ${resolved.invalid.join('、')}；它不能打开页面 ${pageId} 路由之外的地址。`]);
+    }
     if (!resolved.ok) {
+      const missing = [...resolved.missing, ...resolved.invalid];
       throw inputError('params-required', [
         `"${pageId}" 是动态路由 ${effectiveRoute}，需要具体参数值才能打开。`,
-        `缺少: ${resolved.missing.join(', ')}`,
-        `补上即可，例如: manual capture ${pageId} --params "${resolved.missing.map((m) => `${m}=<值>`).join(';')}"`,
+        `缺少: ${missing.join(', ')}`,
+        `补上即可，例如: manual capture ${pageId} --params "${missing.map((m) => `${m}=<值>`).join(';')}"`,
       ]);
     }
-    url = joinUrl(config.project.baseUrl, resolved.route);
+    url = joinUrl(config.project.baseUrl, resolved.route) + resolved.search;
   }
 
   const captureStore = createCaptureStore({ projectRoot, stateDirAbs });
@@ -140,15 +156,6 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
     waitFor: options.waitFor || null,
   };
 
-  // Scenario：显式指定（Scenario 变体，如空状态 / 错误态 / 其他角色）或页面默认（含 .manual/scenarios 覆盖）
-  let scenario = options.scenario || null;
-  let explicitScenario = !!scenario;
-  if (!scenario) {
-    const resolved = resolveScenario(stateDirAbs, derivePageScenario(page, config, { params }), { stepIds: [] });
-    if (!resolved.ok) throw inputError('invalid-scenario', resolved.errors);
-    scenario = resolved.scenario;
-    explicitScenario = resolved.explicit;
-  }
   const isDefaultScenario = scenario.id === `page-${page.id}`;
   // Fixture：先过环境策略（生产 / 未登记环境拒绝），再决定拦截路由；在打开浏览器之前完成
   const data = prepareScenarioData({ stateDirAbs, config, scenario, runId });

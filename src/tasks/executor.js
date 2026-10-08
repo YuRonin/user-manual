@@ -350,7 +350,8 @@ async function executeCapturePlan(plan, provider, options) {
       if (!provider.installRoutes) throw Object.assign(new Error('当前 Browser Provider 不支持请求拦截（routeMocking），不能使用 mock Fixture。'), { code: 'capability-missing' });
       await provider.installRoutes(options.routes, { baseUrl });
     }
-    const openResult = await provider.open(result.url);
+    // 查询串只用于打开入口；result.url 与证据只记录路径
+    const openResult = await provider.open(result.url + (plan.entry.search || ''));
     await provider.waitUntilReady();
     const observation = provider.currentObservation ? await provider.currentObservation() : null;
     const current = { ...openResult, finalUrl: observation?.url || openResult.finalUrl };

@@ -440,6 +440,20 @@ function validateScenario(scenario, context = {}) {
       if (!ok) c.error(`entry.params.${key}`, 'invalid-params', '参数值需要是字符串，catch-all 参数是字符串数组。');
     }
   }
+  // 入口路径与查询参数：数据从路径后缀（/s/<id>）或查询串（?id=）读取的页面用它打开具体内容
+  if (isObject(scenario.entry) && scenario.entry.path !== undefined) {
+    const p = scenario.entry.path;
+    const ok = typeof p === 'string' && p.startsWith('/') && !p.startsWith('//')
+      && !/[?#\\\s]/.test(p) && !p.split('/').some((segment) => segment === '..' || segment === '.');
+    if (!ok) c.error('entry.path', 'invalid-path', 'entry.path 需要是以 / 开头的站内路径，不含 ?、#、反斜杠、空白和 . / .. 段；查询参数写在 entry.query。');
+    if (ok && isObject(scenario.entry.params) && Object.keys(scenario.entry.params).length) c.error('entry.path', 'invalid-path', 'entry.path 与 entry.params 不能同时使用。');
+  }
+  if (isObject(scenario.entry) && scenario.entry.query !== undefined) {
+    if (!isObject(scenario.entry.query)) c.error('entry.query', 'invalid-query', 'entry.query 需要是对象。');
+    else for (const [key, value] of Object.entries(scenario.entry.query)) {
+      if (!nonEmpty(key) || typeof value !== 'string') c.error(`entry.query.${key}`, 'invalid-query', '查询参数名需要非空，值需要是字符串。');
+    }
+  }
   // 数据来源（P3-05）：live，或引用已登记的 Fixture；预期页面状态用于 Empty / Loading / Error Scenario
   if (scenario.data !== undefined && scenario.data !== null) {
     if (!isObject(scenario.data) || !['live', 'fixture'].includes(scenario.data.mode)) c.error('data.mode', 'invalid-data', 'data.mode 需要是 live 或 fixture。');

@@ -52,6 +52,44 @@ function resolveRouteTemplate(template, params = {}) {
   return { ok: true, route: route === '' ? '/' : route };
 }
 
+/**
+ * Scenario 入口要打开的具体位置：路由模板 + 参数，或显式 `entry.path`；再拼上 `entry.query`。
+ * 用于数据从路径后缀或查询参数读取的页面（如 `/s/<shareId>`、`/activities/detail?id=`），
+ * 这类页面的路由模板本身是静态的，只靠模板打不开有效内容。
+ * - `entry.path` 必须落在页面路由的静态前缀之内（等于前缀，或以「前缀/」开头），不能借它打开别的页面。
+ * - `extraParams`（命令行 `--params`）覆盖 Scenario 中的同名参数。
+ * - query 只进入本次打开的地址；证据记录按 origin + pathname 保存，不记录查询串。
+ * @returns {{ ok: true, route: string, search: string } | { ok: false, missing: string[], invalid: string[] }}
+ */
+function resolveEntryLocation(template, entry = {}, extraParams = {}) {
+  let route;
+  if (entry?.path !== undefined) {
+    const prefix = staticRoutePrefix(template);
+    const inside = entry.path === prefix || entry.path.startsWith(prefix === '/' ? '/' : `${prefix}/`);
+    if (!inside) return { ok: false, missing: [], invalid: [`entry.path（需要以 ${prefix} 开头）`] };
+    route = entry.path;
+  } else {
+    const resolved = resolveRouteTemplate(template, { ...(entry?.params || {}), ...extraParams });
+    if (!resolved.ok) return resolved;
+    route = resolved.route;
+  }
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(entry?.query || {})) query.append(key, String(value));
+  const search = query.toString();
+  return { ok: true, route, search: search ? `?${search}` : '' };
+}
+
+/** 路由模板在第一个动态段之前的部分：`/a/:code` → `/a`，`/docs` → `/docs`，`/` → `/`。 */
+function staticRoutePrefix(template) {
+  const segments = [];
+  for (const segment of String(template).split('/')) {
+    if (segment.startsWith(':')) break;
+    segments.push(segment);
+  }
+  const prefix = segments.join('/').replace(/\/+$/, '');
+  return prefix === '' ? '/' : prefix;
+}
+
 function withRevision(scenario) {
   const { revision: _ignored, ...definition } = scenario;
   return { ...scenario, revision: revision(JSON.parse(JSON.stringify(definition))) };
@@ -110,4 +148,4 @@ function deriveTaskScenario(task, pages, config, { params = task.params || {} } 
   });
 }
 
-module.exports = { SCENARIO_SCHEMA_VERSION, authProfileFor, resolveRouteTemplate, derivePageScenario, deriveTaskScenario, withRevision };
+module.exports = { SCENARIO_SCHEMA_VERSION, authProfileFor, resolveRouteTemplate, resolveEntryLocation, derivePageScenario, deriveTaskScenario, withRevision };

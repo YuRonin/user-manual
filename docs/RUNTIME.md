@@ -124,6 +124,18 @@ fixtures:
 Fixture 定义在 `.manual/fixtures/<id>.yaml`（格式见 `src/scenarios/fixtures.js` 头注释）。`manual capture scenario:<id>` 采集变体；
 mock 结果标 `simulated`，hook 的 setup / cleanup 是独立任务（采集失败也清理）；生产与未登记环境在规划时拒绝；secret 只写 `env:NAME` 引用。
 
+**打开具体内容**：有些页面的路由是静态的，数据却从路径后缀（`/s/<shareId>`，由 rewrite 落到 `/s`）或查询参数（`/activities/detail?id=`）读取，
+只靠路由打不开有效内容。在页面的 `page-<id>.yaml` 里用 `entry.path` / `entry.query` 指定一条测试数据：
+
+```yaml
+# .manual/scenarios/page-share.yaml —— 采集、generate 与 verify --live 都打开 /s/abc123?from=qr
+entry: { pageId: share, routeBindingId: main, path: /s/abc123, query: { from: qr } }
+```
+
+- `entry.path` 必须落在页面路由的静态前缀内（等于 `/s` 或以 `/s/` 开头），不能借它打开别的页面；不能与非空 `entry.params` 同时使用。
+- 查询串只进入本次打开的地址，Capture 记录只保存 origin + pathname；手册正文的入口链接仍是页面路由，不出现测试数据。
+- 改 `entry` 会改变 Scenario revision，旧截图不会被缓存复用。
+
 ## 8. 保留与回收
 
 ```bash
