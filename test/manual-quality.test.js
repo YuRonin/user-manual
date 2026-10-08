@@ -72,7 +72,7 @@ test('质量检查能报告缺少步骤与未绑定的完成声明',()=>{
 test('任务入口由页面模型渲染，不把内部 page id 当操作位置',()=>{
  const {renderTask}=require('../src/generate/render');
  const pack={language:'zh-CN',title:'查看积分',entry:{title:'聊天',route:'/chat'},preconditions:['已登录'],steps:[],claims:[],artifacts:[],scope:{firstSkipped:-1},branches:[],relatedTasks:[],blocks:{intro:{default:'查看积分'}}};
- assert.match(renderTask(pack),/## 从哪里开始\n\n打开 \[聊天\]\(\/chat\) 页面。/);
+ assert.match(renderTask(pack),/## 操作步骤\n\n进入 \[聊天\]\(\/chat\) 页面，按以下步骤操作。/);
 });
 test('读者前提可用简明文案呈现，浏览器执行前提仍受原审批范围约束',()=>{
  const {buildTaskFactPack}=require('../src/generate/fact-pack');const {scopeHash}=require('../src/model/approval');
@@ -101,18 +101,19 @@ test('操作前后截图有不同说明，步骤判断先于选择动作',()=>{
  assert.match(md,/在消息输入框右下角，点击「发送」/);
  assert.match(md,/!\[第 1 步操作前的界面\]/);
  assert.match(md,/!\[第 3 步操作后的界面\]/);
- assert.match(md,/\[放大查看\]\(\.\.\/images\/annotated\/before\.png\)/);
+ assert.match(md,/\[!\[第 1 步操作前的界面\]\(\.\.\/images\/annotated\/before\.png\)\]\(\.\.\/images\/annotated\/before\.png\)/);
+ assert.doesNotMatch(md,/放大查看|定位要使用的控件/);
 });
 test('读者核对项在完成部分单列，不提升为已验证结果',()=>{
  const {renderTask}=require('../src/generate/render');
  const pack={language:'zh-CN',title:'出题',preconditions:[],steps:[],claims:[{id:'reply',status:'verified',text:'助手回复已出现。'}],readerChecks:['打开题目预览并核对数量。'],artifacts:[],scope:{firstSkipped:-1},branches:[],relatedTasks:[],blocks:{intro:{default:''}}};
  const markdown=renderTask(pack);
- assert.match(markdown,/采集时已看到：助手回复已出现。/);
- assert.match(markdown,/### 请核对任务结果\n\n- 打开题目预览并核对数量。/);
- assert.equal((markdown.match(/采集时已看到：/g)||[]).length,1);
+ assert.match(markdown,/完成标志：助手回复已出现。/);
+ assert.match(markdown,/### 请确认以下内容\n\n- 打开题目预览并核对数量。/);
+ assert.equal((markdown.match(/完成标志：/g)||[]).length,1);
  const onlyReaderCheck=renderTask({...pack,claims:[]});
- assert.match(onlyReaderCheck,/请核对任务结果[\s\S]*打开题目预览并核对数量。/);
- assert.doesNotMatch(onlyReaderCheck,/采集时已看到：/);
+ assert.match(onlyReaderCheck,/请确认以下内容[\s\S]*打开题目预览并核对数量。/);
+ assert.doesNotMatch(onlyReaderCheck,/完成标志：/);
 });
 test('截图缺失只针对声明需要截图且已执行的步骤',()=>{
  const {taskQuality}=require('../src/generate/quality');

@@ -108,7 +108,7 @@ async function main() {
 
       const draft = readDraft(root, 'chat');
       assert.match(draft, /^# 工作台$/m, '缺少页面标题');
-      assert.match(draft, /`\/chat`/, '缺少路由');
+      assert.match(draft, /\]\(\/chat\)/, '缺少路由');
       assert.match(draft, /「发送」/, '缺少 UI 原文');
       // 草稿只有事实，不该出现正式文档才有的东西
       assert.ok(!fs.existsSync(finalPath(root, 'chat')), '阶段一不应产出正式文档');
@@ -152,7 +152,7 @@ async function main() {
 
   for (const [name, mutate] of [
     ['改了截图路径', (d) => d.replace(/\]\(images\/annotated\/page--chat--[0-9a-f]+\.png\)/, '](images/chat.png)')],
-    ['删掉了截图', (d) => d.replace(/!\[[^\]]*\]\([^)]*\)\n/, '')],
+    ['删掉了截图', (d) => d.replace(/^\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)\n/m, '')],
   ]) {
     await test(`拦截（带图草稿）：${name}`, async () => {
       const root = await prepareProject(server.baseUrl);
@@ -245,7 +245,7 @@ async function main() {
 
       // 手工把草稿和 facts 都改成引用原图：统一门槛仍按产物位置阻止
       const rawHref = '../../.manual/artifacts/raw/pages/chat.png';
-      const tampered = draft.replace('访问地址', `![工作台](${rawHref})\n\n访问地址`);
+      const tampered = draft.replace('入口：', `![工作台](${rawHref})\n\n入口：`);
       fs.writeFileSync(draftPath(root, 'chat'), tampered);
       fs.writeFileSync(factsFile, JSON.stringify({ pageId: 'chat', images: [{ artifactPath: '.manual/artifacts/raw/pages/chat.png', markdownHref: rawHref }] }));
       r = await run('generate', root, ['chat', '--finalize', writePolished(root, 'chat', tampered), '--json']);
@@ -330,9 +330,9 @@ async function main() {
         '',
         '在这个页面与 AI 助手对话，也可以管理历史会话。',
         '',
-        '访问地址：`/chat`',
+        '入口：[工作台](/chat)',
         '',
-        '## 主要操作',
+        '## 主要功能',
         '',
         '1. 输入问题后点击「发送」',
         '2. 点击「新对话」创建会话',
@@ -374,17 +374,17 @@ async function main() {
     {
       // 页面发布图管线就绪前草稿是文字版；删图/改路径由上方 compareFacts 用例覆盖
       name: '凭空加入截图',
-      mutate: (d) => d.replace('## 主要操作', '![工作台](images/annotated/chat.png)\n\n## 主要操作'),
+      mutate: (d) => d.replace('## 主要功能', '![工作台](images/annotated/chat.png)\n\n## 主要功能'),
       expect: /截图引用被改动/,
     },
     {
       name: '改了路由',
-      mutate: (d) => d.replace('`/chat`', '`/chat/index`'),
+      mutate: (d) => d.replace('](/chat)', '](/chat/index)'),
       expect: /路由/,
     },
     {
       name: '编造了响应时间',
-      mutate: (d) => d.replace('访问地址', '发送后通常 3 秒内返回结果。\n\n访问地址'),
+      mutate: (d) => d.replace('入口：', '发送后通常 3 秒内返回结果。\n\n入口：'),
       expect: /草稿里没有的数字/,
     },
     {

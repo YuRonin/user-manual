@@ -175,12 +175,16 @@ async function main() {
     assert.match(byId(report, 'dependency:playwright').hint, /npm ci/);
   });
 
-  await test('命令注册表是 CLI 与 compat 别名的唯一来源（含 auth、doctor）', (root, cacheRoot) => {
+  await test('命令注册表是 CLI 与 compat 别名的唯一来源：帮助分组列出、兼容入口隐藏、别名只覆盖主流程', (root, cacheRoot) => {
     const names = COMMANDS.map((command) => command.name);
-    assert.deepStrictEqual(aliases.COMMANDS, names);
-    assert.ok(names.includes('auth') && names.includes('doctor'));
+    assert.deepStrictEqual(aliases.ALL_COMMANDS, names);
+    assert.deepStrictEqual(aliases.COMMANDS, COMMANDS.filter((command) => command.group === 'core').map((command) => command.name));
+    assert.ok(aliases.COMMANDS.includes('auth') && aliases.COMMANDS.includes('doctor'));
     const help = spawnSync(process.execPath, [CLI, '--help'], { encoding: 'utf8' });
-    for (const name of names) assert.match(help.stdout, new RegExp(`\\b${name}\\b`));
+    for (const command of COMMANDS) {
+      const listed = new RegExp(`^  ${command.name} `, 'm').test(help.stdout);
+      assert.strictEqual(listed, command.group !== 'legacy', `${command.name} 在帮助中的可见性`);
+    }
     for (const command of COMMANDS) {
       const result = run(root, cacheRoot, [command.name, '--help']);
       assert.strictEqual(result.status, 0, `${command.name} --help: ${result.stderr}`);

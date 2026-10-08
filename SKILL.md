@@ -1,138 +1,99 @@
 ---
 name: manual
-description: Use when a Web project needs a living user manual, task-oriented操作指南, page discovery, real-browser screenshots, or maintained Markdown help content; also when the user invokes /manual commands or asks to 初始化、扫描、截图、生成或更新使用手册。
+description: Use when a Web project (currently Next.js) needs a living user manual: 初始化、扫描页面、用真实浏览器截图、生成或更新图文使用手册与任务操作指南、核对手册是否仍与线上一致；also when the user invokes /manual or /manual-<command>.
 ---
 
 # manual —— Living User Manual
 
-给任意 Web 项目建一份「活的」用户手册。页面模型提供位置与证据，用户任务模型组织最终指南；真实浏览器负责验证状态与截图，程序负责确定性校验和落盘。
+为 Web 项目生成并持续维护图文使用手册：读源码建立页面与任务模型，用真实浏览器操作和截图，按帮助中心的写法出稿，代码变化后只更新受影响的文档。
 
-Skill 自身代码与项目数据分离：**Skill 只提供能力，项目状态一律落在业务项目的 `.manual/`。**
+三条不变的原则：
 
-## 最短可用流程
+- **手册里的每张图都来自真实渲染的页面**；页面打不开就报错，不出图。
+- **事实由程序锁定**：步骤顺序、界面名称、截图、完成标志来自结构化模型；模型只能改写说明文字。
+- **只写业务项目的 `.manual/` 和配置里的文档目录**，不改业务代码；原图、认证缓存和会话 URL 不进入正式文档。
 
-已有 `.manual/config.yaml` 与目标模型时直接从下面开始，不重复 `init`、`inspect`、`describe`。
+命令统一为 `node <skill>/bin/manual.js <命令> --project-root <项目根> --json`，下文简写为 `manual <命令>`。
 
-1. 对已有且已批准的模型，直接运行 `manual generate task:<id> --copy-default --json`。多个目标可列在同一命令中，共用一个 Run。结果的 `documents` 给出正式文档路径；检查 `warnings`、`riskBoundaries` 和 `cache`，再按[质量与证据工作流](references/quality-workflow.md)审阅成品。只有需要事先审阅新动作或风险范围时，才先运行 `--plan`。
-2. Runtime 仅在需要浏览器且已配置身份断言时预检登录。失效后用结果中的 Run ID 执行 `manual auth login --resume <runId>`，登录成功后自动继续；已有用户提供的测试凭据可按授权使用。单独排查时运行 `manual auth check --path <受保护页面路径> --json`；`auth status` 只说明缓存存在。
-3. 已有有效证据且只需修改文案时加 `--offline`；明确需要新截图时才加 `--refresh`。`--copy-default` 省去模型文案等待，但其文案必须经过读者视角审阅。
-   若 `--offline` 因 `identityRevision` 变化拒绝复用，不要绕过身份隔离；仅修改文案时可由 `generate-task` 对任务现有证据重新生成草稿并通过定稿门槛，需要当前身份的证据时先审阅计划再重新采集。
-4. `outcome-unknown` 先检查已有会话，不能重新发送；按照[质量与证据工作流](references/quality-workflow.md)核对。
+## 先判断从哪一步开始
 
-页面目标把 `task:<id>` 换成 `page:<id>`。页面或任务不存在时，再按[命令细节与兼容流程](references/command-workflows.md)中的 `init`、`inspect`、`describe`、`discover-tasks` 补齐。
+| 当前状态 | 做什么 |
+|---|---|
+| 项目没有 `.manual/config.yaml` | 第 1 步：首次接入 |
+| 已接入，但要写的页面或任务还没有模型 | 第 2 步：建模 |
+| 页面或任务已建模（任务已批准） | 第 3 步：生成 |
+| 代码改了，想同步手册 | 第 4 步：`update` |
+| 想知道手册是否仍然正确 | 第 4 步：`verify` |
 
-## 当前版本能力
+不确定时运行 `manual doctor` 查看环境、配置与认证状态。
 
-| 命令 | 状态 | 作用 |
-|---|---|---|
-| `manual init` | ✅ V0.1 | 收集配置，生成 `.manual/config.yaml` |
-| `manual inspect` | ✅ V0.2+ | 扫描路由与静态源码依赖，建立页面模型和正逆索引 |
-| `manual describe` | ✅ V0.2 | 把页面的源码分析结果写回模型 |
-| `manual capture` | ✅ V0.3 | 用真实浏览器采集页面或任务证据（`page:<id>` / `task:<id>` / `scenario:<id>`），只推进到证据提交 |
-| `manual auth` | ✅ | 登录并管理可跨 worktree 复用的认证档案 |
-| `manual generate` | ✅ Runtime | 规划并执行：按需采集（复用有效缓存）→ 草稿 → 文案 → 发布门槛 → 发布；`--plan` 只预览 |
-| `manual status` / `resume` / `run-submit` | ✅ Runtime | 查看 Run、从任务快照继续、提交模型文案响应 |
-| `manual publication` | ✅ | 查看与恢复中断的发布事务（`status` / `repair`） |
-| `manual migrate` | ✅ | 显式迁移旧项目到 v2 模型（`--dry-run` / `--apply` / `--rollback`） |
-| `manual discover-tasks` | ✅ Task-first 基础 | 基于页面证据准备候选发现工作清单并写入候选任务 |
-| `manual task-guide` | ✅ | 从一句任务目标取得入口候选与只读建模工作表，不产生审批或执行权限 |
-| `manual review-task` | ✅ | 汇总目标覆盖、逐步截图和完成证据；`--preview` 生成本地读者视图 |
-| `manual approve-tasks` | ✅ Task-first 基础 | 由人工批准、调整或拒绝候选任务 |
-| `manual plan-capture` / `capture-task` | ✅ 兼容 | 任务截图计划 / 安全交互采集（与 `capture task:<id>` 同一用例） |
-| `manual update` | ✅ Phase 3 | 按源码变化只更新受影响的已发布手册；`--plan` 只读预览影响与原因 |
-| `manual verify` | ✅ Phase 3 | `--artifacts`（默认，离线）/ `--live`（真实导航回放 + 漂移报告），`--all` 验证全部已发布手册 |
-| `manual gc` | ✅ Phase 3 | 按保留策略回收未引用的临时文件、原图与旧 Run（默认只列出） |
-| `manual generate-task` | ✅ 兼容 | 分步生成任务指南（`--copy` / `--finalize`） |
-| `manual migrate-artifacts` | ✅ 兼容迁移 | 检查旧页面原图，显式复制到非发布产物目录且不删除源文件 |
-| `manual doctor` | ✅ | 只读检查 Node、依赖、Chromium、中文字体、配置与认证缓存 |
-
-兼容入口（`plan-capture`、`capture-task`、`generate-task`、`generate --draft/--finalize`）保留至少一个迁移窗口，
-新流程用 `generate` / `update` / `capture scenario:<id>`；迁移说明见 docs/MIGRATION.md，运行时说明见 docs/RUNTIME.md。
-
-**任何命令都不改动业务项目代码**，只写 `.manual/` 与配置里指定的文档目录。
-
----
-
-## 质量与证据工作流
-
-先阅读 [references/quality-workflow.md](references/quality-workflow.md)。现有会话授权持续有效；用户已要求修复并实践的范围无需重复确认。新任务应先明确目的、数据前提、操作与验证终点，再生成文案。
-
-## 任务优先工作流
-
-当用户要的是“怎样完成某件事”，使用任务流程；不要把页面上的每个按钮机械地写成并列功能。页面式 `capture` / `generate` 在迁移期继续用于页面总览和静态证据。
-
-先运行 `manual task-guide "任务目标"` 选择页面，再用 `--page <page-id>` 查看步骤与断言线索。线索均需核对；没有可靠证据的业务结果写成读者核对项。候选任务的 `completion.goalChecks` 可把目标逐项关联到已有 `claimIds` 或 `readerChecks`，供 `review-task` 展示覆盖与证据状态。
+## 1. 首次接入（每个项目一次）
 
 ```text
-manual inspect
-→ manual describe
-→ manual discover-tasks <page-id|--all>
-→ AI 基于工作清单提出候选 JSON
-→ manual discover-tasks ... --input <候选.json>
-→ 把候选名称、目标、步骤、风险和证据摘要展示给用户
-→ 用户明确确认后 manual approve-tasks --input <决策.json>
+manual init --base-url <站点地址> --audience <public|internal>
+manual auth login --profile default          # 有登录保护的站点；先在 config.yaml 配好 auth.verifyPath 与 auth.identityAssertions
+manual inspect                                # 扫描 Next.js 路由与源码依赖，输出要读的文件清单
+manual describe --input <分析.json>           # 你读完源码后，写回每页的标题、用途、主要操作和 guide
 ```
 
-候选任务需要记录审批依据；可按用户本次或先前明确授权的范围执行 approve-tasks。范围不清楚时展示具体任务再询问。只有 approved 任务才能进入采集和发布。
+`inspect` 目前只支持 Next.js（App Router 与 Pages Router）；其它框架会明确提示暂不支持。`describe` 的输入格式见[命令细节](references/command-workflows.md)。
 
-任务批准后，在现有授权范围内直接运行 `manual generate task:<id> --copy-default --json`；如需事先审阅新动作或风险范围，用 `--plan` 查看动作、风险边界（`write` 停在动作前、`destructive` 不执行）和需要浏览器的场景。正式任务文档只能引用 `images/annotated/`，任何 raw、sanitized、缺失图片或结构化事实变化都会阻止发布；发布后可用 `manual verify <task-id>` 复核。
-定稿前后可运行 `manual review-task <task-id> --preview` 逐步核对目标、标注与图注；静态报告不替代目视检查或首次阅读者测试。
+## 2. 建模：要写哪些任务
 
-执行候选发现或审批时，先读 [references/task-workflow.md](references/task-workflow.md)。
+用户要的是“怎样完成某件事”时写任务指南，不要把页面上的按钮逐个罗列。
 
----
-
-## Runtime：一条命令完成已授权的依赖
-
-Skill 只负责 **解析意图 → 调用命令 → 处理 waiting_input → 报告结果**。状态、缓存、重试、恢复都由 Runtime 决定并持久化在 `.manual/runs/`，不要在对话里自己重演（例如不要为了“保险”手动重新截图，也不要自行重试失败的步骤）。
-
-```
-node <skill>/bin/manual.js generate <task:<id>|page:<id>> --project-root <项目根> --json
+```text
+manual task-guide "要完成的目标"                    # 找入口页面
+manual task-guide "要完成的目标" --page <page-id>   # 取得步骤与断言线索（只读）
+manual discover-tasks <page-id|--all>              # 取得候选工作清单 → 你写候选 JSON → 带 --input 保存
+manual approve-tasks --input <决策.json>            # 用户确认后才批准
 ```
 
-按退出码处理（契约 C08，JSON 里的 `code` 作细分）：
+候选任务的名称、目标、步骤、风险和证据摘要要先展示给用户；只在用户本次或先前明确授权的范围内批准，范围不清就问。只有已批准的任务才会被采集和发布。任务模型里直接面向读者的字段（标题、`readerPreconditions`、完成声明、`readerChecks`、`branches`、`capture.readerCaption`）按[写作规范](references/manual-writing-style.md)第五节写。细节见[任务工作流](references/task-workflow.md)。
+
+## 3. 生成
+
+```text
+manual generate task:<id> [task:<id2> page:<id> ...]
+```
+
+多个目标共用一个 Run 和浏览器会话。Runtime 自动决定是否需要采集（可复用的有效证据直接用），然后生成事实草稿，**默认停下来请你写文案**（退出码 3，`model-input-required`）：
+
+1. 读请求文件 `.manual/runs/<runId>/model/<requestId>.request.json`，只读其中 `files` 列出的文件。
+2. 按[写作规范](references/manual-writing-style.md)填写 `allowedBlocks` 里的文案块，写成响应 JSON（格式见规范第七节）。
+3. `manual resume <runId> --request <requestId> --input <响应.json>` 提交并继续，直到发布。
+
+常用选项：
+
+- `--plan`：只预览动作、风险边界（`write` 停在动作前，`destructive` 不执行）与需要的浏览器场景；有新动作或风险范围需要用户审阅时先用它。
+- `--offline`：只改文案、已有有效证据时使用，不打开浏览器。
+- `--refresh`：强制重新采集，只在用户要求新截图时使用。
+- `--copy-default`：跳过模型文案、直接用默认句子。只在用户明确要“先出一个粗稿”时使用，交付时要说明文案未经润色。
+
+发布后：报告结果里 `documents` 给出的正式文档路径，处理 `warnings`；任务指南再运行 `manual review-task <id> --preview`，按[质量工作流](references/quality-workflow.md)对照截图逐篇审阅。`cache` 里的复用项说明用的是 `observedAt` 时刻的历史观察，未在线确认。
+
+## 4. 维护
+
+**代码改了：**先 `manual update --plan` 把影响范围和原因链（`sections[].reasonPaths`：文件 → 页面 → 手册）给用户看，确认后 `manual update`。`confidence=conservative` 表示范围被保守扩大，说明原因即可，不要自行缩小；`retirement` 是页面删除后的下线建议，只转告，不删文件。远端数据、权限或部署变化不在源码影响里，需要 `verify --live`。
+
+**手册还对吗：**`manual verify <目标>` 默认离线检查产物（`onlineChecked=false`，不代表线上行为）；`--live` 在真实浏览器回放，结果分 `failed`（行为不一致）、`drift`（内容变化）、`inconclusive`（环境问题）。写操作步骤不执行，对应声明是 `not_run`，要如实说明覆盖范围。`--all` 检查全部已发布手册。
+
+## 按退出码处理
+
+Skill 只负责：解析意图 → 调用命令 → 处理等待 → 报告结果。重试、缓存、恢复由 Runtime 决定并记录在 `.manual/runs/`，不要自己重新截图或循环重跑。
 
 | 退出码 | 含义 | 怎么做 |
 |---|---|---|
-| 0 | 完成 | 报告 `documents` 的路径并处理 `warnings`；`cache` 里的复用项说明“使用了 observedAt 时刻的历史观察，未在线确认” |
-| 3 | 等待输入 | 看 `waiting[].code`：`model-input-required` → 读请求文件（只读其中列出的文件），按 `references/manual-writing-style.md` 第七节写响应 → `manual run-submit <runId> --request <id> --input <响应.json>` → `manual resume <runId>`；`approval-required` / `scope-changed` → 把任务展示给用户，得到明确确认后 `approve-tasks` 再 `resume`；`auth-missing` / `auth-expired` / `login-required` → `manual auth login --resume <runId>`；`review-required` → 展示需确认的数字 / 承诺，用户确认后带 `--accept-review` 重新运行 |
-| 4 | 漂移或冲突 | `run-input-changed` → `manual resume <runId> --replan`；`merge-conflict` → 把 `proposed.md` 与逐块对照展示给用户：采用提案（合入正式文档）或把要保留的块头改为 `owner=human`，然后 `resume`；只有用户明确要求才 `--force`；`document-missing` → 问用户是重新生成（`--force`）还是下线（标 retired）；`verify` 的 failed / drift → 报告分类与差异，不要自动重新生成或接受新基线 |
-| 1 | 失败 | `manual status <runId> --json` 报告失败任务的 code 与提示；Runtime 已按策略重试过，不要自行循环重跑。例外：`network-access-denied` 是客户端沙箱禁止联网，不是网站问题，应在沙箱外重新执行同一条命令（Codex 申请提权执行，用户批准即可），不要让用户“等环境恢复” |
-| 2 | 参数错误 / 目标歧义 | 把 `candidates` 给用户选，用 `task:` / `page:` 前缀重新运行 |
-
-常用选项：`--plan`（只预览，不执行）、`--copy <文案.json>`（已有文案块）、`--copy-default`（不改写文案）、`--offline`（只用历史证据）、`--refresh`（强制重新采集，仅在用户要求时使用）。
-
-写操作返回 `outcome-unknown` 时，不重试提交。若已有会话确实出现结果，按 [质量与证据工作流](references/quality-workflow.md) 修正断言，并用 `capture-task --reconcile-url` 核对既有会话，再离线生成指南。
-已验证提交后若新增只读的结果查看步骤，按同一工作流用 `capture-task --continue-url` 在已有会话续采；不要重放提交。
-
-`fixture-cleanup-required`（退出码 3）表示测试数据清理失败：告诉用户数据仍在测试环境的哪个命名空间，确认环境可用后 `resume`。
-
-### 代码变了：`update`
-
-```
-node <skill>/bin/manual.js update --plan --project-root <项目根> --json   # 先给用户看影响范围与原因链
-node <skill>/bin/manual.js update --project-root <项目根> --json          # 确认后执行
-```
-
-- `sections[].reasonPaths` 是"哪个文件 → 哪个页面 → 哪个 Scenario → 哪份手册"的原因链，按它向用户解释；`confidence=conservative` 表示范围被保守扩大（全局配置、未知依赖），说明原因即可，不要自行缩小范围。
-- `fullRebuild` 表示没有可比较的基线（旧发布记录或非 Git 且无快照）：这些手册会整体重建。
-- `retirement` 是页面被删除后的下线建议：只转告用户，不要删除文档或图片。
-- 源码变化会让受影响页面的语义分析需要复核（`model-input-required` 的 analyze 请求）：按请求读源码、提交分析后 `resume`。
-- 远端 build / 数据 / 权限变化不在源码影响里：需要 `verify --live`。
-
-### 手册还对吗：`verify`
-
-`manual verify <目标>` 默认只做离线产物验证（`onlineChecked=false`）。用户想知道线上是否变了时用 `--live`：
-结果 `failed`（行为与手册不一致）/ `drift`（页面内容与发布时不同）/ `inconclusive`（网络或环境问题，不能下结论）。
-逐条转述 `failures[].category` 与 `claims[]`；写操作步骤不会执行，对应声明是 `not_run`，要如实说明验证覆盖范围。
-
----
+| 0 | 完成（或 `--plan` 预览） | 报告 `documents` 路径并处理 `warnings` |
+| 3 | 等待输入 | 按 `waiting[].code`：`model-input-required` → 上面第 3 步写文案；`approval-required` / `scope-changed` → 把任务展示给用户，确认后 `approve-tasks` 再 `resume`；`auth-missing` / `auth-expired` / `login-required` → `manual auth login --resume <runId>`；`review-required` → 展示需确认的数字与承诺，用户确认后加 `--accept-review` 重跑；`fixture-cleanup-required` → 告诉用户测试数据残留在哪个命名空间，环境恢复后 `resume` |
+| 4 | 漂移或冲突 | `run-input-changed` → `resume <runId> --replan`；`merge-conflict` → 把 `proposed.md` 与逐块对照给用户，由用户选择采用提案或把块头改为 `owner=human` 后 `resume`，只有用户明确要求才 `--force`；`document-missing` → 问用户重新生成还是下线；`verify` 的 failed / drift → 报告差异，不要自动重新生成或接受新基线 |
+| 1 | 失败 | `manual status <runId>` 报告失败任务的 code 与提示。`network-access-denied` 是客户端沙箱禁止联网：在沙箱外重新执行同一条命令。`outcome-unknown`（写操作结果不明）不能重新提交，按[质量工作流](references/quality-workflow.md)“异常恢复”核对 |
+| 2 | 参数错误或目标歧义 | 把 `candidates` 给用户选，用 `task:` / `page:` 前缀重跑 |
 
 ## 按需阅读
 
-- 需要初始化、扫描、旧版截图与分阶段定稿：读[命令细节与兼容流程](references/command-workflows.md)。
-- 需要任务审批、可执行前提和截图质量：读[质量与证据工作流](references/quality-workflow.md)。
-- 需要调整中文文案：读[写作规范](references/manual-writing-style.md)。
-- 需要迁移旧数据或恢复发布事务：读 `docs/MIGRATION.md` 或 `docs/RUNTIME.md`。
-
-所有项目状态只写业务项目的 `.manual/` 与配置中的手册目录。原图、认证缓存和含会话参数的 URL 不进入发布文档。写操作只在已登记、已授权的测试范围执行。
+- [写作规范](references/manual-writing-style.md)：写文案块和任务模型的读者字段之前必读。
+- [质量工作流](references/quality-workflow.md)：交付前审阅、已授权的测试写操作、异常恢复（`outcome-unknown`、身份变化、会话核对与续采）。
+- [任务工作流](references/task-workflow.md)：候选发现、审批与截图质量。
+- [命令细节](references/command-workflows.md)：`init` / `inspect` / `describe` 输入格式，单独采集（`capture`）、预演（`plan-capture --live`）、写操作恢复（`capture-task`）、发布事务（`publication`）、回收（`gc`）与迁移（`migrate`）。
+- `docs/RUNTIME.md`：Run、缓存与故障排查；`docs/MIGRATION.md`：旧项目与兼容命令。

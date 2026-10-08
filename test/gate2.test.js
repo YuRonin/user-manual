@@ -8,7 +8,7 @@
  *   4 Capture 完成后被杀，新进程 resume 从草稿继续
  *   5 错 inputHash 的模型响应被拒，正确响应由另一个进程提交
  *   6 status 解释失败与未完成任务；Run 目录与缓存中没有认证值
- *   7 没有写操作授权：流程停在写动作之前，文档只声明已验证范围
+ *   7 没有写操作授权：流程停在写动作之前，文档不向读者暴露验证范围
  */
 
 const assert = require('assert');
@@ -208,13 +208,12 @@ const count = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir).length : 0);
       scan(path.join(state, 'cache'));
     });
 
-    await step('7 没有写操作授权：停在写动作之前，文档只声明已验证范围', async () => {
+    await step('7 没有写操作授权：停在写动作之前，文档不向读者暴露验证范围', async () => {
       const task = yaml.load(fs.readFileSync(path.join(state, 'tasks', 'edit-profile.yaml'), 'utf8'));
       const manifest = JSON.parse(fs.readFileSync(path.join(root, task.evidenceManifest), 'utf8'));
       assert.deepStrictEqual(manifest.steps.map((s) => [s.id, s.status]), [['open-editor', 'verified'], ['save', 'not-executed']]);
       const doc = fs.readFileSync(path.join(root, 'docs', 'manual', 'tasks', 'edit-profile.md'), 'utf8');
-      assert.match(doc, /此操作未执行/);
-      assert.match(doc, /验证范围：只实际执行到第 1 步/);
+      assert.doesNotMatch(doc, /此操作未执行|验证范围/);
       assert.ok(!/已保存|保存成功/.test(doc), '不声称写操作已完成');
     });
   } catch (_) {

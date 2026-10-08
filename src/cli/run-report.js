@@ -28,7 +28,7 @@ function publishedDocuments(plan, summary, projectRoot, docsOutputDir) {
 }
 
 function waitingHint(runId, waiting, plan = null) {
-  if (waiting.code === 'model-input-required') return `按请求文件处理后：manual run-submit ${runId} --request <requestId> --input <响应.json>，再 manual resume ${runId}`;
+  if (waiting.code === 'model-input-required') return `按请求文件处理后：manual resume ${runId} --request <requestId> --input <响应.json>`;
   if (waiting.code === 'approval-required' || waiting.code === 'scope-changed') return `确认任务后：manual approve-tasks --input <决定.json>，再 manual resume ${runId}`;
   if (waiting.code === 'fixture-cleanup-required') return `测试数据清理失败：确认测试环境可用后 manual resume ${runId} 重试清理（按命名空间幂等）`;
   if (waiting.code === 'merge-conflict') return `人工修改与新生成冲突：按提案合入正式文档（或把要保留的块标为 owner=human）后 manual resume ${runId}；或加 --force 重新运行覆盖`;

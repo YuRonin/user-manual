@@ -27,8 +27,9 @@ manual describe --input describe.json                            # AI 读源码�
 ## 3. 生成：一个 Run 完成已授权的依赖
 
 ```bash
-manual generate page:chat --copy-default --json  # 直接执行；结果含 documents、warnings 和风险边界
+manual generate page:chat --json                # 采集 → 草稿 → 等待模型文案（退出码 3）→ resume 后发布
 manual generate page:chat --plan --json          # 新动作或风险范围需要先审阅时使用；只读
+manual generate page:chat --copy-default --json  # 跳过模型文案出粗稿；交付前必须审阅
 ```
 
 目标写法：`page:<id>` / `task:<id>` / `manual:<page|task>-<id>` / 无前缀的唯一 id；`scenario:<id>` 只用于 `capture`。
@@ -44,7 +45,7 @@ Run 停在 `waiting_input` 时退出码为 3；其中人工修改冲突（`merge
 
 | code | 处理 |
 |---|---|
-| `model-input-required` | 读 `runs/<runId>/model/<requestId>.request.json`，写响应后 `manual run-submit <runId> --request <requestId> --input <响应.json>`，再 `manual resume <runId>` |
+| `model-input-required` | 读 `runs/<runId>/model/<requestId>.request.json`，写响应后 `manual resume <runId> --request <requestId> --input <响应.json>`（提交并继续；旧的 `run-submit` + `resume` 两步仍可用） |
 | `approval-required` / `scope-changed` | 用户确认任务后 `manual approve-tasks --input <决定.json>`，再 `resume` |
 | `auth-missing` / `auth-expired` / `login-required` | `manual auth login` 后 `resume` |
 | `review-required` | 用户确认新出现的数字 / 承诺属实后带 `--accept-review` 重新运行 |

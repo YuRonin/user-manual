@@ -81,11 +81,11 @@ test('操作前截图标错目标或截图时机不符会进入审阅警告', ()
 });
 
 test('读者预览隐藏维护标记，并保留图片和完成段', () => {
-  const markdown = '<!-- manual:block id=overview -->\n# 标题\n<!-- /manual:block -->\n\n1. 点击按钮\n\n![步骤图](../images/annotated/one.png)\n\n## 完成后怎么检查\n\n核对内容。';
+  const markdown = '<!-- manual:block id=overview -->\n# 标题\n<!-- /manual:block -->\n\n1. 点击按钮\n\n![步骤图](../images/annotated/one.png)\n\n## 如何确认已完成\n\n核对内容。';
   const html = renderPreview(markdown, { title: '标题', quality: { warnings: ['需要复核图注'] } }, '../../docs/manual/tasks/');
   assert.match(html, /<h1>标题<\/h1>/);
   assert.match(html, /src="\.\.\/images\/annotated\/one\.png"/);
-  assert.match(html, /完成后怎么检查/);
+  assert.match(html, /如何确认已完成/);
   assert.doesNotMatch(html, /manual:block/);
   assert.match(html, /审阅提示（不属于读者正文）/);
 });

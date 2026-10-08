@@ -67,7 +67,7 @@ function checkStillCurrent({ projectRoot, config, request, facts }) {
     if (subject.type === 'task') {
       const base = createProjectStore({ stateDirAbs: path.join(projectRoot, config.artifacts.stateDir), docsOutputDir: config.docs.outputDir }).load();
       const task = base.model.tasks.find((t) => t.id === subject.id);
-      const fresh = task ? checkDraftFresh({ root: projectRoot, config, task, pages: base.model.pages, facts }) : { ok: false, errors: ['任务已不存在'] };
+      const fresh = task ? checkDraftFresh({ root: projectRoot, config, task, pages: base.model.pages, tasks: base.model.tasks, facts }) : { ok: false, errors: ['任务已不存在'] };
       if (!fresh.ok) throw new RuntimeError('run-input-changed', `${fresh.errors.join(' ')}；运行 manual resume <runId> --replan。`);
     } else {
       const { page } = loadPage(projectRoot, config, subject.id);

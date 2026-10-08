@@ -1,6 +1,6 @@
 # 命令细节与兼容流程
 
-需要初始化、扫描、截图参数或旧版分阶段命令时再阅读本文件。日常生成先按 `SKILL.md` 的快速流程。
+需要初始化与扫描的细节、登录与截图参数、高级命令时阅读本文件。日常生成按 `SKILL.md` 的主流程。
 
 ## `$manual-init` / `/manual-init` —— 初始化配置
 
@@ -120,7 +120,7 @@ node <skill>/bin/manual.js describe --project-root <项目根> --input <分析�
 
 ---
 
-## `$manual-capture` / `/manual-capture` —— 真实浏览器截图
+## 登录与单独采集（`auth` / `capture`）
 
 受保护页面先运行：
 
@@ -146,10 +146,10 @@ localStorage。使用 `manual auth status` 查看本地档案元数据；需要�
 系统用户级缓存，可跨 worktree 使用；不得打印、复制进项目文件或写入证据清单。
 
 ```
-node <skill>/bin/manual.js capture <page-id> --project-root <项目根> --json
+node <skill>/bin/manual.js capture <page:<id>|task:<id>|scenario:<id>> --project-root <项目根> --json
 ```
 
-优先从正索引取出 route（索引不可用时回退页面模型）→ 拼出 `{baseUrl}{route}` → 用配置里的 Provider 打开真实页面 →
+`generate` 会按需自动采集；只想取证据、不生成文档时才单独运行 `capture`。页面采集流程：优先从正索引取出 route（索引不可用时回退页面模型）→ 拼出 `{baseUrl}{route}` → 用配置里的 Provider 打开真实页面 →
 等页面稳定 → 按配置的 viewport 与 DPR 截图 → 回写页面模型的 `browser` 状态。
 
 **先确认开发服务器在跑**。capture 不启动项目，也不会去猜端口——连不上就直接失败。
@@ -188,61 +188,11 @@ DOM 连续静止 → 冻结 CSS 动画与过渡 → 静置回流。
 
 ---
 
-## `$manual-generate` / `/manual-generate` —— 生成手册（含中文自然化）
+## 文案与事实校验
 
-默认走 Runtime（见上文）：文案通过交接请求填写，正文由事实包确定性渲染。下面的三段式是兼容流程，
-需要整篇润色 Markdown 时使用。**中文润色是 AI 的活，事实校验是程序的活**——AI 润色时最容易「顺手把事实改通顺」，
-靠提示词自觉挡不住，所以由程序逐项比对。
+`generate` 默认在事实草稿之后停下，请宿主模型填写文案块（导语、步骤补充说明），见 SKILL.md 第 3 步与[写作规范](manual-writing-style.md)。正文其余部分由事实包确定性渲染，提交的文案经程序校验：改写受保护的 UI 名称或动作会被拒绝，新出现的数字或承诺需要人工确认（`review-required`）。
 
-### 阶段一：出事实草稿
-
-```
-node <skill>/bin/manual.js generate <page-id> --draft --project-root <项目根> --json
-```
-
-草稿写到 `.manual/drafts/<id>.md`，只由确定性事实拼成，一个字都不是推断的。正索引中的关联源码会写入 HTML 元数据，并通过 `--json` 的 `indexContext` 返回给 AI 调用方，不会被当成用户可见操作步骤。
-`--json` 还会返回 `protected` 字段，列出润色阶段一个字都不能动的东西。
-
-前置条件：页面必须已 `describe`（有标题和用途）且已 `capture`（有真实截图）。
-缺哪个会明确告诉你先跑哪条命令。确实要出纯文字版才加 `--no-screenshot`。
-
-### 阶段二：按规范改写成自然中文
-
-**先读 `references/manual-writing-style.md`**，然后把草稿改写成国内 SaaS 帮助中心那样的中文。
-
-只能改：句式、语序、冗余表达、翻译腔、AI 套话。
-不能改：事实、UI 名称、操作顺序、页面行为、截图引用、数字。
-
-一句话判据：**改完之后读者照着做会得到不同结果，那就是改错了。**
-
-重点删掉：`用户可以点击……以实现……` · `通过该功能，用户能够……` · `首先/其次/最后` ·
-`值得注意的是` · `从而提升` · `进一步提升` · `更好地` · `高效地` · `轻松地` · `即可实现` ·
-不必要的`您可以`。
-
-操作说明直接上动词：点击、选择、输入、打开、返回、上传、下载、查看。
-
-```
-✗ 用户可以点击「发送」按钮以提交当前请求。
-✓ 输入完成后，点击「发送」。
-
-✗ 通过该功能，用户能够快速创建新的对话。
-✓ 点击「新对话」创建会话。
-```
-
-**「」只能用于页面模型里确实记录了的 UI 名称。** 不确定按钮叫什么就用描述性说法——
-编一个「开启新会话」出来，用户在页面上根本找不到。
-
-### 阶段三：事实校验并定稿
-
-```
-node <skill>/bin/manual.js generate <page-id> --finalize <润色后的文件> --json
-```
-
-程序逐项比对草稿与定稿：截图路径、「」里的 UI 原文、`` ` ``里的路由与文件名、数字、
-操作步骤的数量与顺序、一级标题。全部一致才写 `docs/manual/<id>.md`。
-
-不一致就**不输出正式文档**，并逐条列出哪里改动了事实。按提示修正后重新 `--finalize`。
-`--fallback-draft` 可以用草稿原文强行定稿——保事实、丢润色，事实优先。
+旧的页面三段式（`generate <page-id> --draft` → 整篇润色 → `--finalize <文件>`，可加 `--fallback-draft`）仍可用，只在需要整篇改写 Markdown 时使用；校验规则同上，详见 `docs/MIGRATION.md`。
 
 ### 想让真实按钮名进手册
 
@@ -301,6 +251,15 @@ status:
 `confidence` 只有在**源码分析完成 且 浏览器验证过**时才升到 `verified`。
 光截了图但没分析过语义，`browser.verified` 是 true 而 `confidence` 仍是 `none`——不虚报。
 
+## 高级命令
+
+只在对应场景使用，主流程不需要：
+
+- `manual plan-capture <task-id> --live`：新建任务、改过定位或数据前提不确定时，在真实浏览器只读预演到写操作前，不产出截图、不改证据。
+- `manual capture-task <task-id> --reconcile-url <已有会话URL> --prior-captures <ID,...>`：已授权的写操作结果不明（`outcome-unknown`）时，核对已有会话并补采最终截图，不重复提交。
+- `manual capture-task <task-id> --continue-url <已有会话URL>`：提交已验证、只缺最后的结果查看步骤时，在已有会话续采，不重放提交。两者的前提与限制见 [质量工作流](quality-workflow.md)。
+- `manual gc`：列出未引用的临时文件、原图与旧 Run；确认后 `--apply --expect <planHash>`。`--inventory` 逐项给出大小与保留原因。
+
 ## 发布恢复与迁移
 
 - 发布按 journal 推进（prepared → assets → document → release → completed）。进程中断后运行 `manual publication status --json` 查看，`manual publication repair` 对账恢复；文档被人工修改时报 `publication-conflict` 并保留修改，不自动覆盖。
@@ -311,4 +270,4 @@ status:
 - inspect 不需要项目正在运行；capture 需要。
 - 动态路由记作 `/artifact/:id`。capture 必须给 `--params "id=123"`，不给就明确拒绝，不会去猜一个 id。
 - 设计约定与 Provider 接口契约见 `docs/ARCHITECTURE.md`。
-- 客户端调用必须使用各自原生别名：Codex 用 `$manual-<command>`，Claude Code 用 `/manual-<command>`。CLI 内部仍使用 `manual <command>`；运行 `npm run install:compat` 可生成全部别名。
+- 客户端别名只覆盖主流程命令（init / inspect / describe / auth / generate / update / verify / doctor）：Codex 用 `$manual-<command>`，Claude Code 用 `/manual-<command>`；其它命令通过主 skill `manual` 调用 CLI。

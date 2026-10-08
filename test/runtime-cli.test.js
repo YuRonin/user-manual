@@ -117,22 +117,22 @@ async function setup(baseUrl) {
     });
 
     let waitingRun;
-    await test('等待模型文案退出 3，给出请求与下一步；另一进程 run-submit 后 resume 完成', async () => {
+    await test('等待模型文案退出 3，给出请求与下一步；resume --request --input 提交并继续', async () => {
       const out = await expectExit(root, ['generate', 'page:chat'], 3);
       waitingRun = out.runId;
       assert.strictEqual(out.status, 'waiting_input');
       assert.strictEqual(out.waiting[0].id, 'rewrite');
-      assert.match(out.waiting[0].next, /run-submit/);
+      assert.match(out.waiting[0].next, /manual resume .* --request <requestId> --input/);
       const status = await expectExit(root, ['status', waitingRun], 0);
       assert.strictEqual(status.tasks.find((t) => t.id === 'rewrite').error.code, 'model-input-required');
       const requestDir = path.join(runsDir, waitingRun, 'model');
       const request = JSON.parse(fs.readFileSync(path.join(requestDir, fs.readdirSync(requestDir).find((n) => n.endsWith('.request.json'))), 'utf8'));
       const response = writeJson(path.join(root, 'response.json'), { requestId: request.requestId, inputHash: 'sha256:wrong', output: { copy: { intro: '在这里和 AI 助手对话。' } } });
-      const rejected = await expectExit(root, ['run-submit', waitingRun, '--request', request.requestId, '--input', response], 1);
+      const rejected = await expectExit(root, ['resume', waitingRun, '--request', request.requestId, '--input', response], 1);
       assert.strictEqual(rejected.code, 'invalid-model-response');
+      assert.strictEqual((await expectExit(root, ['status', waitingRun], 0)).run.status, 'waiting_input', '校验失败不继续 Run');
       writeJson(response, { requestId: request.requestId, inputHash: request.inputHash, output: { copy: { intro: '在这里和 AI 助手对话。' } } });
-      await expectExit(root, ['run-submit', waitingRun, '--request', request.requestId, '--input', response], 0);
-      const resumed = await expectExit(root, ['resume', waitingRun], 0);
+      const resumed = await expectExit(root, ['resume', waitingRun, '--request', request.requestId, '--input', response], 0);
       assert.strictEqual(resumed.status, 'succeeded');
       assert.deepStrictEqual(resumed.documents, [{ subject: 'page:chat', path: path.join(root, 'docs', 'manual', 'chat.md') }]);
       assert.match(fs.readFileSync(path.join(root, 'docs', 'manual', 'chat.md'), 'utf8'), /在这里和 AI 助手对话。/);
@@ -166,7 +166,7 @@ async function setup(baseUrl) {
       const plan = await expectExit(root, ['generate', 'task:edit-profile', '--copy-default', '--plan'], 0);
       assert.strictEqual(plan.tasks[0].reason, 'cache-hit');
       const help = await cli(root, ['--help']);
-      for (const name of ['status', 'resume', 'run-submit']) assert.match(help.stdout, new RegExp(`\\b${name}\\b`));
+      for (const name of ['status', 'resume']) assert.match(help.stdout, new RegExp(`\\b${name}\\b`));
     });
   } finally {
     await server.close();

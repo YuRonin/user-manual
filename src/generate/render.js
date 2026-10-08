@@ -13,25 +13,22 @@ const { revision } = require('../model/revision');
 
 const TEMPLATES = {
   'zh-CN': {
-    before: '开始前',
-    entry: '从哪里开始',
+    before: '前提条件',
     steps: '操作步骤',
-    completion: '完成后怎么检查',
-    readerChecks: '请核对任务结果',
-    branches: '遇到问题时',
-    related: '相关任务',
-    actionsInferred: '主要操作（根据源码推断，尚未在浏览器中逐项验证）',
-    route: (route) => `访问地址：\`${route}\``,
-    notExecuted: '> 此操作未执行，指南停在提交前。',
-    scopeNone: '> 验证范围：本指南的步骤均未实际执行。',
-    scopePartial: (n) => `> 验证范围：只实际执行到第 ${n} 步，之后的步骤未执行。`,
-    simulated: '> 数据来源：界面状态由测试数据模拟（Fixture），未连接真实后端；以下结果只说明界面如何呈现。',
-    verified: '采集时已看到：',
-    expected: '预期会看到：',
-    screenshotNote: '截图仅供参考，具体数据以当前页面为准。',
+    entryLead: (link) => `进入 ${link} 页面，按以下步骤操作。`,
+    completion: '如何确认已完成',
+    readerChecks: '请确认以下内容',
+    branches: '常见问题',
+    related: '相关文档',
+    pageEntry: (link) => `入口：${link}`,
+    actionsInferred: '主要功能',
+    actionsInferredNote: '> 以下功能根据页面整理，具体以实际界面为准。',
+    guideLink: '查看详细步骤',
+    // 完成声明的两个标签必须互不包含：等级由程序按证据决定，定稿校验按前缀区分。
+    verified: '完成标志：',
+    expected: '预期结果：',
+    simulated: '> 说明：截图中的数据为示例数据，实际内容以你的页面为准。',
     stepAlt: (n, timing) => `第 ${n} 步${timing === 'before' ? '操作前' : timing === 'after' ? '操作后' : ''}的界面`,
-    stepCaption: (n, timing) => `图：第 ${n} 步${timing === 'before' ? '操作前，定位要使用的控件' : timing === 'after' ? '操作后的界面，用于核对变化' : '的界面'}。`,
-    imageZoom: '放大查看',
     quote: (text) => `「${text}」`,
     action: {
       click: (t) => `点击${t}`,
@@ -43,25 +40,21 @@ const TEMPLATES = {
     },
   },
   'en-US': {
-    before: 'Before you start',
-    entry: 'Where to start',
+    before: 'Prerequisites',
     steps: 'Steps',
-    completion: 'Completion',
-    readerChecks: 'Check the task result',
-    branches: 'Conditions',
-    related: 'Related tasks',
-    actionsInferred: 'Main actions (inferred from source code, not yet verified in a browser)',
-    route: (route) => `Address: \`${route}\``,
-    notExecuted: '> This action was not executed; the guide stops before submitting.',
-    scopeNone: '> Verification scope: none of the steps in this guide were executed.',
-    scopePartial: (n) => `> Verification scope: only steps up to step ${n} were executed.`,
-    simulated: '> Data source: the UI state was simulated with test fixtures, not a live backend; results below only describe how the UI presents it.',
-    verified: 'Observed during capture: ',
-    expected: 'Expected: ',
-    screenshotNote: 'Screenshots show the interface at capture time. Your data may differ.',
+    entryLead: (link) => `Open ${link} and follow these steps.`,
+    completion: 'How to confirm it worked',
+    readerChecks: 'Please also check',
+    branches: 'FAQ',
+    related: 'Related articles',
+    pageEntry: (link) => `Entry: ${link}`,
+    actionsInferred: 'Main features',
+    actionsInferredNote: '> These features are summarized from the page; the actual interface takes precedence.',
+    guideLink: 'See detailed steps',
+    verified: 'You will see: ',
+    expected: 'Expected result: ',
+    simulated: '> Note: the data in the screenshots is sample data. Your page shows your own content.',
     stepAlt: (n, timing) => `Step ${n} ${timing === 'before' ? 'before the action' : timing === 'after' ? 'after the action' : 'interface'}`,
-    stepCaption: (n, timing) => `Figure: Step ${n} ${timing === 'before' ? 'before the action; locate the control' : timing === 'after' ? 'after the action; check the change' : 'interface'}.`,
-    imageZoom: 'View full size',
     quote: (text) => `「${text}」`,
     action: {
       click: (t) => `Click ${t}`,
@@ -75,7 +68,8 @@ const TEMPLATES = {
 };
 
 // render-2：正文按稳定块 ID 分段（<!-- manual:block id=… --> … <!-- /manual:block -->），供人工编辑保护的三方合并定位（P3-06）。
-const TEMPLATE_VERSION = 'render-12';
+// render-13：面向读者的帮助中心结构——入口并入步骤，正文不暴露采集与验证范围等维护信息。
+const TEMPLATE_VERSION = 'render-13';
 
 class TemplateError extends Error {
   constructor(language) {
@@ -152,7 +146,23 @@ function assemble(blocks, prefix = []) {
   return [...prefix, parts.join('\n\n')].filter((x) => x !== undefined).join('\n') + '\n';
 }
 
-/** 任务指南。copy 只能填充 pack.blocks 中声明的块，调用前应先 validateCopy。 */
+/** 图片本身链接到原图，读者点击即可放大；只有人工核对过的图注才显示。 */
+function figure(artifact, alt, href, indent = '') {
+  const lines = ['', `${indent}[![${alt}](${href})](${href})`];
+  if (artifact?.readerCaption) lines.push('', `${indent}*${artifact.readerCaption}*`);
+  return lines;
+}
+
+/** 相关任务文档同在 tasks/ 目录；没有标题时退回任务 id。 */
+function relatedLine(item) {
+  const { id, title } = typeof item === 'string' ? { id: item, title: null } : item;
+  return `- [${title || id}](${id}.md)`;
+}
+
+/**
+ * 任务指南。copy 只能填充 pack.blocks 中声明的块，调用前应先 validateCopy。
+ * 正文只写读者需要的内容；步骤是否实际执行、验证范围等维护信息留在事实包、review-task 与发布记录中。
+ */
 function renderTask(pack, copy = {}) {
   const t = templateFor(pack.language);
   const hrefOf = new Map(pack.artifacts.map((a) => [a.id, a.markdownHref]));
@@ -160,16 +170,12 @@ function renderTask(pack, copy = {}) {
   const overview = [`# ${pack.title}`];
   const intro = blockText(pack, copy, 'intro');
   if (intro) overview.push('', intro);
-  if (pack.artifacts.length) overview.push('', t.screenshotNote);
+  if (pack.provenance === 'simulated' && pack.artifacts.length) overview.push('', t.simulated);
   blocks.push(['overview', overview]);
-  if (pack.entry?.route) {
-    const place = pack.language === 'zh-CN'
-      ? `打开 [${pack.entry.title || pack.title}](${pack.entry.route}) 页面。`
-      : `Open [${pack.entry.title || pack.title}](${pack.entry.route}).`;
-    blocks.push(['entry', [`## ${t.entry}`, '', place]]);
-  }
-  blocks.push(['before', [`## ${t.before}`, '', ...pack.preconditions.map((item) => `- ${item}`)]]);
-  blocks.push(['steps', [`## ${t.steps}`]]);
+  if (pack.preconditions.length) blocks.push(['before', [`## ${t.before}`, '', ...pack.preconditions.map((item) => `- ${item}`)]]);
+  const stepsHead = [`## ${t.steps}`];
+  if (pack.entry?.route) stepsHead.push('', t.entryLead(`[${pack.entry.title || pack.title}](${pack.entry.route})`));
+  blocks.push(['steps', stepsHead]);
   pack.steps.forEach((step, index) => {
     const note = withoutRepeatedAction(blockText(pack, copy, `step.${step.id}`), step.sentence, pack.language);
     // 已批准的短位置说明可放在动作前，读者先知道到哪里操作。
@@ -188,40 +194,37 @@ function renderTask(pack, copy = {}) {
     else { L.push(`${index + 1}. ${action}`); if (remainder) L.push('', `   ${remainder}`); }
     for (const ref of step.artifactRefs) {
       const artifact = pack.artifacts.find((a) => a.id === ref);
-      const caption = artifact?.readerCaption || t.stepCaption(index + 1, artifact?.timing);
-      const href = hrefOf.get(ref);
-      L.push('', `   ![${artifact?.readerCaption || t.stepAlt(index + 1, artifact?.timing)}](${href})`, '', `   *${caption} [${t.imageZoom}](${href})*`);
+      L.push(...figure(artifact, artifact?.readerCaption || t.stepAlt(index + 1, artifact?.timing), hrefOf.get(ref), '   '));
     }
-    if (step.executed === false) L.push('', `   ${t.notExecuted}`);
     blocks.push([`step.${step.id}`, L]);
   });
-  const completion = [`## ${t.completion}`, ''];
-  if (pack.provenance === 'simulated') completion.push(t.simulated, '');
-  if (pack.scope.firstSkipped === 0) completion.push(t.scopeNone, '');
-  else if (pack.scope.firstSkipped > 0) completion.push(t.scopePartial(pack.scope.firstSkipped), '');
-  for (const claim of pack.claims) completion.push(`<!-- claim:${claim.id} -->`, `${claimLabel(claim.status, t)}${claim.text}`, '');
-  if (pack.readerChecks?.length) completion.push(`### ${t.readerChecks}`, '', ...pack.readerChecks.map((item) => `- ${item}`), '');
-  blocks.push(['completion', completion]);
-  if (pack.branches.length) blocks.push(['branches', [`## ${t.branches}`, '', ...pack.branches.map((b) => `- **${b.condition}**：${b.effect}`)]]);
-  if (pack.relatedTasks.length) blocks.push(['related', [`## ${t.related}`, '', ...pack.relatedTasks.map((id) => `- ${id}`)]]);
+  if (pack.claims.length || pack.readerChecks?.length) {
+    const completion = [`## ${t.completion}`, ''];
+    for (const claim of pack.claims) completion.push(`<!-- claim:${claim.id} -->`, `${claimLabel(claim.status, t)}${claim.text}`, '');
+    if (pack.readerChecks?.length) completion.push(`### ${t.readerChecks}`, '', ...pack.readerChecks.map((item) => `- ${item}`), '');
+    blocks.push(['completion', completion]);
+  }
+  if (pack.branches.length) blocks.push(['branches', [`## ${t.branches}`, ...pack.branches.flatMap((b) => ['', `**${b.condition}**`, '', b.effect])]]);
+  const related = pack.related || (pack.relatedTasks || []);
+  if (related.length) blocks.push(['related', [`## ${t.related}`, '', ...related.map(relatedLine)]]);
   return assemble(blocks);
 }
 
-/** 页面手册。detectedActions 没有逐项浏览器证据，一律带"推断"标题；截图不能把它们提升为已验证。 */
+/** 页面手册。detectedActions 没有逐项浏览器证据：只在没有 guide 时列出，并提示以实际界面为准。 */
 function renderPage(pack, copy = {}, { draft = false } = {}) {
   const t = templateFor(pack.language);
   const overview = [`# ${pack.title}`];
   const intro = blockText(pack, copy, 'intro');
   if (intro) overview.push('', intro);
-  const location = [t.route(pack.route)];
-  for (const artifact of pack.artifacts) location.push('', `![${pack.title}](${artifact.markdownHref})`);
+  const location = [t.pageEntry(`[${pack.title}](${pack.route})`)];
+  for (const artifact of pack.artifacts) location.push(...figure(artifact, pack.title, artifact.markdownHref));
   const blocks = [['overview', overview], ['location', location]];
-  for (const [i, item] of (pack.guide || []).entries()) {
-    const lines = [`## ${i + 1}. ${item.title}`, '', item.instruction];
-    if (item.taskId) lines.push('', `[查看操作指南](tasks/${item.taskId}.md)`);
+  for (const item of pack.guide || []) {
+    const lines = [`## ${item.title}`, '', item.instruction];
+    if (item.taskId) lines.push('', `[${t.guideLink}](tasks/${item.taskId}.md)`);
     blocks.push([`guide.${item.id}`, lines]);
   }
-  if (!pack.guide?.length && pack.actions.length) blocks.push(['actions', [`## ${t.actionsInferred}`, '', ...pack.actions.map((action, i) => `${i + 1}. ${action.text}`)]]);
+  if (!pack.guide?.length && pack.actions.length) blocks.push(['actions', [`## ${t.actionsInferred}`, '', t.actionsInferredNote, '', ...pack.actions.map((action, i) => `${i + 1}. ${action.text}`)]]);
   // 草稿头部的来源注释只用于人工核对，不进入正式文档
   return assemble(blocks, draft ? [...pack.headerComments, ''] : []);
 }

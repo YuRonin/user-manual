@@ -111,7 +111,7 @@ function submitInChild(root, runId, requestId, response) {
       assert.ok(request.files.some((f) => f.path.endsWith('chat.facts.json')));
       assert.ok(!/cookie|storageState|password/i.test(JSON.stringify(request)));
       assert.ok(request.limits.maxBlockChars > 0);
-      assert.match(summary.waiting[0].message, /run-submit/);
+      assert.match(summary.waiting[0].message, /resume .* --request/);
       await chat.execute();
       assert.strictEqual(requests(chat.runStore, chat.runId).length, 1, 'resume 不产生新请求');
     });

@@ -41,7 +41,7 @@ function seal(pack) {
  * @param {Array}  p.claims         computeClaims 的结果
  * @param {string} p.language
  */
-function buildTaskFactPack({ task, evidence, images, claims, language, entryPage = null }) {
+function buildTaskFactPack({ task, evidence, images, claims, language, entryPage = null, taskTitles = null }) {
   const template = templateFor(language);
   const seen = new Set();
   for (const step of task.steps || []) {
@@ -95,6 +95,8 @@ function buildTaskFactPack({ task, evidence, images, claims, language, entryPage
     ...(evidence?.provenance && evidence.provenance !== 'live' ? { provenance: evidence.provenance } : {}),
     branches: task.branches || [],
     relatedTasks: task.relatedTasks || [],
+    // 读者看到的相关文档标题；任务不存在时退回 id。
+    related: (task.relatedTasks || []).map((id) => ({ id, title: taskTitles?.get?.(id) || null })),
     blocks,
     // 文案块里允许出现的界面名称：只能是事实中已有的
     allowedUiTerms: [...new Set([...steps.flatMap((s) => s.uiTerms), ...task.steps.flatMap((s) => uiTerms(s.instruction)), ...uiTerms(task.goal)])],

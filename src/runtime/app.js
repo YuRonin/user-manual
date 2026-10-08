@@ -1,7 +1,7 @@
 'use strict';
 
 /*
- * Runtime 应用层：generate / capture / resume / status / run-submit 命令共用。
+ * Runtime 应用层：generate / capture / resume / status 命令共用（run-submit 为兼容入口）。
  *
  *   planTargets   规划（只读）：--plan 直接打印它，不创建 Run、不产生业务动作
  *   startRun      创建 Run 并执行

@@ -55,11 +55,11 @@ function loadTask({ projectRoot, config, taskId }) {
   try { base = projectStore.load(); } catch (error) { throw failure('invalid-model', error.errors || [error.message]); }
   const task = base.model.tasks.find((t) => t.id === taskId);
   if (!task) throw failure('unknown-target', `找不到任务: ${taskId}`);
-  return { projectStore, base, task, pages: base.model.pages };
+  return { projectStore, base, task, pages: base.model.pages, tasks: base.model.tasks };
 }
 
 /** 按当前任务与证据重新构建事实包（草稿与定稿共用）。 */
-function buildCurrent({ root, config, task, pages = [] }) {
+function buildCurrent({ root, config, task, pages = [], tasks = [] }) {
   if (!task.evidenceManifest) return { ok: false, errors: ['任务缺少 evidenceManifest。'] };
   const evidenceFile = path.join(root, task.evidenceManifest);
   if (!fs.existsSync(evidenceFile)) return { ok: false, errors: [`证据清单不存在: ${evidenceFile}`] };
@@ -68,6 +68,7 @@ function buildCurrent({ root, config, task, pages = [] }) {
     return buildTaskDraft(task, evidence, {
       projectRoot: root, stateDir: path.join(root, config.artifacts.stateDir), finalPath: manualFileFor(root, config, task.id), language: config.docs.language,
       entryPage: pages.find((page) => page.id === task.entryPage),
+      taskTitles: new Map(tasks.map((item) => [item.id, item.title])),
     });
   } catch (error) {
     return { ok: false, errors: [error.message] };
@@ -75,9 +76,9 @@ function buildCurrent({ root, config, task, pages = [] }) {
 }
 
 /** 草稿之后事实（任务定义、证据、图片内容、模板）变了：旧草稿不能再发布。 */
-function checkDraftFresh({ root, config, task, pages, facts }) {
+function checkDraftFresh({ root, config, task, pages, tasks, facts }) {
   if (!facts.factPack) return { ok: true, legacy: true };
-  const current = buildCurrent({ root, config, task, pages });
+  const current = buildCurrent({ root, config, task, pages, tasks });
   if (!current.ok) return current;
   if (current.pack.factsHash !== facts.factsHash) {
     return { ok: false, errors: [`draft-stale: 草稿之后事实发生变化（${diffPacks(facts.factPack, current.pack).join(', ')}），重新运行 manual generate-task ${task.id} 生成草稿。`] };
@@ -96,10 +97,10 @@ function reviewGate(findings, acceptReview) {
 
 /** 生成事实草稿。返回文案块（模型可填写）与受保护事实。 */
 function draftTask({ projectRoot, config, taskId }) {
-  const { task, pages } = loadTask({ projectRoot, config, taskId });
+  const { task, pages, tasks } = loadTask({ projectRoot, config, taskId });
   const usable = checkEvidenceUsable(task, pages);
   if (!usable.ok) throw failure(usable.code || codeOf(usable.errors, 'evidence-unusable'), usable.errors);
-  const built = buildCurrent({ root: projectRoot, config, task, pages });
+  const built = buildCurrent({ root: projectRoot, config, task, pages, tasks });
   if (!built.ok) throw failure('draft-failed', built.errors);
   // 草稿阶段就执行同一产物门槛：隐私未知或位置非法时不给出可定稿的草稿。
   const issues = built.facts.images.flatMap((image) => validateArtifact(image, { projectRoot, config }));
@@ -124,11 +125,11 @@ function draftTask({ projectRoot, config, taskId }) {
  * @returns {{ final, facts, manualFile, accepted }}
  */
 function prepareTaskFinal({ projectRoot, config, taskId, copy = null, markdown = null, acceptReview = false, force = false, runId = null }) {
-  const { task, pages } = loadTask({ projectRoot, config, taskId });
+  const { task, pages, tasks } = loadTask({ projectRoot, config, taskId });
   const { draftFile, factsFile } = draftPaths(projectRoot, config, taskId);
   if (!fs.existsSync(factsFile)) throw failure('draft-missing', '缺少任务事实文件，请先生成草稿。');
   let facts = JSON.parse(fs.readFileSync(factsFile, 'utf8'));
-  const fresh = checkDraftFresh({ root: projectRoot, config, task, pages, facts });
+  const fresh = checkDraftFresh({ root: projectRoot, config, task, pages, tasks, facts });
   if (!fresh.ok) throw failure(codeOf(fresh.errors, 'draft-stale'), fresh.errors);
   let final;
   let review;

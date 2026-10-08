@@ -46,9 +46,15 @@ function extractUiTerms(text) {
   return matchAll(text, /「([^」]*)」/g).map((m) => m[1].trim()).filter(Boolean);
 }
 
-/** 行内代码：路由、文件名、字段名。 */
+/**
+ * 行内代码与站内链接目标：路由、文件名、字段名。
+ * 读者文档把入口路由写成链接（`[工作台](/chat)`），链接目标与行内代码同样受保护；
+ * 图片链接的目标是相对路径，由截图检查负责，这里只收以 / 开头的站内路由。
+ */
 function extractCodeSpans(text) {
-  return matchAll(text, /`([^`\n]+)`/g).map((m) => m[1].trim()).filter(Boolean);
+  const code = matchAll(text, /`([^`\n]+)`/g).map((m) => m[1].trim());
+  const routes = matchAll(text, /\]\((\/[^)\s]*)\)/g).map((m) => m[1]);
+  return [...code, ...routes].filter(Boolean);
 }
 
 /**

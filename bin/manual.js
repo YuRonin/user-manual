@@ -9,7 +9,13 @@
  */
 
 const pkg = require('../package.json');
-const { COMMANDS, PLANNED, findCommand, loadCommand } = require('../src/cli/commands');
+const { GROUPS, COMMANDS, PLANNED, findCommand, loadCommand } = require('../src/cli/commands');
+
+// 按分组列出命令；兼容入口（legacy）仍可执行，但不在帮助中列出。
+const COMMAND_LIST = GROUPS.map((group) => {
+  const rows = COMMANDS.filter((c) => c.group === group.id).map((c) => `  ${c.name.padEnd(15)} ${c.summary}`);
+  return `${group.title}:\n${rows.join('\n')}`;
+}).join('\n\n');
 
 const HELP = `
 manual —— Living User Manual (v${pkg.version})
@@ -18,8 +24,7 @@ manual —— Living User Manual (v${pkg.version})
 用法:
   manual <命令> [选项]
 
-命令:
-${COMMANDS.map((c) => `  ${c.name.padEnd(10)} ${c.summary}`).join('\n')}
+${COMMAND_LIST}
 
 ${PLANNED.length ? `尚未实现（后续版本）:\n${PLANNED.map((c) => `  ${c.name.padEnd(10)} ${c.summary}`).join('\n')}\n\n` : ''}全局选项:
   --help      显示帮助（manual <命令> --help 查看子命令用法）
@@ -27,6 +32,7 @@ ${PLANNED.length ? `尚未实现（后续版本）:\n${PLANNED.map((c) => `  ${c
 
 示例:
   manual init --base-url http://localhost:5173
+  manual generate task:<id> --json
   manual init --help
 `.trim();
 

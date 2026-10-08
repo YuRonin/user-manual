@@ -53,9 +53,9 @@ test('动作句由结构化动作确定性生成；说明文字是可润色的�
   assert.deepStrictEqual(Object.keys(p.blocks), ['intro', 'step.open', 'step.nickname', 'step.save']);
   const md = renderTask(p);
   assert.match(md, /<!-- step:open -->\n1\. 点击「编辑资料」\n\n {3}在右上角点击「编辑资料」按钮/);
-  assert.match(md, /<!-- claim:editor-opened -->\n采集时已看到：编辑面板已打开。/);
-  assert.match(md, /<!-- claim:saved -->\n预期会看到：资料已保存。/);
-  assert.match(md, /验证范围：只实际执行到第 2 步/);
+  assert.match(md, /<!-- claim:editor-opened -->\n完成标志：编辑面板已打开。/);
+  assert.match(md, /<!-- claim:saved -->\n预期结果：资料已保存。/);
+  assert.doesNotMatch(md, /验证范围/);
   assert.strictEqual(validateTaskFinal(md, { title: p.title, stepIds: p.steps.map((s) => s.id), images, uiTexts: [...md.matchAll(/「([^」]+)」/g)].map((m) => m[1]), claims: p.claims, factPack: p }).ok, true);
 });
 test('步骤说明重复动作句时只保留新增信息', () => {
@@ -76,9 +76,9 @@ test('读者核对项进入事实包与完成段，改动使旧草稿失效', ()
   const withCheck = pack({ task: task({ completion: { description: '完成', readerChecks: ['核对新昵称是否正确。'] } }) });
   assert.deepStrictEqual(withCheck.readerChecks, ['核对新昵称是否正确。']);
   assert.notStrictEqual(withCheck.factsHash, original.factsHash);
-  assert.match(renderTask(withCheck), /请核对任务结果[\s\S]*核对新昵称是否正确。/);
+  assert.match(renderTask(withCheck), /请确认以下内容[\s\S]*核对新昵称是否正确。/);
   const facts = { title: withCheck.title, stepIds: withCheck.steps.map(step => step.id), images, uiTexts: [], claims: withCheck.claims, factPack: withCheck };
-  const removed = renderTask(withCheck).replace(/### 请核对任务结果\n\n- 核对新昵称是否正确。\n/, '');
+  const removed = renderTask(withCheck).replace(/### 请确认以下内容\n\n- 核对新昵称是否正确。\n/, '');
   assert.ok(validateTaskFinal(removed, facts, { renderedFromPack: true }).errors.includes('读者核对项缺失或发生变化。'));
 });
 
@@ -110,7 +110,7 @@ test('语言由模板决定：en-US 输出英文结构，未知语言 unsupporte
   const md = renderTask(pack({ language: 'en-US' }));
   assert.match(md, /## Steps/);
   assert.match(md, /1\. Click 「编辑资料」/);
-  assert.match(md, /Observed during capture: 编辑面板已打开。/);
+  assert.match(md, /You will see: 编辑面板已打开。/);
   assert.doesNotMatch(md, /操作步骤|完成标志/);
   assert.throws(() => pack({ language: 'ja-JP' }), (e) => e.code === 'unsupported-template');
   assert.throws(() => templateFor('fr-FR'), /unsupported-template/);
@@ -121,7 +121,7 @@ test('页面：detectedActions 一律标为源码推断，截图不能把它们�
   const withShot = buildPageFactPack({ page, image: { artifactPath: 'docs/manual/images/annotated/p.png', markdownHref: 'images/annotated/p.png', sha256: 'c'.repeat(64), captureId: 'x' }, language: 'zh-CN' });
   assert.deepStrictEqual(withShot.actions.map((a) => a.status), ['inferred']);
   const md = renderPage(withShot);
-  assert.match(md, /## 主要操作（根据源码推断，尚未在浏览器中逐项验证）/);
+  assert.match(md, /## 主要功能\n\n> 以下功能根据页面整理，具体以实际界面为准。/);
   assert.match(md, /!\[工作台\]\(images\/annotated\/p\.png\)/);
   // 正式文档只含块标记（人工编辑保护定位用），不含草稿的来源注释
   assert.deepStrictEqual(md.match(/<!--[^>]*-->/g).filter((c) => !/^<!-- \/?manual:block( id=[a-z.-]+)? -->$/.test(c)), [], '正式文档不含草稿注释');

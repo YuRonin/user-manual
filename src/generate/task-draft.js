@@ -74,7 +74,7 @@ function buildTaskDraft(task, evidence, context = {}) {
   const claims = computeClaims(task, evidence);
   let pack;
   try {
-    pack = buildTaskFactPack({ task, evidence, images, claims, language: context.language || 'zh-CN', entryPage: context.entryPage });
+    pack = buildTaskFactPack({ task, evidence, images, claims, language: context.language || 'zh-CN', entryPage: context.entryPage, taskTitles: context.taskTitles });
   } catch (error) {
     return { ok: false, errors: [`${error.code}: ${error.message}`] };
   }

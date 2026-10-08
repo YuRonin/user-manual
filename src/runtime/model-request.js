@@ -4,7 +4,7 @@
  * 模型交接请求（P2-06）。
  *
  * CLI 没有内置模型：需要语义分析或文案时写一个请求文件，任务记 waiting_input，由宿主 Agent
- * 按 Skill 处理后通过 `manual run-submit` 提交响应。请求只包含完成这件事所需的最少内容：
+ * 按 Skill 处理后通过 `manual resume --request --input` 提交响应并继续。请求只包含完成这件事所需的最少内容：
  *   - 允许读取的文件及其内容 hash（不塞整个仓库，不含浏览器凭据）
  *   - 必要事实（受保护的动作 / UI 名称 / 文案块默认值）
  *   - 输出 schema 与大小限制、响应应写到哪里
@@ -129,7 +129,7 @@ function waitingFor(ctx, request) {
   return {
     waiting: {
       code: 'model-input-required',
-      message: `等待宿主模型处理 ${request.kind} 请求 ${requestPath}，完成后运行 manual run-submit ${ctx.runId} --request ${request.requestId} --input <响应.json>。`,
+      message: `等待宿主模型处理 ${request.kind} 请求 ${requestPath}，完成后运行 manual resume ${ctx.runId} --request ${request.requestId} --input <响应.json>。`,
       request: request.requestId,
     },
   };

@@ -33,10 +33,17 @@ function camel(flag) {
 
 process.stdout.write('\ndocs consistency\n');
 
-test('注册表中的每个命令出现在 SKILL.md 与 README.md，且 --help 退出 0', () => {
+test('命令按分组出现在文档中：主流程 / 任务 / Run 在 SKILL.md，高级命令在命令细节，兼容入口不进 SKILL.md；--help 退出 0', () => {
   assert.deepStrictEqual(PLANNED, [], '没有"计划中"的命令');
+  const workflows = read('references/command-workflows.md');
+  const mentions = (text, name) => new RegExp(`(manual ${name}\\b|\`${name}\`)`).test(text);
   for (const command of COMMANDS) {
-    assert.ok(docs.skill.includes(`manual ${command.name}`) || docs.skill.includes(`\`${command.name}\``) || docs.skill.includes(`/ \`${command.name}\``), `SKILL.md 缺少 ${command.name}`);
+    if (['core', 'task', 'run'].includes(command.group)) assert.ok(mentions(docs.skill, command.name), `SKILL.md 缺少 ${command.name}`);
+    if (command.group === 'advanced') assert.ok(mentions(workflows, command.name), `command-workflows.md 缺少 ${command.name}`);
+    if (command.group === 'legacy') {
+      assert.ok(!new RegExp(`manual ${command.name}\\b`).test(docs.skill), `SKILL.md 不应引导使用兼容入口 ${command.name}`);
+      assert.ok(docs.migration.includes(command.name), `MIGRATION.md 缺少兼容入口 ${command.name} 的替代说明`);
+    }
     assert.ok(docs.readme.includes(command.name), `README.md 缺少 ${command.name}`);
     const help = spawnSync(process.execPath, [CLI, command.name, '--help'], { encoding: 'utf8' });
     assert.strictEqual(help.status, 0, `${command.name} --help`);
@@ -60,7 +67,7 @@ test('不再有过时的说法：计划中的 update、字节一致的截图、�
 });
 
 test('RUNTIME.md 覆盖完整流程：安装、登录、generate、等待输入、resume、update、verify、迁移、故障排查', () => {
-  for (const keyword of ['npm ci', 'auth login', 'generate', 'waiting', 'run-submit', 'resume', 'update', 'verify', 'gc', '故障排查']) {
+  for (const keyword of ['npm ci', 'auth login', 'generate', 'waiting', '--request', 'resume', 'update', 'verify', 'gc', '故障排查']) {
     assert.ok(docs.runtime.includes(keyword), `RUNTIME.md 缺少 ${keyword}`);
   }
   assert.ok(docs.migration.includes('manual migrate --dry-run'));

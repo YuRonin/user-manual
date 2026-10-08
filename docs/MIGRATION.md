@@ -24,15 +24,17 @@ manual migrate --rollback <迁移 id>             # 用完整备份恢复
 
 ## 兼容入口与退出窗口
 
-以下入口继续可用，至少保留到下一个主版本；新项目优先使用右列：
+以下入口继续可用，至少保留到下一个主版本；它们不再出现在 `manual --help` 与 SKILL.md 中，新项目使用右列：
 
 | 兼容入口 | 替代 |
 |---|---|
-| `generate <page-id> --draft` / `--finalize <文件>`（页面三段式） | `generate page:<id>`（Runtime）+ `run-submit` / `--copy` |
+| `generate <page-id> --draft` / `--finalize <文件>`（页面三段式） | `generate page:<id>`（Runtime）+ `resume --request --input` / `--copy` |
+| `run-submit <runId> --request <id> --input <文件>` + `resume <runId>` | `resume <runId> --request <id> --input <文件>` |
+| `migrate-artifacts` | 仅用于 V0.3 以前的旧原图；新项目不需要 |
 | `plan-capture` / `capture-task` | `generate task:<id> --plan` / `capture task:<id>` |
 | `generate-task <id> [--copy / --finalize]` | `generate task:<id>` |
 | `verify <task-id>` | `verify task:<id>`（同一检查）/ `verify task:<id> --live` |
-| Codex `$manual-<命令>` / Claude Code `/manual-<命令>` 别名 | 由命令注册表自动生成（`npm run install:compat`），包括新增的 `update` / `gc` |
+| Codex `$manual-<命令>` / Claude Code `/manual-<命令>` 别名 | 只为主流程命令生成（init / inspect / describe / auth / generate / update / verify / doctor）；`npm run install:compat` 会清理旧版本生成的其它别名，其余命令通过主 skill `manual` 使用 |
 
 旧 schema 的读取器（v1 页面 / 任务 YAML、旧 manifest、没有 Capture 记录的页面投影、无 `sourceBaseline` / `generatedBlob` 的发布记录）
 继续保留。本阶段没有删除任何兼容实现：它们仍被兼容入口调用，删除需要先证明没有调用方且有等价替代。
