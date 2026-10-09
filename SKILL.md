@@ -82,6 +82,8 @@ manual generate task:<id> [task:<id2> page:<id> ...]
 
 用户要把手册做成可访问的帮助中心、或要 HTML 而不是 Markdown 时：`manual site`。它读取已发布的 `docs.outputDir`（`index.md` 目录 + 页面篇 + `tasks/` 任务篇；目录分组可用 `docs.catalog` 配置，见[命令细节](references/command-workflows.md)），输出一套静态 HTML 到 `site.outputDir`（默认 `.manual/site/`）：首页目录与可选求助区、正文页面包屑、「完成后你会看到」提示框、WebP 截图。
 
+每次发布还会重写 `docs.outputDir/meta.json`（每篇的 `updatedAt` 与最多 5 篇 `related`，契约见[命令细节](references/command-workflows.md#文档元数据metajson)），给应用内帮助中心等下游只读使用；`manual site` 目前不读它。不要手改，下次发布会覆盖。
+
 - 退出码 1 + `site-dead-link` / `site-catalog-*`：手册本身有断链或目录缺失，报告给用户并修手册（或重新 `generate`），不要改生成的 HTML。
 - 退出码 4 + `site-output-unmanaged`：`site.outputDir` 里已有别人的文件。问用户确认可以覆盖后才加 `--force`。
 - 要嵌进应用：把 `site.outputDir` 指到应用的静态目录（如 `public/help`），`homeUrl` 设为应用首页；独立部署在别的域名时设 `appBaseUrl`，让手册里的产品入口链接到应用。配置项见[命令细节](references/command-workflows.md)。

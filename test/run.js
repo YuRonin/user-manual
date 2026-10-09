@@ -16,6 +16,7 @@ const FILES = [
   'manual-quality.test.js',
   'catalog.test.js',
   'style-lint.test.js',
+  'doc-meta.test.js',
   'revision.test.js',
   'model-schema.test.js',
   'init.test.js',

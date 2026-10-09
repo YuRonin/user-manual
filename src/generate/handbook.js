@@ -14,7 +14,7 @@ function taskCoverage(pack) {
 function describeEntry(pack) {
   return text(pack?.blocks?.intro?.default || '').replace(/\s+/g,' ').trim();
 }
-/** 收集所有已发布手册的目录行，按 manualId 排序。 */
+/** 收集所有已发布手册（目录行 + 供 meta.json 用的 href/title/factPack/createdAt），按 manualId 排序。 */
 function collectEntries(projectRoot,config) {
   const state=path.join(projectRoot,config.artifacts.stateDir),dir=path.join(state,'releases');
   const entries=[];
@@ -24,7 +24,7 @@ function collectEntries(projectRoot,config) {
     const pack=r.facts?.factPack;
     const href=path.relative(path.join(projectRoot,config.docs.outputDir),path.join(projectRoot,r.documentPath)).replace(/\\/g,'/');
     const summary=describeEntry(pack);
-    entries.push({id,kind:pack?.kind==='task'||id.startsWith('task-')?'task':'page',line:`- [${text(pack?.title||id)}](${href})${summary?`：${summary}`:''}`});
+    entries.push({id,kind:pack?.kind==='task'||id.startsWith('task-')?'task':'page',href,title:pack?.title||id,pack:pack||{},createdAt:r.createdAt,line:`- [${text(pack?.title||id)}](${href})${summary?`：${summary}`:''}`});
   }
   return entries;
 }
@@ -59,4 +59,4 @@ function updateHandbook({projectRoot,config}) {
   if(unknown.length)result.warning=`catalog-unknown-entries: docs.catalog 引用了尚未发布的手册 ${unknown.join('、')}，已跳过。`;
   return result;
 }
-module.exports={updateHandbook,taskCoverage};
+module.exports={updateHandbook,taskCoverage,collectEntries,groupEntries};

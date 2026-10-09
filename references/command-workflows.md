@@ -285,6 +285,32 @@ docs:
 - 引用了尚未发布的手册：生成时跳过并输出 `catalog-unknown-entries` 告警；`manual doctor` 的 `catalog` 项给 warn。
 - 配置形状错误（坏 id、跨组重复等）在加载配置时直接报错。
 
+## 文档元数据（`meta.json`）
+
+与目录同时，每次发布整文件重写 `docs.outputDir/meta.json`，给应用内帮助中心等下游只读使用（`manual site` 目前不读它）。不要手改。
+
+```json
+{
+  "version": 1,
+  "docs": {
+    "tasks/generate-practice.md": {
+      "updatedAt": "2026-10-08T07:18:42.512Z",
+      "related": [{ "target": "chat.md", "title": "AI 对话", "reason": "entry-page" }]
+    }
+  }
+}
+```
+
+- 键与 `target` 是相对 `docs.outputDir` 的 posix 路径，与目录链接一致；只含已发布手册（发布记录在且文档文件存在），没有相关文章的篇目为 `"related": []`。
+- `updatedAt`：当前发布记录的 `createdAt`；`title`：手册标题（与目录一致）。
+- `related` 每篇最多 5 条，去掉自身、同一目标只留最强理由；同强度按目录顺序、再按路径。理由从强到弱：
+  - `explicit`：任务定义的 `relatedTasks`（单向）；
+  - `guide-link`：页面指南里引用的任务（页面 ↔ 任务）；
+  - `entry-page`：任务入口路由等于页面路由（双向，忽略查询串与尾斜杠）；
+  - `shared-page`：任务步骤经过的页面（双向）；
+  - `same-group`：目录同一分组（配置了 `docs.catalog` 按配置，否则按默认两组）。
+- 指向未发布手册的关系静默丢弃。同样的发布状态得到逐字节相同的文件；写入失败只告警 `doc-meta-update-failed`，不影响发布。
+
 ## 帮助中心网站（`manual site`）
 
 `manual site` 只读手册、只写 `site.outputDir`，可随时重跑；截图按修改时间增量转码。`config.yaml` 的 `site:` 段（整段可选）：

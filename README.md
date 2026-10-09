@@ -54,7 +54,7 @@ npm run install:compat          # 安装客户端别名；--client codex / claud
 - [更换头像](change-avatar.md)
 ```
 
-步骤动作句、顺序、截图和完成标志由程序从结构化模型生成；导语与步骤说明由模型按[写作规范](references/manual-writing-style.md)填写，程序校验它没有改动事实。验证范围、截图时间等维护信息不进入正文，用 `review-task` 和发布记录查看。`docs.outputDir/index.md` 自动维护目录：默认分“操作指南”和“功能介绍”两组；在 `config.yaml` 的 `docs.catalog` 里可改成按场景分组（任务篇与页面篇混排，未列入的已发布手册自动落到兜底分组），见[命令细节](references/command-workflows.md#目录分组docscatalog)。
+步骤动作句、顺序、截图和完成标志由程序从结构化模型生成；导语与步骤说明由模型按[写作规范](references/manual-writing-style.md)填写，程序校验它没有改动事实。验证范围、截图时间等维护信息不进入正文，用 `review-task` 和发布记录查看。`docs.outputDir/index.md` 自动维护目录：默认分“操作指南”和“功能介绍”两组；在 `config.yaml` 的 `docs.catalog` 里可改成按场景分组（任务篇与页面篇混排，未列入的已发布手册自动落到兜底分组），见[命令细节](references/command-workflows.md#目录分组docscatalog)。同时重写 `docs.outputDir/meta.json`：每篇已发布手册的最后更新时间与最多 5 篇相关文章，供应用内帮助中心等下游读取（契约见[命令细节](references/command-workflows.md#文档元数据metajson)）。
 
 ## 用法
 
@@ -224,6 +224,7 @@ DOM 连续静止 → 冻结 CSS 动画与过渡 → 静置回流。每步有独�
   <id>.md              正式手册（generate 定稿产出）
   tasks/<id>.md        任务操作指南
   index.md             目录（manual:catalog 区块自动维护）
+  meta.json            每篇的更新时间 + 相关文章（每次发布整文件重写）
   images/annotated/    发布图（原图与诊断图留在 .manual/ 下，不发布）
 ```
 

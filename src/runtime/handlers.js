@@ -409,6 +409,10 @@ function publishDoc(ctx, task) {
     const catalog = require('../generate/handbook').updateHandbook({ projectRoot: ctx.projectRoot, config: ctx.config });
     if (catalog.warning) process.stderr.write(`[manual quality] ${catalog.warning}\n`);
   } catch (error) { process.stderr.write(`[manual quality] catalog-update-failed: ${error.message}\n`); }
+  // meta.json（更新时间 + 相关文章）同样尽力而为：失败只告警，不影响本次发布。
+  try {
+    require('../generate/doc-meta').updateDocMeta({ projectRoot: ctx.projectRoot, config: ctx.config });
+  } catch (error) { process.stderr.write(`[manual quality] doc-meta-update-failed: ${error.message}\n`); }
   return { outputs: [{ kind: 'release', ref: `${manualIdFor(subject.type, subject.id)}/${published.release.id}` }] };
 }
 
