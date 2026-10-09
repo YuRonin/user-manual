@@ -30,6 +30,23 @@ function sameGeometry(a, b) {
 }
 
 /**
+ * 指针只能停在一处：有标注目标靠 hover 才显示时，全部定位完再逐个确认仍可见（不再移动指针），
+ * 否则后一个 hover 已让前一个消失，图上会框出空白。
+ * @param {Array<{ target, label, revealedBy }>} located
+ */
+async function confirmTargetsShown(provider, located) {
+  if (!located.some((item) => item.revealedBy)) return;
+  for (const { target, label } of located) {
+    try {
+      await provider.performAction({ type: 'inspect', target, reveal: false });
+    } catch (error) {
+      throw captureError('annotation-hover-conflict',
+        `标注 ${label} 需要指针悬停才显示，但同一张截图里还有别的悬停目标，二者无法同时出现：${error.message}；把它们拆到不同步骤的截图里。`);
+    }
+  }
+}
+
+/**
  * @param provider
  * @param {object} p
  * @param {string} p.rawPath
@@ -76,4 +93,4 @@ async function derivePublished({ captured, rawPath, sanitizedPath, publishedPath
   return { redactions: detection.redactions, annotations: layout.annotations, privacy, quality, derived, published: !!published };
 }
 
-module.exports = { captureStable, derivePublished, sameGeometry, MAX_ATTEMPTS };
+module.exports = { captureStable, confirmTargetsShown, derivePublished, sameGeometry, MAX_ATTEMPTS };

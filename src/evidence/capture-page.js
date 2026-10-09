@@ -21,7 +21,7 @@ const { resolveRouteTemplate, resolveEntryLocation, derivePageScenario } = requi
 const { readIndexes, findForwardPage } = require('../inspect/index-store');
 const { prepareAuth, classifyAuthFailure, refreshAuth } = require('../auth/runtime');
 const { validateNavigation, runAssertions } = require('./validate-page');
-const { captureStable, derivePublished } = require('./capture-safe');
+const { captureStable, derivePublished, confirmTargetsShown } = require('./capture-safe');
 const { createProjectStore } = require('../store/project');
 const { createCaptureStore, sanitizeUrl } = require('./store');
 const { definitionRevision } = require('../model/revision');
@@ -206,13 +206,16 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
     const captured = await captureStable(provider, { rawPath: stagedRaw, fullPage: options.fullPage === true, format,
       resolveTargets: async () => {
         const targets = [];
+        const located = [];
         for (const [i, item] of (page.guide || []).entries()) {
           if (!item.target) continue;
           const found = await provider.performAction({ type: 'inspect', target: item.target });
           const rect = { ...found.rect };
           if (options.fullPage) { const geometry = await provider.collectGeometry({ fullPage: true }); rect.x += geometry.scroll.x; rect.y += geometry.scroll.y; }
           targets.push({ label: String(i + 1), rect });
+          located.push({ target: item.target, label: String(i + 1), revealedBy: found.revealedBy || null });
         }
+        await confirmTargetsShown(provider, located);
         return targets;
       },
     });

@@ -543,7 +543,7 @@ class PlaywrightBrowserProvider extends BrowserProvider {
     if (!this.page) throw new Error('定位元素之前必须先 open()。');
     if (!target || typeof target !== 'object') throw new Error('缺少语义目标。');
     const root = target.within ? this.locatorFor(target.within) : this.page;
-    if (target.role && target.name) return root.getByRole(target.role, { name: target.name, exact: target.exact !== false });
+    if (target.role && target.name) return root.getByRole(target.role, { name: target.name, exact: target.exact !== false, includeHidden: target.includeHidden === true });
     if (target.label) return root.getByLabel(target.label, { exact: target.exact !== false });
     if (target.text) return root.getByText(target.text, { exact: target.exact !== false });
     if (target.testId) return root.getByTestId(target.testId);
@@ -566,9 +566,70 @@ class PlaywrightBrowserProvider extends BrowserProvider {
     throw Object.assign(new Error('目标元素不存在或不可见；检查前置数据、空结果和页面状态。'), { code: 'target-not-visible' });
   }
 
+  /** 元素实际画出来了吗：自身 visibility 不可见，或自身与祖先 opacity 连乘近 0（hover 才显示的图标常见写法）都算透明。 */
+  async isTransparent(locator) {
+    return locator.evaluate((el) => {
+      if (getComputedStyle(el).visibility !== 'visible') return true;
+      let opacity = 1;
+      for (let node = el; node && node.nodeType === 1; node = node.parentElement) opacity *= Number(getComputedStyle(node).opacity);
+      return opacity < 0.05;
+    });
+  }
+
+  /** visibility:hidden 的目标 isVisible 为 false，但仍占位；唯一占位的那个可以 hover 唤出。 */
+  async uniqueLaidOutLocator(target) {
+    const laidOut = [];
+    for (const strategy of [target, ...(target.alternatives || [])]) {
+      // visibility:hidden 的元素不在可访问性树里，按角色查找要显式包含隐藏元素（仅内部使用，不进模型 schema）。
+      const locator = this.locatorFor({ ...strategy, within: strategy.within || target.within, includeHidden: true });
+      for (let i = 0, count = await locator.count(); i < count; i++) {
+        const box = await locator.nth(i).boundingBox().catch(() => null);
+        if (box && box.width && box.height) laidOut.push(locator.nth(i));
+      }
+      if (laidOut.length) break;
+    }
+    return laidOut.length === 1 ? laidOut[0] : null;
+  }
+
+  /**
+   * 定位标注 / 检查目标并确认它真的画在像素里。hover 才显示的目标（祖先 :hover、mouseenter）
+   * 在 reveal=true 时把指针移到它上面再确认；仍透明就报错，绝不返回一个框住空白的矩形。
+   * 返回的 revealedBy='hover' 表示目标依赖指针位置：同一张图里只能有一处这样的状态。
+   */
+  async inspectTarget(target, { reveal = true } = {}) {
+    const transparent = () => Object.assign(new Error(reveal
+      ? '目标在页面上是透明的（opacity 为 0 或 visibility 隐藏），把指针移上去后仍未显示；检查它需要的前置交互。'
+      : '目标在页面上是透明的（opacity 为 0 或 visibility 隐藏），截图里看不到它。'), { code: 'target-transparent' });
+    const hover = async (locator) => {
+      await locator.hover({ force: true, timeout: 2000 });
+      // mouseenter 驱动的显示要等一次框架渲染；CSS :hover 已被 FREEZE_CSS 去掉过渡，立即生效。
+      for (let i = 0; i < 10 && await this.isTransparent(locator); i++) await this.page.waitForTimeout(100);
+    };
+    let locator;
+    let revealedBy = null;
+    try {
+      locator = await this.uniqueVisibleLocator(target);
+    } catch (error) {
+      if (!reveal || error.code !== 'target-not-visible') throw error;
+      const hidden = await this.uniqueLaidOutLocator(target);
+      if (!hidden) throw error;
+      await hover(hidden);
+      revealedBy = 'hover';
+      try { locator = await this.uniqueVisibleLocator(target); } catch (_) { throw transparent(); }
+    }
+    if (await this.isTransparent(locator)) {
+      if (!reveal || revealedBy) throw transparent();
+      await hover(locator);
+      revealedBy = 'hover';
+      if (await this.isTransparent(locator)) throw transparent();
+    }
+    return { target, rect: await locator.boundingBox(), resolution: this.lastResolution, revealedBy };
+  }
+
   async performAction(action) {
     if (action.page) await this.usePage(action.page);
     if (action.type === 'inspect' && !action.target) return { target: null, rect: null };
+    if (action.type === 'inspect') return this.inspectTarget(action.target, { reveal: action.reveal !== false });
     const locator = await this.uniqueVisibleLocator(action.target);
     const rect = await locator.boundingBox();
     if (action.type === 'click') await locator.click();

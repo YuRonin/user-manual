@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { writeText } = require('../util/fsx');
 const { sha256Hex } = require('../util/hash');
-const { captureStable, derivePublished } = require('../evidence/capture-safe');
+const { captureStable, derivePublished, confirmTargetsShown } = require('../evidence/capture-safe');
 const { createCaptureStore, sanitizeUrl } = require('../evidence/store');
 const { revisionOf } = require('../util/hash');
 const { validateNavigation, runAssertions, isUrlOnly, DEFAULT_ASSERTION_TIMEOUT_MS } = require('../evidence/validate-page');
@@ -37,18 +37,21 @@ async function diagnosticScreenshot(provider, stateDir, plan, step) {
 function annotationResolver(provider, step) {
   return async () => {
     const out = [];
+    const located = [];
     for (const annotation of step.capture?.annotations || []) {
       if (annotation.rect) { out.push({ label: annotation.label, rect: annotation.rect }); continue; }
       const target = annotation.target === 'action.target' ? step.action?.target : annotation.target;
       if (!target) continue;
       try {
-        const located = await provider.performAction({ type: 'inspect', target });
-        if (!located?.rect) throw new Error('目标没有可用几何。');
-        out.push({ label: annotation.label, rect: located.rect });
+        const found = await provider.performAction({ type: 'inspect', target });
+        if (!found?.rect) throw new Error('目标没有可用几何。');
+        out.push({ label: annotation.label, rect: found.rect });
+        located.push({ target, label: annotation.label, revealedBy: found.revealedBy || null });
       } catch (error) {
         throw Object.assign(new Error(`步骤 ${step.id} 的标注目标在截图时不可见：${error.message}`), { code: 'annotation-target-missing' });
       }
     }
+    await confirmTargetsShown(provider, located);
     return out;
   };
 }

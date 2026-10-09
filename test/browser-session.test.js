@@ -71,6 +71,18 @@ function startServer() {
       res.end('<button aria-label="云盘" onmouseenter="document.querySelector(\'#search\').hidden=false">云盘</button><input id="search" placeholder="搜索我的文件" hidden>');
       return;
     }
+    if (req.url === '/hover-icons') {
+      res.end(`<style>
+        .row { display: flex; gap: 8px; padding: 8px; width: 300px; }
+        .row .fade { opacity: 0; } .row:hover .fade { opacity: 1; }
+        .row .hide { visibility: hidden; } .row:hover .hide { visibility: visible; }
+      </style>
+      <div class="row">文件 A <button class="fade" aria-label="重命名 A">✎</button></div>
+      <div class="row">文件 B <button class="fade" aria-label="重命名 B">✎</button><button class="hide" aria-label="删除 B">🗑</button></div>
+      <div class="row" onmouseenter="this.querySelector('button').style.opacity=1">文件 C <button style="opacity:0" aria-label="分享 C">↗</button></div>
+      <div class="row">文件 D <button style="opacity:0" aria-label="永远透明">?</button></div>`);
+      return;
+    }
     res.end('<h1>首页</h1>');
   });
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({
@@ -234,6 +246,53 @@ function storageFor(baseUrl, role) {
         await provider.open(`${server.baseUrl}/hover-source`);
         await provider.performAction({ type: 'hover', target: { role: 'button', name: '云盘' } });
         assert.strictEqual(await provider.page.getByPlaceholder('搜索我的文件').isVisible(), true);
+      });
+    } finally {
+      await session.close();
+      await server.close();
+    }
+  });
+
+  await test('真实 Chromium：hover 才显示的图标在 inspect 时被唤出，唤不出就报错而不是框空白', async () => {
+    const server = await startServer();
+    const session = createBrowserSession();
+    try {
+      await session.withScenario({ id: 'hover-icons', providerConfig, profile }, async (provider) => {
+        await provider.open(`${server.baseUrl}/hover-icons`);
+        const inspect = (name, reveal) => provider.performAction({ type: 'inspect', target: { role: 'button', name }, reveal });
+        const shown = async (name) => !(await provider.isTransparent(provider.page.getByRole('button', { name })));
+        const a = await inspect('重命名 A');
+        assert.strictEqual(a.revealedBy, 'hover', 'opacity:0 + 父级 :hover');
+        assert.ok(a.rect && a.rect.width > 0);
+        assert.strictEqual(await shown('重命名 A'), true);
+        assert.strictEqual((await inspect('删除 B')).revealedBy, 'hover', 'visibility:hidden + 父级 :hover');
+        assert.strictEqual((await inspect('重命名 B')).revealedBy, null, '同一行已被悬停，无需再移动指针');
+        await assert.rejects(inspect('重命名 A', false), { code: 'target-transparent' }, '指针移走后 A 又消失');
+        assert.strictEqual((await inspect('分享 C')).revealedBy, 'hover', 'mouseenter 驱动');
+        await assert.rejects(inspect('永远透明'), { code: 'target-transparent' });
+      });
+    } finally {
+      await session.close();
+      await server.close();
+    }
+  });
+
+  await test('confirmTargetsShown：两个靠不同悬停显示的标注目标报 annotation-hover-conflict', async () => {
+    const { confirmTargetsShown } = require('../src/evidence/capture-safe');
+    const server = await startServer();
+    const session = createBrowserSession();
+    try {
+      await session.withScenario({ id: 'hover-conflict', providerConfig, profile }, async (provider) => {
+        await provider.open(`${server.baseUrl}/hover-icons`);
+        const locate = async (name, label) => {
+          const target = { role: 'button', name };
+          const found = await provider.performAction({ type: 'inspect', target });
+          return { target, label, revealedBy: found.revealedBy };
+        };
+        const sameRow = [await locate('删除 B', '1'), await locate('重命名 B', '2')];
+        await confirmTargetsShown(provider, sameRow);
+        const rows = [await locate('重命名 A', '1'), await locate('删除 B', '2')];
+        await assert.rejects(confirmTargetsShown(provider, rows), { code: 'annotation-hover-conflict' });
       });
     } finally {
       await session.close();
