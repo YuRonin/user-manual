@@ -120,6 +120,24 @@ function renderConfigYaml(config, meta = {}) {
   L.push(`  imagesDir: ${scalar(config.docs.imagesDir)}`);
   L.push('');
 
+  // ---- site（可选，manual site 使用；缺省即可构建）
+  L.push('# ---------------------------------------------------------------- 帮助中心网站');
+  L.push('# `manual site` 把已发布手册渲染成静态 HTML 帮助中心。整段可选，取消注释按需修改。');
+  L.push('# site:');
+  L.push('#   outputDir: .manual/site        # 输出目录（项目内、不能与手册目录重叠）');
+  L.push('#   title: 帮助中心');
+  L.push('#   description: 按要完成的事查找操作步骤，或了解各个页面能做什么。');
+  L.push('#   homeUrl: /                     # 顶栏「返回应用」链接；不填则不显示');
+  L.push('#   appBaseUrl: https://app.example.com  # 手册里 /credits 这类产品链接的前缀；嵌在应用内时不填');
+  L.push('#   noindex: true                  # 默认随 privacy.audience：internal 时不让搜索引擎收录');
+  L.push("#   theme: { primary: '#2f5bd3' }   # 还可配 text / muted / background / surface / border / soft");
+  L.push('#   labels: { completion: 完成后你会看到 }');
+  L.push('#   support:                       # 首页底部求助区');
+  L.push('#     title: 没找到答案？');
+  L.push('#     items:');
+  L.push('#       - { title: 问题反馈群, description: 扫码反馈问题, image: public/qr/feedback.png }');
+  L.push('');
+
   // ---- artifacts
   L.push('# ---------------------------------------------------------------- 截图产物');
   L.push('# 原图（raw/sanitized/diagnostics）只留在本机 .manual 下，不能被手册引用；');
@@ -212,6 +230,8 @@ const STATE_IGNORES = [
   'runs/',
   'drafts/',
   'previews/',
+  // manual site 的默认输出：由手册派生，随时可重建
+  'site/',
   // 模型快照与工作副本内容等价（缺失时按工作副本重建）；验证报告是一次性输出，工具不回读。
   'snapshots/',
   'verifications/',

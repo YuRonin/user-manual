@@ -260,6 +260,24 @@ status:
 - `manual capture-task <task-id> --continue-url <已有会话URL>`：提交已验证、只缺最后的结果查看步骤时，在已有会话续采，不重放提交。两者的前提与限制见 [质量工作流](quality-workflow.md)。
 - `manual gc`：列出未引用的临时文件、原图与旧 Run；确认后 `--apply --expect <planHash>`。`--inventory` 逐项给出大小与保留原因。
 
+## 帮助中心网站（`manual site`）
+
+`manual site` 只读手册、只写 `site.outputDir`，可随时重跑；截图按修改时间增量转码。`config.yaml` 的 `site:` 段（整段可选）：
+
+| 字段 | 默认 | 说明 |
+|---|---|---|
+| `outputDir` | `.manual/site` | 项目内相对路径，不能与 `docs.outputDir` 重叠（构建会清理旧产物） |
+| `title` / `description` | `帮助中心` / 空 | 首页标题与副标题 |
+| `homeUrl` | 无 | 顶栏「返回应用」链接；http(s) 或站内绝对路径 |
+| `appBaseUrl` | 无 | 手册里 `/credits` 这类产品链接的前缀；嵌在应用同域时不填 |
+| `noindex` | `privacy.audience` 不是 `public` 时为 true | 页面加 `robots noindex` |
+| `webpQuality` | 82 | 1-100 |
+| `theme` | 中性蓝灰 | `primary` / `text` / `muted` / `background` / `surface` / `border` / `soft`，只接受十六进制颜色 |
+| `labels` | — | `completion`（提示框标题）、`backToIndex`、`backToApp` |
+| `support` | 无求助区 | `{ title, description, items: [{ title, description, image }] }`，`image` 为项目内路径，复制到 `assets/` |
+
+链接规则：文档互链 → 相对 `.html`；`images/…/*.png|jpg` → `.webp`（gif/webp 原样）；站内绝对路径原样（或拼 `appBaseUrl`）；`http(s)` 外链新标签页打开；其它协议与 `//host` 丢弃链接只留文字。只发布被正文引用到的截图。输出目录里的 `.manual-site.json` 记录生成过的文件，清理只针对清单内文件。
+
 ## 发布恢复与迁移
 
 - 发布按 journal 推进（prepared → assets → document → release → completed）。进程中断后运行 `manual publication status --json` 查看，`manual publication repair` 对账恢复；文档被人工修改时报 `publication-conflict` 并保留修改，不自动覆盖。
@@ -270,4 +288,4 @@ status:
 - inspect 不需要项目正在运行；capture 需要。
 - 动态路由记作 `/artifact/:id`。capture 必须给 `--params "id=123"`，不给就明确拒绝，不会去猜一个 id。
 - 设计约定与 Provider 接口契约见 `docs/ARCHITECTURE.md`。
-- 客户端别名只覆盖主流程命令（init / inspect / describe / auth / generate / update / verify / doctor）：Codex 用 `$manual-<command>`，Claude Code 用 `/manual-<command>`；其它命令通过主 skill `manual` 调用 CLI。
+- 客户端别名只覆盖主流程命令（init / inspect / describe / auth / generate / update / verify / site / doctor）：Codex 用 `$manual-<command>`，Claude Code 用 `/manual-<command>`；其它命令通过主 skill `manual` 调用 CLI。

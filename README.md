@@ -91,6 +91,14 @@ manual verify --all --live # 在线回放，源码没变、线上变了也能发
 manual gc                  # 列出可回收的临时文件与原图；确认后 --apply --expect <planHash>
 ```
 
+发布成网站：
+
+```bash
+manual site                # 把 docs.outputDir 渲染成静态帮助中心（默认输出 .manual/site/）
+```
+
+首页是目录（操作指南 / 功能介绍）加可选的求助区，正文页带面包屑，任务篇的「如何确认已完成」渲染为「完成后你会看到」提示框，截图转为 WebP。文档互链改写为相对 `.html`，`file://` 直接打开或放到任意子路径都能用；手册里的 `/credits` 这类产品入口原样保留（独立部署时用 `site.appBaseUrl` 补全域名）。任何死链都会让构建失败且不写文件；只清理自己上次生成的文件，输出目录非空且不是它生成的会拒绝写入（确认后 `--force`）。标题、主题色、求助区等在 `config.yaml` 的 `site:` 段配置（`init` 生成的模板里有注释示例）。
+
 正式文档里生成的内容由 `<!-- manual:block … -->` 标记分段：块外可以自由补充说明，`update` / `generate` 会保留；同一块被人和生成器同时改动时停下来（退出码 4），给出提案与逐块对照，不会静默覆盖。
 
 退出码：0 成功 / `--plan`；1 失败；2 参数错误或目标歧义；3 等待输入（文案、登录、审批、人工确认、测试数据清理）；4 漂移或冲突。
@@ -101,7 +109,7 @@ manual gc                  # 列出可回收的临时文件与原图；确认后
 
 | 分组 | 命令 |
 |---|---|
-| 主流程 | `init` · `inspect` · `describe` · `auth` · `generate` · `update` · `verify` · `doctor` |
+| 主流程 | `init` · `inspect` · `describe` · `auth` · `generate` · `update` · `verify` · `site` · `doctor` |
 | 任务型指南 | `task-guide` · `discover-tasks` · `approve-tasks` · `review-task` |
 | Run 查看与继续 | `status` · `resume` |
 | 高级与维护 | `capture`（只采集）· `plan-capture`（只读预演）· `capture-task`（写操作核对与续采）· `publication`（发布事务恢复）· `gc` · `migrate` |

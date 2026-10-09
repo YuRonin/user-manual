@@ -27,6 +27,7 @@ const COMMANDS = [
   { name: 'generate', group: 'core', module: 'generate', summary: '规划并执行：按需采集 → 事实草稿 → 模型文案 → 发布门槛 → 发布（可 --plan 预览）' },
   { name: 'update', group: 'core', module: 'update', summary: '根据源码变化增量更新已发布手册（可 --plan 预览影响与原因）' },
   { name: 'verify', group: 'core', module: 'verify', summary: '验证已发布手册：离线产物检查或 --live 在线回放' },
+  { name: 'site', group: 'core', module: 'site', summary: '把已发布手册渲染成静态帮助中心网站（首页目录 + 正文页 + WebP 截图）' },
   { name: 'doctor', group: 'core', module: 'doctor', summary: '只读检查 Node、依赖、浏览器、配置与认证缓存环境' },
   { name: 'task-guide', group: 'task', module: 'task-guide', summary: '从一句任务目标找入口页面，生成只读建模工作表' },
   { name: 'discover-tasks', group: 'task', module: 'discover-tasks', summary: '从页面证据提出候选用户任务，等待人工确认' },

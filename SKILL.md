@@ -78,6 +78,14 @@ manual generate task:<id> [task:<id2> page:<id> ...]
 
 **手册还对吗：**`manual verify <目标>` 默认离线检查产物（`onlineChecked=false`，不代表线上行为）；`--live` 在真实浏览器回放，结果分 `failed`（行为不一致）、`drift`（内容变化）、`inconclusive`（环境问题）。写操作步骤不执行，对应声明是 `not_run`，要如实说明覆盖范围。`--all` 检查全部已发布手册。
 
+## 5. 发布为帮助中心网站
+
+用户要把手册做成可访问的帮助中心、或要 HTML 而不是 Markdown 时：`manual site`。它读取已发布的 `docs.outputDir`（`index.md` 目录 + 页面篇 + `tasks/` 任务篇），输出一套静态 HTML 到 `site.outputDir`（默认 `.manual/site/`）：首页目录与可选求助区、正文页面包屑、「完成后你会看到」提示框、WebP 截图。
+
+- 退出码 1 + `site-dead-link` / `site-catalog-*`：手册本身有断链或目录缺失，报告给用户并修手册（或重新 `generate`），不要改生成的 HTML。
+- 退出码 4 + `site-output-unmanaged`：`site.outputDir` 里已有别人的文件。问用户确认可以覆盖后才加 `--force`。
+- 要嵌进应用：把 `site.outputDir` 指到应用的静态目录（如 `public/help`），`homeUrl` 设为应用首页；独立部署在别的域名时设 `appBaseUrl`，让手册里的产品入口链接到应用。配置项见[命令细节](references/command-workflows.md)。
+
 ## 按退出码处理
 
 Skill 只负责：解析意图 → 调用命令 → 处理等待 → 报告结果。重试、缓存、恢复由 Runtime 决定并记录在 `.manual/runs/`，不要自己重新截图或循环重跑。

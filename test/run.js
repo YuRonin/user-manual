@@ -85,6 +85,7 @@ const FILES = [
   'install-smoke.test.js',
   'performance.test.js',
   'retention.test.js',
+  'site.test.js',
   'docs-consistency.test.js',
   'gate3.test.js',
 ];

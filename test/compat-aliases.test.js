@@ -25,7 +25,7 @@ try {
   assert.ok(!fs.existsSync(path.join(claude, 'commands', 'manual-capture.md')), '旧 Claude 别名已清理');
   assert.strictEqual(fs.readFileSync(path.join(claude, 'commands', 'manual-status.md'), 'utf8'), '用户自己写的命令');
   assert.strictEqual(output.removed.length, 2);
-  for (const name of ['manual-init', 'manual-inspect', 'manual-describe', 'manual-auth', 'manual-generate', 'manual-update', 'manual-verify', 'manual-doctor']) {
+  for (const name of ['manual-init', 'manual-inspect', 'manual-describe', 'manual-auth', 'manual-generate', 'manual-update', 'manual-verify', 'manual-site', 'manual-doctor']) {
     const skill = path.join(codex, 'skills', name, 'SKILL.md');
     const command = path.join(claude, 'commands', `${name}.md`);
     assert.ok(fs.existsSync(skill), skill);
@@ -33,7 +33,7 @@ try {
     assert.match(fs.readFileSync(skill, 'utf8'), new RegExp(`name: ${name}`));
     assert.match(fs.readFileSync(command, 'utf8'), new RegExp(`manual\\.js" ${name.replace(/^manual-/, '')}`));
   }
-  assert.strictEqual(output.installed.length, 16);
+  assert.strictEqual(output.installed.length, 18);
 
   const readme = fs.readFileSync(path.resolve(__dirname, '..', 'README.md'), 'utf8');
   const architecture = fs.readFileSync(path.resolve(__dirname, '..', 'docs', 'ARCHITECTURE.md'), 'utf8');
