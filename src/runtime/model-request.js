@@ -82,7 +82,7 @@ function analyzeContent(ctx, task) {
     files,
     facts: { pageId: page.id, route: page.route, title: page.title || null, purpose: page.purpose || null, detectedActions: page.detectedActions || [] },
     output: { type: 'page-analysis', allowedFields: ['title', 'purpose', 'detectedActions'], shape: '{ "title": "...", "purpose": "...", "detectedActions": ["..."] }' },
-    instructions: `只根据列出的源码文件判断页面标题、用途与可见操作；不确定就不写，不编造业务规则。purpose 按 ${STYLE_GUIDE} 第三节导语写两到三句。`,
+    instructions: `只根据列出的源码文件判断页面标题、用途与可见操作；不确定就不写，不编造业务规则。purpose 按 ${STYLE_GUIDE} 第三节导语写一两句。`,
   };
 }
 
