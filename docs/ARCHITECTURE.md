@@ -26,10 +26,12 @@ Skill 代码与项目数据严格分离：
   pages/<id>.yaml         每页详情，页面模型的事实来源（入库）
   index/forward.json      页面 → 源码 / 截图 / 手册的派生正索引（入库）
   index/reverse.json      源码文件 → 受影响页面的派生逆索引（入库）
-  .gitignore              让下面这些不入库
-  screenshots/raw/        原始截图
-  screenshots/annotated/  标注后截图
-<项目根>/<docs.outputDir>/  手册 Markdown + images/（入库）
+  tasks/ scenarios/ fixtures/  任务、Scenario 与 Fixture 定义（入库）
+  evidence/ releases/     Capture 证据记录与发布记录（入库）
+  .gitignore              让下面这些本机产物不入库
+  artifacts/raw/          原始截图（另有 diagnostics/、manifests/）
+  runs/ drafts/ snapshots/ verifications/ site/   Run 状态、草稿、模型快照、验证报告、帮助中心站点
+<项目根>/<docs.outputDir>/  手册 Markdown + images/annotated/ + index.md + meta.json（入库）
 
 %LOCALAPPDATA%/living-user-manual/auth/   Windows 用户级认证缓存（不入库）
 ```
@@ -257,5 +259,5 @@ Runtime 路径下，正文由事实包确定性渲染（`src/generate/render.js`
 2. 跨进程常驻 daemon / 受控并发执行（Runtime 是单进程串行，一个 Run 内复用 Browser）
 3. 多个 Scenario 截图同时渲染进同一页面手册（变体证据目前只作为独立 Capture）
 4. 任务手册的视觉漂移比较（任务只做行为断言回放）
-5. 手册索引页、移动端 profile、操作系统凭据库加密认证缓存
+5. 移动端 profile、操作系统凭据库加密认证缓存
 6. 业务站点部署或 PR 自动合并（CI 只测试本工具）

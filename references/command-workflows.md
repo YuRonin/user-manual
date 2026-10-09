@@ -86,7 +86,7 @@ CLI 会识别技术栈、扫出全部页面、递归追踪项目内静态依赖�
 
 如果发现页面依赖的关键组件不在 `entry` 里（如 `components/membership/**`），一并补进 `source`。
 
-**边界**：这一阶段只回答「这个页面是什么、能做什么」。**不要**去区分 free/pro/max、loading/error、空状态——那些是 Scenario，属于 V0.5。
+**边界**：这一阶段只回答「这个页面是什么、能做什么」。**不要**去区分 free/pro/max、loading/error、空状态——那些用 Scenario 声明，见 `docs/RUNTIME.md` 第 7 节。
 
 ### 3. 写回
 

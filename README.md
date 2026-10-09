@@ -263,4 +263,3 @@ Chromium（Linux 另装 `fonts-noto-cjk`），先跑 doctor，再依次跑 unit 
 
 - [架构与演进约定](docs/ARCHITECTURE.md)
 - [运行时](docs/RUNTIME.md)、[迁移与兼容入口](docs/MIGRATION.md)
-- 历史设计、实施计划与实测记录：[docs/archive/](docs/archive/README.md)
