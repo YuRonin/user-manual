@@ -14,6 +14,7 @@ const pkg = require('../../package.json');
 const { parseArgs } = require('../cli/args');
 const { loadConfig, configPathFor } = require('../config/load');
 const cache = require('../auth/cache');
+const { readCurrentPointer } = require('../publication/release-store');
 const { probeRedirect, redirectWarning } = require('../util/redirect-probe');
 
 const KNOWN_FLAGS = new Set(['projectRoot', 'json', 'help']);
@@ -154,7 +155,24 @@ function checkProject(projectRoot) {
   if (loaded.config.docs && loaded.config.docs.outputDir) {
     results.push(checkWritable('output:docs', path.resolve(projectRoot, loaded.config.docs.outputDir)));
   }
+  const catalog = checkCatalog(projectRoot, loaded.config);
+  if (catalog) results.push(catalog);
   return { loaded, checks: results };
+}
+
+/** docs.catalog 引用的手册是否都已发布；未配置分组时不出这一项。 */
+function checkCatalog(projectRoot, config) {
+  const catalog = config.docs?.catalog;
+  if (!catalog) return null;
+  const stateDir = path.resolve(projectRoot, config.artifacts.stateDir);
+  const missing = catalog.groups
+    .flatMap((group) => group.entries)
+    .filter((manualId) => !readCurrentPointer(stateDir, manualId));
+  if (!missing.length) return check('catalog', 'ok', '目录分组引用的手册均已发布');
+  return check('catalog', 'warn', `目录分组引用了尚未发布的手册：${missing.join('、')}`, {
+    missing,
+    hint: '发布这些手册，或从 .manual/config.yaml 的 docs.catalog 中移除；更新目录时会跳过它们。',
+  });
 }
 
 /**
@@ -300,4 +318,4 @@ async function run(argv) {
   return report.ok ? 0 : 1;
 }
 
-module.exports = { run, HELP, KNOWN_FLAGS, collectChecks, checkBaseUrlRedirect, versionAtLeast, checkAuthPermissions, checkFonts };
+module.exports = { run, HELP, KNOWN_FLAGS, collectChecks, checkBaseUrlRedirect, versionAtLeast, checkAuthPermissions, checkFonts, checkCatalog };

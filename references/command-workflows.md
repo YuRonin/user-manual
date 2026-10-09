@@ -260,6 +260,31 @@ status:
 - `manual capture-task <task-id> --continue-url <已有会话URL>`：提交已验证、只缺最后的结果查看步骤时，在已有会话续采，不重放提交。两者的前提与限制见 [质量工作流](quality-workflow.md)。
 - `manual gc`：列出未引用的临时文件、原图与旧 Run；确认后 `--apply --expect <planHash>`。`--inventory` 逐项给出大小与保留原因。
 
+## 目录分组（`docs.catalog`）
+
+每次发布都会重写 `docs.outputDir/index.md` 的 `manual:catalog` 区块。默认分「操作指南」（任务篇）和「功能介绍」（页面篇）两组；产品手册想按读者场景组织时，在 `config.yaml` 的 `docs:` 下配置 `catalog`（整段可选）：
+
+```yaml
+docs:
+  catalog:
+    fallbackTitle: 更多            # 未被任何分组引用的已发布手册落到这里；全部引用时不出现
+    groups:
+      - title: 快速开始
+        entries: [page-login, page-password-reset]
+      - title: AI 对话与教学
+        entries: [page-chat, task-generate-practice]
+```
+
+| 字段 | 默认 | 说明 |
+|---|---|---|
+| `groups[].title` | 必填 | 单行非空，不能与 `fallbackTitle` 同名 |
+| `groups[].entries` | 必填 | 手册 id，即 `.manual/releases/` 下的目录名（`page-<id>` / `task-<id>`），不是发布记录 UUID；组内顺序即目录顺序；同一 id 只能出现在一个分组 |
+| `fallbackTitle` | `更多` | 兜底分组标题 |
+
+- 输出格式不变（`## 分组` + `- [标题](路径)：摘要`），`manual site` 与其它消费者无需改动；空分组一律省略。
+- 引用了尚未发布的手册：生成时跳过并输出 `catalog-unknown-entries` 告警；`manual doctor` 的 `catalog` 项给 warn。
+- 配置形状错误（坏 id、跨组重复等）在加载配置时直接报错。
+
 ## 帮助中心网站（`manual site`）
 
 `manual site` 只读手册、只写 `site.outputDir`，可随时重跑；截图按修改时间增量转码。`config.yaml` 的 `site:` 段（整段可选）：

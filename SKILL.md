@@ -80,7 +80,7 @@ manual generate task:<id> [task:<id2> page:<id> ...]
 
 ## 5. 发布为帮助中心网站
 
-用户要把手册做成可访问的帮助中心、或要 HTML 而不是 Markdown 时：`manual site`。它读取已发布的 `docs.outputDir`（`index.md` 目录 + 页面篇 + `tasks/` 任务篇），输出一套静态 HTML 到 `site.outputDir`（默认 `.manual/site/`）：首页目录与可选求助区、正文页面包屑、「完成后你会看到」提示框、WebP 截图。
+用户要把手册做成可访问的帮助中心、或要 HTML 而不是 Markdown 时：`manual site`。它读取已发布的 `docs.outputDir`（`index.md` 目录 + 页面篇 + `tasks/` 任务篇；目录分组可用 `docs.catalog` 配置，见[命令细节](references/command-workflows.md)），输出一套静态 HTML 到 `site.outputDir`（默认 `.manual/site/`）：首页目录与可选求助区、正文页面包屑、「完成后你会看到」提示框、WebP 截图。
 
 - 退出码 1 + `site-dead-link` / `site-catalog-*`：手册本身有断链或目录缺失，报告给用户并修手册（或重新 `generate`），不要改生成的 HTML。
 - 退出码 4 + `site-output-unmanaged`：`site.outputDir` 里已有别人的文件。问用户确认可以覆盖后才加 `--force`。

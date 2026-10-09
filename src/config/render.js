@@ -118,6 +118,14 @@ function renderConfigYaml(config, meta = {}) {
   L.push(`  outputDir: ${scalar(config.docs.outputDir)}`);
   L.push('  # 手册引用的图片落点。这份是要随手册入库的。');
   L.push(`  imagesDir: ${scalar(config.docs.imagesDir)}`);
+  L.push('  # index.md 目录分组（可选）。不配置时分「操作指南」「功能介绍」两组；');
+  L.push('  # 配置后按下面的分组与顺序输出，entries 填手册 id（page-<id> / task-<id>），');
+  L.push('  # 未被引用的已发布手册自动落到 fallbackTitle 分组。');
+  L.push('  # catalog:');
+  L.push('  #   fallbackTitle: 更多');
+  L.push('  #   groups:');
+  L.push('  #     - title: 快速开始');
+  L.push('  #       entries: [page-login, task-reset-password]');
   L.push('');
 
   // ---- site（可选，manual site 使用；缺省即可构建）

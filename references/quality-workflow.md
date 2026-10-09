@@ -54,7 +54,7 @@ Run 因 `auth-expired`、`auth-missing` 或 `login-required` 停下时，可执�
 
 verify --artifacts 仅证明文件与事实一致，onlineChecked=false；不能报告业务成功。verify --live 检查当前可回放界面。报告已执行步骤数量、绑定且通过的完成声明，以及停止点。没有绑定断言的业务结果始终是预期。
 
-每次 Runtime 发布会更新 docs.outputDir/index.md 的 manual:catalog 区块，区块外人工文字保留；已有无标记的 index.md 保留并提示。交付时从该入口核对文档、图片与任务链接。
+每次 Runtime 发布会更新 docs.outputDir/index.md 的 manual:catalog 区块（分组默认为操作指南 / 功能介绍，配置 docs.catalog 后按配置；引用了未发布手册时跳过并告警 catalog-unknown-entries），区块外人工文字保留；已有无标记的 index.md 保留并提示。交付时从该入口核对文档、图片与任务链接。
 
 ## 本地修改后安装
 

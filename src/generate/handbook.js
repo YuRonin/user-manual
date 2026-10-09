@@ -14,29 +14,49 @@ function taskCoverage(pack) {
 function describeEntry(pack) {
   return text(pack?.blocks?.intro?.default || '').replace(/\s+/g,' ').trim();
 }
-/*
- * 目录按读者用途分组：先列"怎样完成某件事"的操作指南，再列页面功能介绍；
- * 每项一行标题加一句说明，不写证据范围等维护信息。
- */
-function updateHandbook({projectRoot,config}) {
+/** 收集所有已发布手册的目录行，按 manualId 排序。 */
+function collectEntries(projectRoot,config) {
   const state=path.join(projectRoot,config.artifacts.stateDir),dir=path.join(state,'releases');
-  const groups={task:[],page:[]};
+  const entries=[];
   for(const id of fs.existsSync(dir)?fs.readdirSync(dir).sort():[]) {
     if(!/^(page|task)-[a-z0-9-]+$/.test(id))continue;
     const r=readCurrentRelease(state,id);if(!r||!fs.existsSync(path.join(projectRoot,r.documentPath)))continue;
     const pack=r.facts?.factPack;
     const href=path.relative(path.join(projectRoot,config.docs.outputDir),path.join(projectRoot,r.documentPath)).replace(/\\/g,'/');
     const summary=describeEntry(pack);
-    (pack?.kind==='task'||id.startsWith('task-')?groups.task:groups.page).push(`- [${text(pack?.title||id)}](${href})${summary?`：${summary}`:''}`);
+    entries.push({id,kind:pack?.kind==='task'||id.startsWith('task-')?'task':'page',line:`- [${text(pack?.title||id)}](${href})${summary?`：${summary}`:''}`});
   }
-  const section=(title,rows)=>rows.length?['',`## ${title}`,'',...rows]:[];
-  const generated=[OPEN,'# 使用手册',...section('操作指南',groups.task),...section('功能介绍',groups.page),CLOSE].join('\n');
-  const rows=[...groups.task,...groups.page];
+  return entries;
+}
+/*
+ * 目录分组：
+ * - 默认按读者用途分两组：先列"怎样完成某件事"的操作指南，再列页面功能介绍；
+ * - 配置了 docs.catalog 时按配置的分组与顺序输出，未被引用的已发布手册落到兜底分组，
+ *   配置里尚未发布的条目跳过并告警（不静默丢失）。空分组一律省略。
+ * 每项一行标题加一句说明，不写证据范围等维护信息。
+ */
+function groupEntries(entries,catalog) {
+  if(!catalog)return {sections:[['操作指南',entries.filter(e=>e.kind==='task')],['功能介绍',entries.filter(e=>e.kind==='page')]],unknown:[]};
+  const byId=new Map(entries.map(e=>[e.id,e])),used=new Set(),unknown=[];
+  const sections=catalog.groups.map(g=>[g.title,g.entries.flatMap(id=>{
+    const e=byId.get(id);if(!e){unknown.push(id);return [];}
+    used.add(id);return [e];
+  })]);
+  sections.push([catalog.fallbackTitle,entries.filter(e=>!used.has(e.id))]);
+  return {sections,unknown};
+}
+function updateHandbook({projectRoot,config}) {
+  const {sections,unknown}=groupEntries(collectEntries(projectRoot,config),config.docs.catalog||null);
+  const section=(title,rows)=>rows.length?['',`## ${title}`,'',...rows.map(e=>e.line)]:[];
+  const generated=[OPEN,'# 使用手册',...sections.flatMap(([title,rows])=>section(title,rows)),CLOSE].join('\n');
+  const rows=sections.flatMap(([,r])=>r);
   const file=path.join(projectRoot,config.docs.outputDir,'index.md');
   const prior=fs.existsSync(file)?fs.readFileSync(file,'utf8'):'';
   if(prior && !(prior.includes(OPEN)&&prior.includes(CLOSE)))return {file,updated:false,warning:'catalog-human-owned: index.md 已存在且无生成标记，保留人工内容。'};
   const content=prior ? prior.slice(0,prior.indexOf(OPEN))+generated+prior.slice(prior.indexOf(CLOSE)+CLOSE.length) : generated+'\n';
   fs.mkdirSync(path.dirname(file),{recursive:true});writeFileAtomic(file,content);
-  return {file,updated:true,entries:rows.length};
+  const result={file,updated:true,entries:rows.length};
+  if(unknown.length)result.warning=`catalog-unknown-entries: docs.catalog 引用了尚未发布的手册 ${unknown.join('、')}，已跳过。`;
+  return result;
 }
 module.exports={updateHandbook,taskCoverage};

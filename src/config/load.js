@@ -22,6 +22,7 @@ const { isUuid } = require('../model/ids');
 const PROJECT_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const { resolveAnnotationConfig } = require('./annotation');
 const { resolveSiteConfig } = require('./site');
+const { resolveCatalogConfig } = require('./catalog');
 
 const CONFIG_RELATIVE = path.join(DEFAULTS.stateDir, 'config.yaml');
 
@@ -176,6 +177,11 @@ function loadConfig(projectRoot) {
   const annotation = resolveAnnotationConfig(raw.annotation);
   if (!annotation.ok) return { ok: false, errors: annotation.errors };
   config.annotation = annotation.config;
+
+  // index.md 目录分组（docs.catalog）：整段可选，不配置时沿用默认两组
+  const catalog = resolveCatalogConfig(raw.docs?.catalog);
+  if (!catalog.ok) return { ok: false, errors: catalog.errors };
+  config.docs.catalog = catalog.config;
 
   // 帮助中心静态站（manual site）：整段可选，缺省值即可构建
   const site = resolveSiteConfig(raw.site, {
