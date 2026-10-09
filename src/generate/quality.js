@@ -1,5 +1,6 @@
 'use strict';
 const { canonical } = require('../util/hash');
+const { lintProse, formatStyle } = require('./style-lint');
 function imageQuality(captured, redactions, annotations) {
   const canvas=captured.geometry.fullPage ? captured.geometry.documentSize : captured.geometry.viewport;
   const area=(canvas?.width || 1)*(canvas?.height || 1);
@@ -7,6 +8,19 @@ function imageQuality(captured, redactions, annotations) {
   const ratio=Math.min(1,maskedArea/area);
   return {annotationCount:annotations.length, redactionCount:redactions.length, maskedAreaUpperBound:ratio,
     warnings:[...(annotations.length ? [] : ['image-unannotated']),...(ratio>0.15 ? ['image-heavily-redacted: 使用演示数据或局部图，并目视检查最终图片；保留隐私遮挡。'] : [])]};
+}
+/** 任务模型里直接给读者看的文字（写作规范第五节），逐段做风格检查。 */
+function readerTexts(task) {
+  const out=[['title',task.title],['goal',task.goal]];
+  (task.readerPreconditions||[]).forEach((t,i)=>out.push([`readerPreconditions[${i}]`,t]));
+  for (const step of task.steps||[]) {
+    out.push([`steps.${step.id}.instruction`,step.instruction]);
+    if (step.capture?.readerCaption) out.push([`steps.${step.id}.readerCaption`,step.capture.readerCaption]);
+  }
+  for (const claim of task.completion?.claims||[]) out.push([`completion.${claim.id}`,claim.text]);
+  (task.completion?.readerChecks||[]).forEach((t,i)=>out.push([`readerChecks[${i}]`,t]));
+  for (const b of task.branches||[]) out.push([`branches.${b.id}.condition`,b.condition],[`branches.${b.id}.effect`,b.effect]);
+  return out.filter(([,text])=>typeof text==='string' && text);
 }
 function taskQuality(task,evidence = {}, { entryPage } = {}) {
   const warnings=[];
@@ -45,6 +59,8 @@ function taskQuality(task,evidence = {}, { entryPage } = {}) {
       }
     }
   }
+  for (const [where,text] of readerTexts(task)) warnings.push(...formatStyle(lintProse(text),where));
+  if (/「[^」]+」/.test(task.title||'')) warnings.push('style-quote-in-title（title）: 标题写读者要完成的结果，不用「」');
   const executed=(evidence.steps||[]).filter(s=>s.status && s.status!=='not-executed');
   checks.screenshots = executed.some(s=>s.screenshots?.length);
   if (!checks.screenshots) warnings.push('screenshots-missing: 缺少已执行步骤的截图。');

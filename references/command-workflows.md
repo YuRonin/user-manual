@@ -190,7 +190,7 @@ DOM 连续静止 → 冻结 CSS 动画与过渡 → 静置回流。
 
 ## 文案与事实校验
 
-`generate` 默认在事实草稿之后停下，请宿主模型填写文案块（导语、步骤补充说明），见 SKILL.md 第 3 步与[写作规范](manual-writing-style.md)。正文其余部分由事实包确定性渲染，提交的文案经程序校验：改写受保护的 UI 名称或动作会被拒绝，新出现的数字或承诺需要人工确认（`review-required`）。
+`generate` 默认在事实草稿之后停下，请宿主模型填写文案块（导语、步骤补充说明），见 SKILL.md 第 3 步与[写作规范](manual-writing-style.md)。正文其余部分由事实包确定性渲染，提交的文案经程序校验：改写受保护的 UI 名称或动作会被拒绝，写作规范第四节标 ⚙ 的风格问题（套话、“您”、连串「」）也会被拒绝（`style-*`），新出现的数字或承诺需要人工确认（`review-required`）。`describe` 写入的 `purpose` 与 `guide` 做同样的风格检查；任务模型的读者字段命中时在 `review-task` 里给警告。
 
 旧的页面三段式（`generate <page-id> --draft` → 整篇润色 → `--finalize <文件>`，可加 `--fallback-draft`）仍可用，只在需要整篇改写 Markdown 时使用；校验规则同上，详见 `docs/MIGRATION.md`。
 

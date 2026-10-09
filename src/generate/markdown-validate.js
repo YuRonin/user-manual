@@ -5,7 +5,8 @@
  *
  * 两类结论：
  *   blocked         必须拒绝：未声明的文案块、在文案里塞结构（标题 / 图片 / 列表 / 注释）、
- *                   编造的界面名称、对事实动作的否定（"不要点击「保存」"）。
+ *                   编造的界面名称、对事实动作的否定（"不要点击「保存」"）、
+ *                   写作规范第四节里能确定判断的风格问题（套话、"您"、「」堆叠，见 style-lint）。
  *   review-required 规则无法证明对错，需要人确认：新出现的数字 + 单位（含同数字换单位）、
  *                   业务承诺（"保证""立即""自动完成"……）。
  * 这是结构与关键事实的一致性检查，不声称能证明任意自由文本与事实语义等价。
@@ -13,6 +14,7 @@
  */
 
 const MarkdownIt = require('markdown-it');
+const { lintProse } = require('./style-lint');
 
 const parser = new MarkdownIt({ html: true });
 
@@ -84,6 +86,7 @@ function validateCopy(pack, copy) {
     if (unknown.length) blocked.push({ blockId, code: 'ui-term-unknown', detail: unknown });
     const negated = negatedTerms(value, [...allowed]);
     if (negated.length) blocked.push({ blockId, code: 'negated-action', detail: negated });
+    for (const f of lintProse(value)) blocked.push({ blockId, code: `style-${f.code}`, detail: f.detail });
     const numbers = numberUnits(value).filter((n) => !factNumbers.has(n) && !numberUnits(pack.blocks[blockId].default).includes(n));
     if (numbers.length) review.push({ blockId, code: 'number-unit', detail: numbers });
     const promised = promises(value).filter((p) => !promises(pack.blocks[blockId].default).includes(p));

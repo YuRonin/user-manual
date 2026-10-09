@@ -21,6 +21,7 @@ const { CONFIDENCE, ANALYSIS, isBrowserVerified } = require('../inspect/model');
 const store = require('../inspect/store');
 const { createProjectStore } = require('../store/project');
 const { displayPath } = require('../util/fsx');
+const { lintProse, formatStyle } = require('../generate/style-lint');
 
 const KNOWN_FLAGS = new Set(['projectRoot', 'input', 'id', 'title', 'purpose', 'actions', 'source', 'includeInManual', 'lifecycle', 'json', 'help']);
 
@@ -168,6 +169,8 @@ function validateEntry(entry, index, knownIds, errors) {
     if (typeof entry.purpose !== 'string' || entry.purpose.trim() === '') {
       errors.push(`${where}.purpose 需要是非空字符串。`);
     } else {
+      const style = formatStyle(lintProse(entry.purpose), `${where}.purpose`);
+      if (style.length) errors.push(...style);
       patch.purpose = entry.purpose.trim();
       touched = true;
     }
@@ -185,7 +188,14 @@ function validateEntry(entry, index, knownIds, errors) {
   if (entry.guide !== undefined) {
     const checked = require('../model/schema').validatePage({ id: entry.id, route: '/', guide: entry.guide });
     if (!checked.ok) errors.push(...checked.errors.map(e => `${where}.${e.path}: ${e.message}`));
-    else { patch.guide = entry.guide; touched = true; }
+    else {
+      const style = entry.guide.flatMap((g, i) => [
+        ...formatStyle(lintProse(g.title), `${where}.guide[${i}].title`),
+        ...formatStyle(lintProse(g.instruction), `${where}.guide[${i}].instruction`),
+      ]);
+      if (style.length) errors.push(...style);
+      else { patch.guide = entry.guide; touched = true; }
+    }
   }
 
   if (entry.source !== undefined) {

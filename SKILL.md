@@ -36,7 +36,7 @@ manual inspect                                # 扫描 Next.js 路由与源码�
 manual describe --input <分析.json>           # 你读完源码后，写回每页的标题、用途、主要操作和 guide
 ```
 
-`inspect` 目前只支持 Next.js（App Router 与 Pages Router）；其它框架会明确提示暂不支持。`describe` 的输入格式见[命令细节](references/command-workflows.md)。
+`inspect` 目前只支持 Next.js（App Router 与 Pages Router）；其它框架会明确提示暂不支持。`describe` 的输入格式见[命令细节](references/command-workflows.md)。`purpose` 和 `guide` 会原样进入手册，按[写作规范](references/manual-writing-style.md)第一、三节写：说清用途、选项区别和操作后的变化，「」只给要操作的控件；套话、“您”、连串「」会被拒绝。
 
 ## 2. 建模：要写哪些任务
 
@@ -49,7 +49,7 @@ manual discover-tasks <page-id|--all>              # 取得候选工作清单 �
 manual approve-tasks --input <决策.json>            # 用户确认后才批准
 ```
 
-候选任务的名称、目标、步骤、风险和证据摘要要先展示给用户；只在用户本次或先前明确授权的范围内批准，范围不清就问。只有已批准的任务才会被采集和发布。任务模型里直接面向读者的字段（标题、`readerPreconditions`、完成声明、`readerChecks`、`branches`、`capture.readerCaption`）按[写作规范](references/manual-writing-style.md)第五节写。细节见[任务工作流](references/task-workflow.md)。
+候选任务的名称、目标、步骤、风险和证据摘要要先展示给用户；只在用户本次或先前明确授权的范围内批准，范围不清就问。只有已批准的任务才会被采集和发布。任务模型里直接面向读者的字段（标题、`readerPreconditions`、完成声明、`readerChecks`、`branches`、`capture.readerCaption`）按[写作规范](references/manual-writing-style.md)第三、五节写。细节见[任务工作流](references/task-workflow.md)。
 
 ## 3. 生成
 
@@ -59,8 +59,8 @@ manual generate task:<id> [task:<id2> page:<id> ...]
 
 多个目标共用一个 Run 和浏览器会话。Runtime 自动决定是否需要采集（可复用的有效证据直接用），然后生成事实草稿，**默认停下来请你写文案**（退出码 3，`model-input-required`）：
 
-1. 读请求文件 `.manual/runs/<runId>/model/<requestId>.request.json`，只读其中 `files` 列出的文件。
-2. 按[写作规范](references/manual-writing-style.md)填写 `allowedBlocks` 里的文案块，写成响应 JSON（格式见规范第七节）。
+1. 读请求文件 `.manual/runs/<runId>/model/<requestId>.request.json` 和其中 `files` 列出的文件；需要背景时只回看该页面模型及其列出的源码，用来理解已有事实，不添加新事实。
+2. 按[写作规范](references/manual-writing-style.md)填写 `allowedBlocks` 里的文案块：默认文字通常偏短，按第三节补全读者会问的“填什么、选哪个、点了会怎样”。写成响应 JSON（格式见规范第七节）。
 3. `manual resume <runId> --request <requestId> --input <响应.json>` 提交并继续，直到发布。
 
 常用选项：

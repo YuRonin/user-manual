@@ -65,7 +65,7 @@ function rewriteContent(ctx, task) {
     files,
     facts: { factsHash: pack.factsHash, language: pack.language || null, copyBlocks: blocks, protected: { uiTerms: facts.uiTexts || [], images: (facts.images || []).map((i) => i.artifactPath) } },
     output: { type: 'copy', allowedBlocks: Object.keys(blocks), shape: '{ "copy": { "<blockId>": "文案" } }' },
-    instructions: `只填写 allowedBlocks 中的文案块；按 ${STYLE_GUIDE} 改写，不改 UI 名称、操作顺序、数字与完成条件。`,
+    instructions: `只填写 allowedBlocks 中的文案块；按 ${STYLE_GUIDE} 改写：用读者能懂的话补全用途、要填什么、点了之后会看到什么（只用事实里有的信息），「」只给要操作的控件。不改 UI 名称、操作顺序、数字与完成条件。`,
   };
 }
 
@@ -82,7 +82,7 @@ function analyzeContent(ctx, task) {
     files,
     facts: { pageId: page.id, route: page.route, title: page.title || null, purpose: page.purpose || null, detectedActions: page.detectedActions || [] },
     output: { type: 'page-analysis', allowedFields: ['title', 'purpose', 'detectedActions'], shape: '{ "title": "...", "purpose": "...", "detectedActions": ["..."] }' },
-    instructions: '只根据列出的源码文件判断页面标题、用途与可见操作；不确定就不写，不编造业务规则。',
+    instructions: `只根据列出的源码文件判断页面标题、用途与可见操作；不确定就不写，不编造业务规则。purpose 按 ${STYLE_GUIDE} 第三节导语写两到三句。`,
   };
 }
 
