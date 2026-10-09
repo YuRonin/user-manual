@@ -242,7 +242,7 @@ const snapshot = (file) => ({ bytes: fs.readFileSync(file, 'utf8'), mtime: fs.st
       walk(docs);
       const markdown = files.filter((f) => f.endsWith('.md')).map((f) => fs.readFileSync(f, 'utf8')).join('\n');
       assert.doesNotMatch(markdown, /\.manual\/|artifacts\/raw|sanitized|diagnostics|cookie|13812345678/);
-      assert.ok(files.every((f) => f.endsWith('.md') || f.includes(`${path.sep}images${path.sep}annotated${path.sep}`)), '文档目录只有正式文档与发布图');
+      assert.ok(files.every((f) => f.endsWith('.md') || f === path.join(docs, 'meta.json') || f.includes(`${path.sep}images${path.sep}annotated${path.sep}`)), '文档目录只有正式文档、meta.json 与发布图');
       for (const manualId of ['page-chat', 'page-home', 'task-edit-profile']) {
         const release = releases.readCurrentRelease(state, manualId);
         for (const image of release.facts.images || []) assert.strictEqual(image.privacy.status, 'passed');
