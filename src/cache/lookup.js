@@ -19,7 +19,7 @@ const { changedFields } = require('./keys');
 const { freshnessPolicy } = require('./policy');
 const { CACHE_ENTRY_VERSION } = require('./store');
 
-const MISS_REASONS = ['not-found', 'input-changed', 'expired', 'artifact-missing', 'hash-mismatch', 'validation-insufficient', 'policy-changed', 'environment-unknown'];
+const MISS_REASONS = ['not-found', 'input-changed', 'expired', 'artifact-missing', 'hash-mismatch', 'validation-insufficient', 'annotation-incomplete', 'policy-changed', 'environment-unknown'];
 
 function miss(reason, extra = {}) {
   return { hit: false, reason, ...extra };
@@ -36,9 +36,10 @@ function miss(reason, extra = {}) {
  * @param {string[]} [p.requiredScopes]
  * @param {{ audience?, revision? }} [p.privacy]  当前发布受众与隐私规则 revision
  * @param {object} [p.cachePolicy]  项目配置里的 TTL 覆盖
+ * @param {boolean} [p.requireAnnotation]  采集证据必须有发布图且标注覆盖通过（failed / unknown 都不复用）
  * @param {() => number} [p.now]
  */
-function lookup({ store, keyInfo, subject = null, mode, projectRoot, stateDirAbs, requiredScopes = [], privacy = null, cachePolicy, now = () => Date.now() }) {
+function lookup({ store, keyInfo, subject = null, mode, projectRoot, stateDirAbs, requiredScopes = [], privacy = null, cachePolicy, requireAnnotation = false, now = () => Date.now() }) {
   const { kind, key } = keyInfo;
   if (!mode.read) return { hit: false, bypassed: mode.name, reason: null };
   if (keyInfo.uncertainty.includes('environment')) return miss('environment-unknown', { uncertainty: keyInfo.uncertainty });
@@ -62,12 +63,17 @@ function lookup({ store, keyInfo, subject = null, mode, projectRoot, stateDirAbs
   if (lacking.length > 0) return miss('validation-insufficient', { missingScopes: lacking });
 
   if (privacy && entry.privacy) {
-    if (privacy.audience === 'public' && ['unknown', 'not-run', 'uncertain'].includes(entry.privacy.status)) {
+    // failed 也不能复用：隐私未通过的采集没有发布图
+    if (privacy.audience === 'public' && ['unknown', 'not-run', 'uncertain', 'failed'].includes(entry.privacy.status)) {
       return miss('validation-insufficient', { detail: `privacy-${entry.privacy.status}` });
     }
     if (privacy.revision && entry.privacy.revision && privacy.revision !== entry.privacy.revision) {
       return miss('policy-changed', { detail: 'privacy-revision' });
     }
+  }
+
+  if (requireAnnotation && entry.annotation?.status !== 'passed') {
+    return miss('annotation-incomplete', { detail: entry.annotation?.status || 'unknown', failures: entry.annotation?.failures || [] });
   }
 
   const freshness = freshnessPolicy(kind, keyInfo, cachePolicy);

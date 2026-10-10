@@ -78,6 +78,8 @@ function createCacheStore({ stateDirAbs, now = () => Date.now() }) {
       observedAt: entry.observedAt,
       validationScopes: entry.validationScopes || [],
       privacy: entry.privacy || null,
+      // 采集类 entry：发布图与标注覆盖是否通过（failed / unknown 不能作为成功复用）
+      annotation: entry.annotation || null,
       uncertainty: entry.uncertainty || [],
       // 不参与 key 的附加说明（例如产生这批发布图时的隐私规则 / 主题 / 渲染器），用于判断是否需要重新派生。
       meta: entry.meta || null,

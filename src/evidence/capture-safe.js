@@ -57,10 +57,13 @@ async function confirmTargetsShown(provider, located) {
  * @param {() => Promise<Array<{label, rect}>>} [p.resolveTargets]  截图时刻的标注目标（CSS 坐标）
  * @returns {{ shot, geometry, targets, candidates, attempts }}
  */
-async function captureStable(provider, { rawPath, fullPage = false, format = 'png', resolveTargets = async () => [], maxAttempts = MAX_ATTEMPTS }) {
+async function captureStable(provider, { rawPath, fullPage = false, format = 'png', resolveTargets = async () => [], maxAttempts = MAX_ATTEMPTS, stabilityMs = undefined }) {
+  let quiet = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     // 先等页面静置再取几何：否则收尾渲染期间的连续重试会全部落在同一段变化里。
-    if (provider.waitForQuiet) await provider.waitForQuiet();
+    // DOM 在等待上限内仍在变化（如回复仍在逐字输出）时这一轮不截图，进入下一次尝试。
+    quiet = provider.waitForQuiet ? await provider.waitForQuiet(stabilityMs ? { maxMs: stabilityMs } : undefined) : null;
+    if (quiet?.dom === 'max-wait') continue;
     const before = provider.collectGeometry ? await provider.collectGeometry({ fullPage }) : null;
     const targets = await resolveTargets();
     const candidates = provider.collectSensitiveElements ? await provider.collectSensitiveElements({ fullPage }) : null;
@@ -71,10 +74,13 @@ async function captureStable(provider, { rawPath, fullPage = false, format = 'pn
       const geometry = after
         ? { ...after, fullPage }
         : { dpr: shot.meta?.deviceScaleFactor || 1, viewport: shot.meta?.viewport, scroll: { x: 0, y: 0 }, documentSize: null, fullPage, mutationGeneration: null };
-      return { shot, geometry, targets, candidates, attempts: attempt };
+      // 数据请求在等待上限内仍未结束：不阻断（长轮询页面），但必须在证据中提示
+      const warnings = quiet?.network === 'busy' ? [`screenshot-network-busy: 截图时仍有 ${quiet.pendingRequests} 个数据请求未结束，内容可能尚未加载完成。`] : [];
+      return { shot, geometry, targets, candidates, attempts: attempt, warnings };
     }
   }
-  throw captureError('geometry-unstable', `截图前后页面仍在变化，重试 ${maxAttempts} 次后放弃；不会产出发布图。`);
+  const state = quiet?.dom === 'max-wait' ? `DOM 持续变化${quiet.network === 'busy' ? `，仍有 ${quiet.pendingRequests} 个数据请求未结束` : ''}` : '截图前后几何不一致';
+  throw captureError('geometry-unstable', `截图前页面一直不稳定（${state}），重试 ${maxAttempts} 次后放弃；不会产出发布图。`);
 }
 
 /**

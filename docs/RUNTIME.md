@@ -36,7 +36,7 @@ manual generate page:chat --copy-default --json  # 跳过模型文案出粗稿�
 
 Run 的节点：`(fixture-setup) → capture | derive-image → (analyze) → draft → (rewrite) → validate → publish → (fixture-cleanup)`。
 缓存命中的采集报告 `cache-hit` 与当时的 `observedAt`（历史观察，未在线确认）。
-成功的 `publish` 节点会在结果的 `documents` 中列出正式文档绝对路径；规划提醒也会随 `warnings` 返回。发布成功仍需审阅手册内容与截图。
+成功的 `publish` 节点会在结果的 `documents` 中列出正式文档绝对路径；规划提醒和执行期提示（缓存在执行前失效、标注覆盖失败、未生成发布图、截图时网络未空闲等，形如 `<节点>：<提示>`）都随 `warnings` 返回，`manual status` 同样展示。发布成功仍需审阅手册内容与截图。
 
 ### 等待输入（Run 状态 waiting_input）
 
@@ -151,7 +151,12 @@ manual gc --apply --expect <planHash>          # 项目锁内重新核对后删�
 
 | 现象 | 先看 |
 |---|---|
-| 一直 `cache-hit` 但页面已变 | 缓存只证明输入没变；用 `verify --live` 检查线上，或 `generate --refresh` 重新采集 |
+| 一直 `cache-hit` 但页面已变 | 缓存只证明输入没变；用 `verify --live` 检查线上，或 `generate --refresh` 重新采集。`generate` 执行前会重扫源码指纹，源码改动会显示为 `capture-required:input-changed(sourceHash)` |
+| `capture-required:annotation-incomplete` | 上次采集标注覆盖失败、没有发布图，或是没有覆盖记录的旧证据：不会复用，按提示修正 guide / 功能目标后重新采集 |
+| `source-freshness-unknown`（warnings） | 生成前重扫源码失败，按上次 inspect 的指纹规划；先 `manual inspect` 确认扫描正常 |
+| `geometry-unstable` | 截图前页面一直在变（回复仍在输出、轮询刷新）；确认步骤断言等到了真正的完成状态，必要时放宽 `capture.waits.stabilityMs` |
+| `readiness-timeout` / `page-reloaded`（warnings） | 入口长时间加载中：已自动刷新一次；仍失败时检查接口，或放宽 `capture.waits.readinessMs` |
+| `target-obscured` | 操作目标被提示条等浮层盖住，移开指针并等待后仍未消失；不会重试（避免重复保存）。在下一步 `requires` 里用 `hidden` 断言等提示条消失 |
 | `run-input-changed` | 规划之后模型 / 文案 / Fixture 变了：`resume <runId> --replan` |
 | `publication-in-progress` | `manual publication status`，再 `publication repair` |
 | `fixture-policy-denied` | Scenario 的 environment 是否在 `config.fixtures.environments` 登记、baseUrl 是否匹配 origins |

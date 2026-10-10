@@ -59,13 +59,42 @@ function copyPolicy({ copy = null, copyDefault = false }) {
  * 只读规划。
  * @returns {{ project, snapshot, plan, planHash, errors, mode }}
  */
-function planTargets({ projectRoot, command, targets, flags = {}, copy = { mode: 'model' }, acceptReview = false, force = false, project = null }) {
+function planTargets({ projectRoot, command, targets, flags = {}, copy = { mode: 'model' }, acceptReview = false, force = false, project = null, freshSource = false }) {
   const opened = project || openProject(projectRoot);
   const mode = resolveMode(flags);
-  const base = opened.projectStore.load();
+  let base = opened.projectStore.load();
+  // 只读的源码新鲜度：在内存里按当前源码重算页面指纹，让缓存 key 反映刚改过的源码（不写模型）
+  const freshness = freshSource ? currentSourcePages({ projectRoot, config: opened.config, base }) : null;
+  if (freshness?.pages) base = { ...base, model: { ...base.model, pages: freshness.pages } };
   const snapshot = collectPlanningInputs({ projectRoot, config: opened.config, base, targets, mode, cacheStore: opened.cacheStore });
   const planned = plan(snapshot, { command, copy, acceptReview, force });
+  if (freshness?.warning) planned.plan.summary.warnings.push(freshness.warning);
   return { project: opened, snapshot, plan: planned.plan, planHash: planned.planHash, errors: planned.errors, mode };
+}
+
+/** 按当前源码重算页面指纹（只读）；扫描失败时沿用已提交指纹并给出警告，不假装新鲜。 */
+function currentSourcePages({ projectRoot, config, base }) {
+  const { buildSourceGraph } = require('../inspect/source-graph');
+  const { readCurrentGraph } = require('../inspect/index-store');
+  const stateDirAbs = path.join(projectRoot, config.artifacts.stateDir);
+  let scanned;
+  try { scanned = buildSourceGraph({ projectRoot, config, existingPages: base.model.pages, previousGraph: readCurrentGraph(stateDirAbs) }); }
+  catch (error) { scanned = { ok: false, errors: [error.message] }; }
+  if (!scanned.ok) return { pages: null, warning: `source-freshness-unknown: 无法重新扫描源码（${(scanned.errors || []).join('；')}），按上次 inspect 的指纹规划。` };
+  // 只替换已有页面的指纹；新增 / 删除页面仍由 inspect 或 update 决定
+  const byId = new Map(scanned.result.pages.map((page) => [page.id, page]));
+  return { pages: base.model.pages.map((page) => byId.has(page.id) ? { ...page, analysis: byId.get(page.id).analysis } : page) };
+}
+
+/** 执行前刷新源码指纹并写回模型（与 update 相同）；扫描失败时不阻断，返回警告。 */
+function refreshSource(projectRoot, config) {
+  try {
+    require('../inspect/refresh').refreshModel({ projectRoot, config });
+    return null;
+  } catch (error) {
+    if (error.code === 'model-conflict') throw new RuntimeError('model-conflict', error.message);
+    return `source-freshness-unknown: 执行前刷新源码指纹失败（${error.code || 'scan-failed'}: ${error.message}），按上次 inspect 的指纹执行。`;
+  }
 }
 
 function contextFor(projectRoot, project, mode) {
@@ -110,8 +139,10 @@ async function execute({ projectRoot, project, runId, mode, verifyInputs = null,
 }
 
 /** 规划并执行。规划有错误时不创建 Run。 */
-async function startRun({ projectRoot, command, targets, flags = {}, copy, acceptReview = false, force = false, predecessor = null, sessionFactory = undefined }) {
+async function startRun({ projectRoot, command, targets, flags = {}, copy, acceptReview = false, force = false, predecessor = null, sessionFactory = undefined, freshSource = false }) {
+  const warning = freshSource ? refreshSource(projectRoot, openProject(projectRoot).config) : null;
   const planned = planTargets({ projectRoot, command, targets, flags, copy, acceptReview, force });
+  if (warning) planned.plan.summary.warnings.push(warning);
   if (planned.errors.length) {
     throw new RuntimeError(/^([a-z][a-z0-9-]+):/.exec(planned.errors[0])?.[1] || 'invalid-plan', planned.errors.join('；'), { errors: planned.errors, plan: planned.plan });
   }
@@ -203,11 +234,12 @@ function runStatus({ projectRoot, runId = null }) {
       error: t.error ? { code: t.error.code, policy: t.error.policy, message: t.error.message } : null,
       next: t.effectiveStatus === 'waiting_input' && t.error ? waitingHint(runId, { id: t.id, code: t.error.code }, state.plan) : null,
       outputs: t.outputRefs.map((r) => ({ kind: r.kind, ref: r.ref || null })),
+      warnings: t.warnings || [],
     })),
     cache: state.plan.summary?.cache || [],
     riskBoundaries: state.plan.summary?.riskBoundaries || [],
     documents,
-    warnings: state.plan.summary?.warnings || [],
+    warnings: [...(state.plan.summary?.warnings || []), ...state.tasks.flatMap((t) => (t.warnings || []).map((warning) => `${t.id}：${warning}`))],
     // 恢复理由与复用来源：来自事件日志（日志缺失时为空，不影响任务状态）。
     recovery: events.events.filter((e) => /^recovery:/.test(e.message || '')).map((e) => ({ taskId: e.taskId, result: e.message.slice('recovery:'.length), at: e.at })),
     events: { count: events.events.length, truncated: events.truncated, skipped: events.skipped },
@@ -235,6 +267,7 @@ function recordCapture({ projectRoot, subject, captureIds, extraRefs = [], obser
       outputRefs: [...captureIds.map((id) => ({ kind: 'capture', ref: id })), ...extraRefs], observedAt,
       validationScopes: scopes,
       privacy: { status: statuses.every((st) => st === 'passed') ? 'passed' : (statuses.some((st) => st === 'unknown' || st === 'not-run') ? 'unknown' : 'failed') },
+      annotation: require('../evidence/integrity').annotationSummary(records),
       meta: { imageInputs: imageInputsOf(project.config) },
     });
     return true;

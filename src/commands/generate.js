@@ -264,7 +264,8 @@ async function runRuntime({ projectRoot, values, targets, json }) {
   const flags = { offline: values.offline === true, refresh: values.refresh === true, noCache: values.noCache === true };
   try {
     const copy = copyPolicy({ copy: typeof values.copy === 'string' ? values.copy : null, copyDefault: values.copyDefault === true });
-    const options = { projectRoot, command: 'generate', targets, flags, copy, acceptReview: values.acceptReview === true, force: values.force === true };
+    // 源码新鲜度：刚改过源码直接 generate 时，缓存 key 必须反映新指纹（B1-06）
+    const options = { projectRoot, command: 'generate', targets, flags, copy, acceptReview: values.acceptReview === true, force: values.force === true, freshSource: true };
     if (values.plan) return printPlan({ json, planned: planTargets(options) });
     return printRun({ json, result: await startRun(options), label: 'generate', projectRoot });
   } catch (error) {

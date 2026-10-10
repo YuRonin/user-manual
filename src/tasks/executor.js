@@ -7,7 +7,8 @@ const { sha256Hex } = require('../util/hash');
 const { captureStable, derivePublished, confirmTargetsShown } = require('../evidence/capture-safe');
 const { createCaptureStore, sanitizeUrl } = require('../evidence/store');
 const { revisionOf } = require('../util/hash');
-const { validateNavigation, runAssertions, isUrlOnly, DEFAULT_ASSERTION_TIMEOUT_MS } = require('../evidence/validate-page');
+const { validateNavigation, validateWithReload, runAssertions, isUrlOnly, DEFAULT_ASSERTION_TIMEOUT_MS } = require('../evidence/validate-page');
+const { DEFAULT_WAITS } = require('../config/waits');
 const { errorCode } = require('../runtime/errors');
 const { derivationSidecar } = require('../evidence/capture-page');
 const { stepInventory, buildPlan } = require('../annotations/coverage');
@@ -74,7 +75,7 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
   const inventory = stepInventory({ page, task, step });
   const annotationPlan = buildPlan({ inventory, page, task, step });
   try {
-    const captured = await captureStable(provider, { rawPath, resolveTargets: publish ? annotationResolver(provider, step, annotationPlan) : async () => [] });
+    const captured = await captureStable(provider, { rawPath, stabilityMs: options.waits?.stabilityMs, resolveTargets: publish ? annotationResolver(provider, step, annotationPlan) : async () => [] });
     captured.inventory = inventory;
     captured.plan = annotationPlan;
     const stateRelative = path.relative(projectRoot, stateDir).replace(/\\/g, '/') || '.';
@@ -127,10 +128,11 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
         } : { mode: options.provenanceMode || 'live' },
       },
     });
-    store.setLatest({ [`task:${plan.taskId}:${step.id}:${timing}`]: record.id });
+    // 变体证据单独登记 latest，不覆盖默认 Scenario 的指针
+    store.setLatest({ [options.variant ? `scenario:${plan.scenario.id}:${step.id}:${timing}` : `task:${plan.taskId}:${step.id}:${timing}`]: record.id });
     const artifactOf = (kind) => record.artifacts.find((a) => a.kind === kind) || null;
     const output = { captureId: record.id, raw: path.join(projectRoot, artifactOf('raw').path), timing, bytes: captured.shot.bytes,
-      meta: { ...captured.shot.meta, url: sanitizeUrl(captured.shot.meta?.url) } };
+      meta: { ...captured.shot.meta, url: sanitizeUrl(captured.shot.meta?.url) }, warnings: [...(captured.warnings || [])] };
     if (safe) {
       output.sanitized = path.join(projectRoot, artifactOf('sanitized').path);
       output.annotated = artifactOf('published')?.path || null;
@@ -139,6 +141,8 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
       output.privacy = safe.privacy;
       output.annotations = safe.annotations;
       output.annotationCoverage = safe.coverage;
+      if (safe.coverage && !safe.coverage.ok) output.warnings.push(`annotation-coverage-failed: ${safe.coverage.failures.map((item) => `${item.feature_id}:${item.reason}`).join('、')}`);
+      if (!safe.published && safe.privacy.status !== 'passed') output.warnings.push('隐私检测未通过，未生成发布图。');
       output.quality = safe.quality;
       output.derivedFromRawHash = safe.derived.rawHash;
       output.geometryHash = safe.derived.geometryHash;
@@ -366,17 +370,27 @@ async function executeCapturePlan(plan, provider, options) {
       await provider.installRoutes(options.routes, { baseUrl });
     }
     // 查询串只用于打开入口；result.url 与证据只记录路径
-    const openResult = await provider.open(result.url + (plan.entry.search || ''));
-    await provider.waitUntilReady();
-    const observation = provider.currentObservation ? await provider.currentObservation() : null;
-    const current = { ...openResult, finalUrl: observation?.url || openResult.finalUrl };
-    if (options.authRuntime?.assertAuthenticated) options.authRuntime.assertAuthenticated(current);
+    const waits = { ...DEFAULT_WAITS, ...(options.waits || {}) };
+    const openResult = await provider.open(result.url + (plan.entry.search || ''), { timeout: waits.readinessMs });
     let navigation;
     try {
-      navigation = validateNavigation({ requestedUrl: result.url, openResult, observation, expected: plan.entry.expected || {} });
+      // 入口长期卡在加载中时刷新一次（此时还没有执行任何动作，不会重放写操作）
+      ({ navigation } = await validateWithReload(provider, {
+        settle: async () => {
+          await provider.waitUntilReady({ timeout: waits.readinessMs });
+          return { observation: provider.currentObservation ? await provider.currentObservation() : null };
+        },
+        validate: (observation) => {
+          const current = { ...openResult, finalUrl: observation?.url || openResult.finalUrl };
+          if (options.authRuntime?.assertAuthenticated) options.authRuntime.assertAuthenticated(current);
+          return validateNavigation({ requestedUrl: result.url, openResult, observation, expected: plan.entry.expected || {} });
+        },
+        enabled: waits.reloadOnStuckLoading, timeout: waits.readinessMs,
+      }));
     } catch (error) {
       throw options.authRuntime?.classify ? options.authRuntime.classify(error) : error;
     }
+    if (navigation.warnings.length) result.warnings = [...(result.warnings || []), ...navigation.warnings];
     result.finalUrl = sanitizeUrl(navigation.finalUrl);
     result.validations = [...navigation.validations];
     const entryAssertions = (plan.entry.assertions || []).filter((assertion) => assertion.type !== 'url');
@@ -437,6 +451,8 @@ async function executeCapturePlan(plan, provider, options) {
     // 旧 evidence manifest 仅作兼容视图：每张截图条目都由对应 Capture 记录生成，
     // canonicalCaptureRefs 是权威引用，不能与记录各自维护。
     result.canonicalCaptureRefs = result.steps.flatMap((s) => s.screenshots.map((shot) => shot.captureId)).filter(Boolean);
+    // 截图级提示（网络未空闲、标注覆盖失败、未出发布图）汇总到证据，供 Runtime 透传
+    result.warnings = [...(result.warnings || []), ...result.steps.flatMap((s) => s.screenshots.flatMap((shot) => (shot.warnings || []).map((warning) => `${s.id}: ${warning}`)))];
     const manifestText = JSON.stringify(result, null, 2) + '\n';
     writeText(path.join(stateDir, 'artifacts', 'manifests', `${plan.taskId}--evidence.json`), manifestText);
     // 不可变副本（内容寻址）：任务投影与缓存引用它，之后的采集不会覆盖这次的证据清单。

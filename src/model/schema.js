@@ -360,7 +360,7 @@ function validateUserTask(task, context = {}) {
       if (step.risk !== undefined && !RISKS.includes(step.risk)) c.error(`${where}.risk`, 'invalid-risk', `risk 需要是 ${RISKS.join(' / ')} 之一。`);
       if (step.replay !== undefined && !REPLAYS.includes(step.replay)) c.error(`${where}.replay`, 'invalid-replay', `replay 需要是 ${REPLAYS.join(' / ')} 之一。`);
       validateCaptureSpec(c, step.capture, `${where}.capture`);
-      if (step.assertionTimeoutMs !== undefined && (!Number.isInteger(step.assertionTimeoutMs) || step.assertionTimeoutMs < 1 || step.assertionTimeoutMs > 120000)) c.error(where, 'invalid-timeout', 'assertionTimeoutMs 需要是 1..120000 的整数。');
+      if (step.assertionTimeoutMs !== undefined && (!Number.isInteger(step.assertionTimeoutMs) || step.assertionTimeoutMs < 1 || step.assertionTimeoutMs > 600000)) c.error(where, 'invalid-timeout', 'assertionTimeoutMs 需要是 1..600000 的整数（毫秒，最长 10 分钟）。');
       if (step.requires !== undefined) validateAssertions(c, step.requires, `${where}.requires`);
       if (step.pageAfter !== undefined && !isSafeId(step.pageAfter)) c.error(where, 'invalid-action', 'pageAfter 需要页面 id');
       if (pagesById && step.pageAfter) {

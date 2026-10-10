@@ -5,7 +5,7 @@
 > **适用仓库**：`E:\NeoStar\user-manual`（审计时 `living-manual` 0.1.0）  
 > **依据**：《Living User Manual Skill 七阶段优化进度审计报告》（2026-10-10；基线 `main@6da5bf7` + 审计时工作区未提交改动）  
 > **补充依据**：NeoAgent `demo/website/docs/manual-full-rerun-plan.md` 的“已知问题与对策”（2026-10-10）。该记录是一次测试环境运行快照；实施前仍须复核现状。  
-> **实施状态**：B0 已完成（见第 15 节）；B1 起待实施。未勾选的项目不代表已修改或验证通过。  
+> **实施状态**：B0、B1 已完成（见第 15 节）；B2 起待实施。未勾选的项目不代表已修改或验证通过。  
 > **维护方式**：每批次开始前重新核对最新仓库；完成后勾选任务、登记测试和变更证据。
 
 ---
@@ -237,26 +237,26 @@ Page.features [Feature ID + scope + source]
 
 ### B1 工作项
 
-- [ ] **B1-01｜任务 Scenario 参数贯通（P0-2）**：Runtime 调用 `captureTask()` 必须传入选中的 `scenarioDefinition`；核对登录身份、Fixture、entry、断言与 `record.scenarioId`。
-- [ ] **B1-02｜Scenario 缓存及投影隔离**：变体 Capture 不能覆盖默认页面 `latestCaptureId` / 任务 `lastCapture`；缓存命中与重新执行路径行为相同。修复 `restoreProjection` 的变体判断。
-- [ ] **B1-03｜失败缓存拦截（P0-3）**：写缓存前以及 lookup 复用前同时检验 coverage/evidence 状态；失败/unknown 不得以成功缓存复用；提供 `annotation-incomplete` 等明确 miss reason。
-- [ ] **B1-04｜真实错误穿透**：确保 handler warnings 进入 runner、events、状态输出；缓存失效和截图失败不会被误报为 `succeeded`。
-- [ ] **B1-05｜Import Graph 修复（P0-5）**：解析 `./api.client`、`@/lib/date.utils`、`export * as ns from`；解析不了标为 unresolved/partial，不能虚报 complete。
-- [ ] **B1-06｜Generate 新鲜度**：调用现有 `refreshModel` 或等效新鲜度检查，确保刚修改源码后直接 `generate` 不复用旧指纹。控制不必要全量失效。
-- [ ] **B1-07｜Legacy Sidecar 与缓存治理**：已知不可验证旧证据标为待补采或待重派生，避免 `null` 绕过覆盖门禁。
-- [ ] **B1-08｜认证档案 UI 状态隔离**：复核 `localStorage` 中 `neo_sidebar_collapsed` 如何写入、回写认证档案；依赖侧栏的任务在采集前须恢复并断言侧栏展开，采集其他页面不能把收起状态永久污染后续任务。优先复用现有 `readState/writeState` 与 Auth Profile 机制，不在任务模型中硬编码测试账号。
-- [ ] **B1-09｜流式回复与截图稳定性**：`reply-ready` 必须等真实回复正文或产物卡片出现且生成状态结束；截图前等待网络/DOM 达到有界稳定窗口，超时明确报告当前状态，不能把用户消息或短暂停顿当作 AI 回复完成。复核本次 `page:chat` 修复是否已合入工具仓库。
-- [ ] **B1-10｜慢环境等待与恢复**：登录检查、页面就绪和截图稳定等待采用可配置且有上限的预算；接口尚未返回时不能提前通过静置判据。整页长期卡在“加载中”时允许一次有记录的刷新，写步骤及结果未知时不得自动重放。
-- [ ] **B1-11｜暂态提示条遮挡操作**：保存成功后若提示条覆盖后续目标，执行已声明的安全鼠标移开/等待动作并重新检查目标可见性；不能在提示条遮挡时反复点击或重放保存。以 `edit-export-artifact` 的“保存后打开更多操作”复现。
+- [x] **B1-01｜任务 Scenario 参数贯通（P0-2）**：Runtime 调用 `captureTask()` 必须传入选中的 `scenarioDefinition`；核对登录身份、Fixture、entry、断言与 `record.scenarioId`。
+- [x] **B1-02｜Scenario 缓存及投影隔离**：变体 Capture 不能覆盖默认页面 `latestCaptureId` / 任务 `lastCapture`；缓存命中与重新执行路径行为相同。修复 `restoreProjection` 的变体判断。
+- [x] **B1-03｜失败缓存拦截（P0-3）**：写缓存前以及 lookup 复用前同时检验 coverage/evidence 状态；失败/unknown 不得以成功缓存复用；提供 `annotation-incomplete` 等明确 miss reason。
+- [x] **B1-04｜真实错误穿透**：确保 handler warnings 进入 runner、events、状态输出；缓存失效和截图失败不会被误报为 `succeeded`。
+- [x] **B1-05｜Import Graph 修复（P0-5）**：解析 `./api.client`、`@/lib/date.utils`、`export * as ns from`；解析不了标为 unresolved/partial，不能虚报 complete。
+- [x] **B1-06｜Generate 新鲜度**：调用现有 `refreshModel` 或等效新鲜度检查，确保刚修改源码后直接 `generate` 不复用旧指纹。控制不必要全量失效。
+- [x] **B1-07｜Legacy Sidecar 与缓存治理**：已知不可验证旧证据标为待补采或待重派生，避免 `null` 绕过覆盖门禁。
+- [x] **B1-08｜认证档案 UI 状态隔离**：复核 `localStorage` 中 `neo_sidebar_collapsed` 如何写入、回写认证档案；依赖侧栏的任务在采集前须恢复并断言侧栏展开，采集其他页面不能把收起状态永久污染后续任务。优先复用现有 `readState/writeState` 与 Auth Profile 机制，不在任务模型中硬编码测试账号。
+- [x] **B1-09｜流式回复与截图稳定性**：`reply-ready` 必须等真实回复正文或产物卡片出现且生成状态结束；截图前等待网络/DOM 达到有界稳定窗口，超时明确报告当前状态，不能把用户消息或短暂停顿当作 AI 回复完成。复核本次 `page:chat` 修复是否已合入工具仓库。
+- [x] **B1-10｜慢环境等待与恢复**：登录检查、页面就绪和截图稳定等待采用可配置且有上限的预算；接口尚未返回时不能提前通过静置判据。整页长期卡在“加载中”时允许一次有记录的刷新，写步骤及结果未知时不得自动重放。
+- [x] **B1-11｜暂态提示条遮挡操作**：保存成功后若提示条覆盖后续目标，执行已声明的安全鼠标移开/等待动作并重新检查目标可见性；不能在提示条遮挡时反复点击或重放保存。以 `edit-export-artifact` 的“保存后打开更多操作”复现。
 
 ### B1 验收
 
-- [ ] Task Scenario 变体以 mock/匿名等指定状态运行，`scenarioId` 和 `provenance.mode` 正确；默认主体投影保持不变。
-- [ ] 失败覆盖结果不会二次命中：重新生成显示 `capture-required:annotation-incomplete` 或明确修复路径。
-- [ ] 修改 `api.client.ts`、`date.utils.ts` 或 `export * as` 链接模块时，`update --plan` 能命中相关页面。
-- [ ] 改动源码后 `generate` 能识别 `input-changed(sourceHash)`（最终字段以现有协议为准）。
-- [ ] 先采带产物对话、再采依赖侧栏「全部」的任务，目标仍可见；发送 AI 请求后不会在回复生成中发布截图；人为延迟接口时报告可定位的等待超时，而非伪成功或无限等待；保存提示条遮挡后续按钮时可恢复目标可见性，且不重复保存。
-- [ ] 新增任务变体与缓存隔离集成测试；完整 CI 不回归。
+- [x] Task Scenario 变体以 mock/匿名等指定状态运行，`scenarioId` 和 `provenance.mode` 正确；默认主体投影保持不变。
+- [x] 失败覆盖结果不会二次命中：重新生成显示 `capture-required:annotation-incomplete` 或明确修复路径。
+- [x] 修改 `api.client.ts`、`date.utils.ts` 或 `export * as` 链接模块时，`update --plan` 能命中相关页面。
+- [x] 改动源码后 `generate` 能识别 `input-changed(sourceHash)`（最终字段以现有协议为准）。
+- [ ] 先采带产物对话、再采依赖侧栏「全部」的任务，目标仍可见；发送 AI 请求后不会在回复生成中发布截图；人为延迟接口时报告可定位的等待超时，而非伪成功或无限等待；保存提示条遮挡后续按钮时可恢复目标可见性，且不重复保存。（工具侧机制已用测试夹具验证；待在 NeoAgent 测试站实际重跑确认）
+- [x] 新增任务变体与缓存隔离集成测试；完整 CI 不回归。
 
 ---
 
@@ -590,7 +590,7 @@ Page.features [Feature ID + scope + source]
 | 批次 | 状态 | 开始基线 | 完成提交/PR | 测试记录 | 遗留问题 |
 |---|---|---|---|---|---|
 | B0 | 完成 | `main@6da5bf7` + 工作区未提交的标注覆盖改动 | 待提交 | unit 全部通过；browser 全部通过（基线 1 个失败 `generate.test.js` 已修复）；`annotation-coverage.test.js` 20 项 | 旧证据 `unknown` 仅提示不阻断（B2-14）；B0-01 发现页面/任务草稿错误顺序与 overflow 已在并发改动中修复 |
-| B1 | 未开始 | 待填 | 待填 | 待填 | 待填 |
+| B1 | 完成 | `fa9b500` | 待提交 | unit / browser 全部通过；新增 task-scenario-variant、capture-stability、target-obscured 测试，import-graph / runtime-planner / runtime-runner / auth-cache / scenario-fixtures 增补正反例 | 侧栏等 UI 状态需项目在 `auth.ephemeralStorageKeys` 声明并用 `requires` 断言；网络未空闲只提示不阻断（长轮询页面）；`reply-ready` 语义仍由目标项目的状态断言定义 |
 | B2 | 未开始 | 待填 | 待填 | 待填 | 待填 |
 | B3 | 未开始 | 待填 | 待填 | 待填 | 待填 |
 | B4 | 未开始 | 待填 | 待填 | 待填 | 待填 |

@@ -95,7 +95,7 @@ function treeDigest(dir) {
 }
 
 /** 伪造一次成功采集并写入缓存（用于命中测试）。 */
-function seedCaptureCache(root, subject, { imageInputs } = {}) {
+function seedCaptureCache(root, subject, { imageInputs, annotation = { status: 'passed', failures: [] } } = {}) {
   const { config, stateDirAbs } = context(root);
   const { snapshot } = planFor(root, [`${subject.type}:${subject.id}`], { cache: false });
   const s = snapshot.subjects[`${subject.type}:${subject.id}`];
@@ -112,7 +112,7 @@ function seedCaptureCache(root, subject, { imageInputs } = {}) {
   createCacheStore({ stateDirAbs }).put({
     kind: 'capture', key: keyInfo.key, input: keyInfo.input, subject: `capture:${subject.type}:${subject.id}`,
     outputRefs: [{ kind: 'capture', ref: record.id }], observedAt: record.observedAt, validationScopes: ['page-identity'],
-    privacy: { status: 'passed' }, uncertainty: [], meta: { imageInputs: imageInputs || imageInputsOf(config) },
+    privacy: { status: 'passed' }, annotation, uncertainty: [], meta: { imageInputs: imageInputs || imageInputsOf(config) },
   });
   return record;
 }
@@ -193,6 +193,13 @@ try {
     assert.ok(!chat.tasks.some((t) => t.kind === 'analyze'));
   });
 
+  test('标注覆盖失败或未知的采集不作为缓存命中：capture-required:annotation-incomplete', () => {
+    seedCaptureCache(root, { type: 'page', id: 'chat' }, { annotation: { status: 'failed', failures: ['x:upload:not-drawn'] } });
+    assert.strictEqual(planFor(root, ['page:chat']).plan.tasks.find((t) => t.id === 'capture').reason, 'capture-required:annotation-incomplete');
+    seedCaptureCache(root, { type: 'page', id: 'chat' }, { annotation: null });
+    assert.strictEqual(planFor(root, ['page:chat']).plan.tasks.find((t) => t.id === 'capture').reason, 'capture-required:annotation-incomplete');
+  });
+
   test('缓存命中：capture 标为 reuse candidate（不预先标成功），不计入需要浏览器的场景；图像输入变化插入 derive-image', () => {
     const seeded = seedCaptureCache(root, { type: 'page', id: 'chat' });
     const hit = planFor(root, ['page:chat']);
@@ -271,6 +278,20 @@ try {
     assert.deepStrictEqual(Object.keys(out.plan.pageRevisions), ['profile']);
     const key = captureKey({ projectId: 'p', scenarioId: 's', scenarioRevision: 'r', checkpoint: 'c', viewport: { width: 1, height: 1 }, dpr: 1, browser: 'b', captureMode: 'm', readinessPolicy: 'r' });
     assert.ok(key.uncertainty.includes('deployedBuild'));
+  });
+
+  test('generate 规划前重扫源码指纹（只读）：刚改的源码不再命中旧缓存', () => {
+    const { planTargets } = require('../src/runtime/app');
+    seedCaptureCache(root, { type: 'page', id: 'chat' });
+    const options = { projectRoot: root, command: 'generate', targets: ['page:chat'] };
+    assert.strictEqual(planTargets(options).plan.tasks.find((t) => t.id === 'capture').reason, 'cache-hit');
+    const modelFile = path.join(root, '.manual', 'pages', 'chat.yaml');
+    const before = fs.readFileSync(modelFile, 'utf8');
+    fs.appendFileSync(path.join(root, 'app', 'chat', 'page.tsx'), '\nexport const changed = true\n');
+    assert.strictEqual(planTargets(options).plan.tasks.find((t) => t.id === 'capture').reason, 'cache-hit', '不重扫时沿用旧指纹（旧行为）');
+    const fresh = planTargets({ ...options, freshSource: true });
+    assert.match(fresh.plan.tasks.find((t) => t.id === 'capture').reason, /^capture-required:input-changed\(.*sourceHash/);
+    assert.strictEqual(fs.readFileSync(modelFile, 'utf8'), before, '--plan 路径不写模型');
   });
 } finally {
   fx.cleanup(root);

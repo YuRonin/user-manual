@@ -45,7 +45,7 @@ function printRun({ json, result, label = 'generate', projectRoot = null, docsOu
   const { runId, summary, plan } = result;
   const code = exitCodeForRun(summary);
   const documents = publishedDocuments(plan, summary, projectRoot, docsOutputDir);
-  const warnings = plan?.summary?.warnings || [];
+  const warnings = [...(plan?.summary?.warnings || []), ...(summary.warnings || [])];
   if (json) {
     process.stdout.write(JSON.stringify({
       ok: summary.status === 'succeeded',

@@ -97,5 +97,40 @@ test('公开元数据不包含 cookie 或 localStorage 值', (root) => {
   assert.match(text, /neoagent-test/);
 });
 
-process.stdout.write(`\n${passed} passed, ${failures.length} failed\n`);
-if (failures.length > 0) process.exitCode = 1;
+const { prepareAuth, refreshAuth, withoutEphemeral } = require('../src/auth/runtime');
+const polluted = (collapsed) => ({
+  cookies: [{ name: 'sid', value: 'cookie-secret', domain: 'example.com', path: '/', expires: -1 }],
+  origins: [{ origin: 'https://example.com', localStorage: [{ name: 'token', value: 'keep' }, { name: 'neo_sidebar_collapsed', value: collapsed }, { name: 'neo_ui_theme', value: 'dark' }] }],
+});
+const authConfig = (root) => ({ project: { baseUrl: 'https://example.com' }, auth: { enabled: true, cacheKey: 'neoagent-test', activeProfile: 'default', capabilities: ['cookies', 'localStorage'], ephemeralStorageKeys: ['neo_sidebar_collapsed', 'neo_ui_*'] }, _root: root });
+const names = (state) => state.origins[0].localStorage.map((item) => item.name);
+
+test('界面状态键（精确 / 前缀*）不随认证档案注入；凭据键保留', (root) => {
+  cache.writeState({ root, cacheKey: 'neoagent-test', profile: 'default' }, { origin: 'https://example.com', storageState: polluted('true') });
+  const auth = prepareAuth(authConfig(root), { root });
+  assert.deepStrictEqual(names(auth.storageState), ['token'], '已被污染的旧档案注入时也要剔除 UI 状态');
+  assert.deepStrictEqual(names(withoutEphemeral(polluted('true'), [])), ['token', 'neo_sidebar_collapsed', 'neo_ui_theme'], '未声明时不改动');
+});
+
+(async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'manual-auth-cache-'));
+  try {
+    cache.writeState({ root, cacheKey: 'neoagent-test', profile: 'default' }, { origin: 'https://example.com', storageState: polluted('false') });
+    const auth = prepareAuth(authConfig(root), { root });
+    // 某次采集把侧栏收起：导出的状态带着 collapsed=true，写回档案时必须剔除
+    const provider = { currentObservation: async () => ({ url: 'https://example.com/chat' }), exportStorageState: async () => polluted('true') };
+    const first = await refreshAuth(provider, auth, { onlyIfChanged: true });
+    assert.strictEqual(first.updated, false, '只有 UI 状态变化不算凭据变化');
+    await refreshAuth(provider, auth);
+    assert.deepStrictEqual(names(cache.readState({ root, cacheKey: 'neoagent-test', profile: 'default' }).storageState), ['token']);
+    passed++;
+    process.stdout.write('  ✓ 写回认证档案时剔除界面状态键；仅 UI 状态变化不触发写回\n');
+  } catch (error) {
+    failures.push({ name: 'refreshAuth ephemeral', error });
+    process.stdout.write(`  ✗ refreshAuth ephemeral\n    ${error.stack || error}\n`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+  process.stdout.write(`\n${passed} passed, ${failures.length} failed\n`);
+  if (failures.length > 0) process.exitCode = 1;
+})();

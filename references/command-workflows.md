@@ -138,6 +138,28 @@ manual auth login --profile default
 - `auth-timeout`：报错里会带最后停留的 URL，据此判断是没登录完，还是跳去了别的主机。
 
 **会轮换 refresh token 的站点**（每次刷新都换发新 token，复用旧 token 会被吊销全部登录）：采集时工具会串行使用同一认证档案，站点下发新 Cookie 就立即写回缓存，采集失败也会保存轮换后的令牌。
+
+**界面状态不进认证档案**：站点把侧栏收起、主题之类的 UI 状态存在 localStorage 时，某次采集改动的状态会随认证档案写回，污染后面的任务。在 `auth.ephemeralStorageKeys` 里列出这些键（`前缀*` 表示前缀匹配），写回和注入时都会剔除，页面按默认状态打开：
+
+```yaml
+auth:
+  ephemeralStorageKeys: [neo_sidebar_collapsed, neo_ui_*]
+```
+
+依赖某个 UI 状态的任务步骤，用 `requires` 断言它（例如侧栏的「全部」入口可见），不要依赖上一次采集留下的状态。
+
+**慢环境的等待预算**（`capture.waits`，每项都有上限，超时会明确报告当前状态）：
+
+```yaml
+capture:
+  waits:
+    readinessMs: 30000      # 打开页面后等待就绪，1000–300000
+    stabilityMs: 5000       # 截图前等 DOM 静止、数据请求结束（每次尝试），500–120000
+    authCheckMs: 15000      # 登录检查打开验证页，1000–300000
+    reloadOnStuckLoading: true  # 入口页超时后仍"加载中"时刷新一次（只用于入口，从不重放动作）
+```
+
+生成类步骤（如等待 AI 回复）在步骤上设 `assertionTimeoutMs`，上限 600000（10 分钟）；超出上限会被拒绝。截图前 DOM 仍在变化（回复还在逐字输出）不会截图；有数据请求未结束但 DOM 已静止时照常截图，并在 `warnings` 里提示 `screenshot-network-busy`。
 不要在同一认证档案上同时运行多个 manual 进程；建议用专门的测试账号采集，避免连带踢掉真人登录。
 如果仍被要求重新登录，说明缓存里的 token 已被站点吊销，请用户重新 `auth login`，不要反复重试。
 

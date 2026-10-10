@@ -20,6 +20,7 @@ const { createProjectStore } = require('../store/project');
 const { approvalState, APPROVAL_STATES, approvalMessage } = require('../model/approval');
 const { ANALYSIS } = require('../inspect/model');
 const { createCaptureStore } = require('../evidence/store');
+const { annotationSummary } = require('../evidence/integrity');
 const { capturePage, pageProjection } = require('../evidence/capture-page');
 const { rederiveCaptures } = require('../evidence/rederive');
 const { captureTask, taskProjection } = require('../tasks/capture-usecase');
@@ -179,7 +180,7 @@ async function authCheck(ctx, task) {
     const found = lookup({
       store: ctx.cacheStore, keyInfo: { kind: 'capture', key: current.captureKey, input: current.captureKeyInput, uncertainty: current.captureUncertainty },
       subject: `capture:${subjectKey(task.input.subject)}`, mode: ctx.mode, projectRoot: ctx.projectRoot, stateDirAbs: ctx.stateDirAbs,
-      requiredScopes: ['page-identity'], privacy: { audience: ctx.config.privacy?.audience || 'public' }, cachePolicy: ctx.config.cache, now: ctx.now,
+      requiredScopes: ['page-identity'], privacy: { audience: ctx.config.privacy?.audience || 'public' }, cachePolicy: ctx.config.cache, requireAnnotation: true, now: ctx.now,
     });
     if (found.hit) return checked('cache-hit');
   }
@@ -203,6 +204,14 @@ function privacySummary(records) {
   return { status, revision: records[0].privacy?.policyRevision || null };
 }
 
+/** 只有真实（live）采集能成为页面默认投影；fixture / 模拟数据只作独立证据（与 capture-page 一致）。 */
+function isLiveRecord(record, ctx) {
+  const mode = record?.provenance?.mode;
+  // 重新派生的记录沿用原始观察：按它派生自的那条记录判断
+  if (mode === 'rederived' && ctx && record.provenance.derivedFrom) return isLiveRecord(readRecords(ctx, [record.provenance.derivedFrom])[0], ctx);
+  return !mode || mode === 'live';
+}
+
 function readRecords(ctx, captureIds) {
   const store = createCaptureStore({ projectRoot: ctx.projectRoot, stateDirAbs: ctx.stateDirAbs });
   return captureIds.map((id) => store.read(id)).filter(Boolean);
@@ -213,13 +222,15 @@ function writeCaptureCache(ctx, task, current, outputs, records, observedAt) {
   ctx.cacheStore.put({
     kind: 'capture', key: current.captureKey, input: current.captureKeyInput, uncertainty: current.captureUncertainty,
     subject: `capture:${subjectKey(task.input.subject)}`, outputRefs: outputs, observedAt,
-    validationScopes: scopesPassed(records), privacy: privacySummary(records),
+    validationScopes: scopesPassed(records), privacy: privacySummary(records), annotation: annotationSummary(records),
     meta: { imageInputs: imageInputsOf(ctx.config) },
   });
 }
 
 /** 复用时把任务 / 页面投影指回缓存中的证据（例如期间用旧命令重新采集过）。 */
 function restoreProjection(ctx, subject, outputs, observedAt, current) {
+  // 变体证据不是默认投影：缓存命中时同样不能改写页面 / 任务的默认截图指针
+  if (subject.scenarioId) return;
   const projectStore = loadModel(ctx);
   const base = projectStore.load();
   const captureIds = outputs.filter((r) => r.kind === 'capture').map((r) => r.ref);
@@ -227,6 +238,7 @@ function restoreProjection(ctx, subject, outputs, observedAt, current) {
     const page = base.model.pages.find((p) => p.id === subject.id);
     if (page.browser?.latestCaptureId === captureIds[0]) return;
     const [record] = readRecords(ctx, captureIds);
+    if (!isLiveRecord(record, ctx)) return;
     projectStore.commit({ base, kind: 'observation', changes: { pages: [pageProjection(page, record)] } });
     return;
   }
@@ -251,7 +263,7 @@ async function capture(ctx, task) {
     const found = lookup({
       store: ctx.cacheStore, keyInfo: { kind: 'capture', key: current.captureKey, input: current.captureKeyInput, uncertainty: current.captureUncertainty },
       mode: ctx.mode, projectRoot: ctx.projectRoot, stateDirAbs: ctx.stateDirAbs, requiredScopes: ['page-identity'],
-      privacy: { audience: ctx.config.privacy?.audience || 'public' }, cachePolicy: ctx.config.cache, now: ctx.now,
+      privacy: { audience: ctx.config.privacy?.audience || 'public' }, cachePolicy: ctx.config.cache, requireAnnotation: true, now: ctx.now,
     });
     if (found.hit) {
       restoreProjection(ctx, subject, found.outputRefs, found.observedAt, current);
@@ -280,7 +292,8 @@ async function capture(ctx, task) {
     writeCaptureCache(ctx, task, current, outputs, [result.record], result.record.observedAt);
     return { outputs, warnings: [...warnings, ...result.ready.warnings], actions: 1 };
   }
-  const result = await captureTask({ projectRoot: ctx.projectRoot, config: ctx.config, taskId: subject.id, session: ctx.session(), runId: ctx.runId });
+  const result = await captureTask({ projectRoot: ctx.projectRoot, config: ctx.config, taskId: subject.id, session: ctx.session(), runId: ctx.runId,
+    ...(subject.scenarioId ? { scenario: current.scenarioDefinition } : {}) });
   checkpoint('capture-committed');
   const captureIds = result.updatedTask.lastCapture.captureIds;
   const outputs = [
@@ -335,7 +348,7 @@ async function deriveImage(ctx, task) {
   if (subject.type === 'page') {
     const page = base.model.pages.find((p) => p.id === subject.id);
     const record = records[0].record;
-    projectStore.commit({ base, kind: 'observation', changes: { pages: [pageProjection(page, record)] } });
+    if (!subject.scenarioId && isLiveRecord(record, ctx)) projectStore.commit({ base, kind: 'observation', changes: { pages: [pageProjection(page, record)] } });
     outputs = [{ kind: 'capture', ref: record.id }];
   } else {
     const manifestRef = source.find((r) => r.kind === 'file').ref;
@@ -346,7 +359,7 @@ async function deriveImage(ctx, task) {
       capturedAt: entity.lastCapture?.capturedAt || records[0]?.record.observedAt, captureIds: captureIds2, manifestRelative: rel(ctx, file),
       scenario: { id: current.scenario.id, revision: current.scenario.revision }, modelRevision: current.definitionRevision,
     });
-    projectStore.commit({ base, kind: 'observation', changes: { tasks: [updated] } });
+    if (!subject.scenarioId) projectStore.commit({ base, kind: 'observation', changes: { tasks: [updated] } });
     outputs = [...captureIds2.map((id) => ({ kind: 'capture', ref: id })), fileRef(ctx, file)];
   }
   const newRecords = readRecords(ctx, outputs.filter((r) => r.kind === 'capture').map((r) => r.ref));

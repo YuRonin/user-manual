@@ -218,7 +218,7 @@ function collectPlanningInputs({ projectRoot, config, base, targets, mode, cache
       const found = lookup({
         store: cacheStore, keyInfo, subject: `capture:${key}`, mode, projectRoot, stateDirAbs,
         requiredScopes: ['page-identity'], privacy: { audience: config.privacy?.audience || 'public' },
-        cachePolicy: config.cache, now,
+        cachePolicy: config.cache, requireAnnotation: true, now,
       });
       cache = found.hit
         ? { hit: true, reusedFrom: found.reusedFrom, observedAt: found.observedAt, stale: found.stale, uncertainty: found.uncertainty, imageInputs: found.entry.meta?.imageInputs || null, outputRefs: found.outputRefs }

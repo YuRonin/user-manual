@@ -20,7 +20,8 @@ const { CONFIDENCE, ANALYSIS, normalizePage, isActivePage } = require('../inspec
 const { resolveRouteTemplate, resolveEntryLocation, derivePageScenario } = require('../scenarios/model');
 const { readIndexes, findForwardPage } = require('../inspect/index-store');
 const { prepareAuth, classifyAuthFailure, refreshAuth } = require('../auth/runtime');
-const { validateNavigation, runAssertions } = require('./validate-page');
+const { validateNavigation, validateWithReload, runAssertions } = require('./validate-page');
+const { resolveWaits } = require('../config/waits');
 const { captureStable, derivePublished, confirmTargetsShown } = require('./capture-safe');
 const { pageInventory, buildPlan } = require('../annotations/coverage');
 const { createProjectStore } = require('../store/project');
@@ -149,8 +150,10 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
 
   const captureStore = createCaptureStore({ projectRoot, stateDirAbs });
   const format = config.artifacts.format || 'png';
+  const waits = resolveWaits(config);
   const readyOptions = {
-    timeout: options.timeout ? Number(options.timeout) : DEFAULT_READY_OPTIONS.timeout,
+    // --timeout 优先；否则用项目配置的就绪等待预算（capture.waits.readinessMs，有上限）
+    timeout: options.timeout ? Number(options.timeout) : waits.readinessMs,
     quietMs: options.quietMs ? Number(options.quietMs) : DEFAULT_READY_OPTIONS.quietMs,
     settleMs: options.settleMs ? Number(options.settleMs) : DEFAULT_READY_OPTIONS.settleMs,
     freezeAnimations: options.noFreezeAnimations !== true,
@@ -183,11 +186,16 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
       await provider.installRoutes(data.routes, { baseUrl: config.project.baseUrl });
     }
     const openResult = await provider.open(url, { timeout: readyOptions.timeout });
-    const ready = await provider.waitUntilReady(readyOptions);
     // 等待结束后重新读取 URL 与页面事实：SPA 延迟跳转以截图时的地址为准。
-    const observation = provider.currentObservation ? await provider.currentObservation() : await provider.probe();
-    // 先判断这次打开到底算不算成功，再决定要不要落盘。顺序不能反。
-    const navigation = validateNavigation({ requestedUrl: url, openResult, observation, expected });
+    // 先判断这次打开到底算不算成功，再决定要不要落盘。顺序不能反。长期卡在加载中时刷新一次再判定。
+    const { ready, navigation } = await validateWithReload(provider, {
+      settle: async () => ({
+        ready: await provider.waitUntilReady(readyOptions),
+        observation: provider.currentObservation ? await provider.currentObservation() : await provider.probe(),
+      }),
+      validate: (observation) => validateNavigation({ requestedUrl: url, openResult, observation, expected }),
+      enabled: waits.reloadOnStuckLoading, timeout: readyOptions.timeout,
+    });
     ready.warnings.push(...navigation.warnings);
     // 页面身份：只有非 URL 断言能证明"打开的是这一页"；只有 URL 的旧模型记为 url-only。
     let identity = 'url-only';
@@ -207,7 +215,7 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
     const semantic = provider.semanticSnapshot ? await provider.semanticSnapshot() : null;
     const environment = provider.environmentInfo ? provider.environmentInfo({ fullPage: options.fullPage === true }) : null;
     // 稳定截图 + 离线派生：原图只留在 rawDir，发布图由同一份原图遮罩后写入 annotatedDir。
-    const captured = await captureStable(provider, { rawPath: stagedRaw, fullPage: options.fullPage === true, format,
+    const captured = await captureStable(provider, { rawPath: stagedRaw, fullPage: options.fullPage === true, format, stabilityMs: waits.stabilityMs,
       resolveTargets: async () => {
         const targets = [];
         const located = [];
@@ -227,6 +235,7 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
         return targets;
       },
     });
+    ready.warnings.push(...(captured.warnings || []));
     captured.inventory = inventory;
     captured.plan = annotationPlan;
     fs.writeFileSync(stagedDerivation, derivationSidecar(captured));

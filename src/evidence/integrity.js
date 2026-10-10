@@ -56,6 +56,22 @@ function cacheCandidacy(record) {
   return { ok: missing.length === 0, missing };
 }
 
+/**
+ * 一组 Capture 记录能否作为"成功采集"被缓存复用：每条都要有发布图且标注覆盖通过。
+ * 覆盖失败 → failed；旧记录没有覆盖结果 → unknown。两者都不能当作成功命中（B1-03 / B1-07）。
+ */
+function annotationSummary(records) {
+  const failures = [];
+  let unknown = false;
+  for (const record of records) {
+    const coverage = record?.annotationCoverage;
+    if (!coverage) unknown = true;
+    else if (!coverage.ok) failures.push(...(coverage.failures || []).map((item) => `${record.id}:${item.feature_id}:${item.reason}`));
+    if (!(record?.artifacts || []).some((artifact) => artifact.kind === 'published')) failures.push(`${record?.id}:no-published-artifact`);
+  }
+  return { status: failures.length ? 'failed' : unknown || records.length === 0 ? 'unknown' : 'passed', failures };
+}
+
 /** 一条 validation 数组里某 scope 是否全部通过（至少一条）。一个 scope 通过不推导其他 scope。 */
 function scopePassed(record, scope) {
   const items = (record?.validations || []).filter((v) => v.scope === scope);
@@ -105,4 +121,4 @@ function verifyOutputRefs(projectRoot, stateDirAbs, refs) {
   return problems;
 }
 
-module.exports = { verifyCaptureRecord, verifyOutputRefs, cacheCandidacy, scopePassed, describeProblems };
+module.exports = { verifyCaptureRecord, verifyOutputRefs, cacheCandidacy, scopePassed, describeProblems, annotationSummary };

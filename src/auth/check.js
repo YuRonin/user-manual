@@ -28,8 +28,10 @@ async function checkAuthOnline({ config, profile, path = null, sessionFactory = 
       providerConfig: config.browser.providers[providerId],
       profile: config.capture.profiles[config.capture.activeProfile], auth,
     }, async (provider) => {
-      const opened = await provider.open(target.href, { timeout: 15000 });
-      await provider.waitUntilReady({ timeout: 8000, networkIdleTimeout: 1000 });
+      // 慢环境可放宽 capture.waits.authCheckMs（有上限）；就绪等待取同一预算的一半，至少保持原来的 8 秒
+      const authCheckMs = require('../config/waits').resolveWaits(config).authCheckMs;
+      const opened = await provider.open(target.href, { timeout: authCheckMs });
+      await provider.waitUntilReady({ timeout: Math.max(8000, Math.round(authCheckMs / 2)), networkIdleTimeout: 1000 });
       const observed = await provider.currentObservation();
       try {
         assertAuthenticated({ finalUrl: observed?.url || opened.finalUrl }, auth);

@@ -21,6 +21,7 @@ const { executeCapturePlan, reconcileCapturePlan, continueReadOnlyCapturePlan } 
 const { prepareAuth, authRuntimeFor } = require('../auth/runtime');
 const { RuntimeError } = require('../runtime/errors');
 const { prepareScenarioData } = require('../scenarios/fixtures');
+const { resolveWaits } = require('../config/waits');
 
 function inputError(code, errors) {
   return new RuntimeError(code, errors.join(' '), { errors });
@@ -55,7 +56,7 @@ function taskProjection(task, pages, { capturedAt, captureIds, manifestRelative,
  * @param {object} [p.session]  BrowserSession；缺省时自行创建并关闭 provider
  * @returns {Promise<{ task, updatedTask, plan, planFile, evidence, scenario }>}
  */
-async function captureTask({ projectRoot, config, taskId, session = null, runId = null, preflight = false, reconcile = null, continueUrl = null }) {
+async function captureTask({ projectRoot, config, taskId, session = null, runId = null, preflight = false, reconcile = null, continueUrl = null, scenario: variantScenario = null }) {
   const stateDir = path.join(projectRoot, config.artifacts.stateDir);
   const projectStore = createProjectStore({ stateDirAbs: stateDir, docsOutputDir: config.docs.outputDir });
   let base;
@@ -63,8 +64,10 @@ async function captureTask({ projectRoot, config, taskId, session = null, runId 
   const task = base.model.tasks.find((t) => t.id === taskId);
   if (!task) throw inputError('unknown-target', [`找不到任务: ${taskId}`]);
   const pages = base.model.pages;
-  const derived = deriveTaskScenario(task, pages, config);
-  const scenario = resolveScenario(stateDir, derived, { stepIds: (task.steps || []).map((step) => step.id) });
+  // Runtime 选中的变体（mock / 匿名等）原样使用；否则取任务的默认 Scenario
+  const scenario = variantScenario
+    ? { ok: true, scenario: variantScenario, variant: true }
+    : resolveScenario(stateDir, deriveTaskScenario(task, pages, config), { stepIds: (task.steps || []).map((step) => step.id) });
   if (!scenario.ok) throw inputError('invalid-scenario', scenario.errors);
   const built = buildCapturePlan(task, pages, { scenario: scenario.scenario, config, preflight });
   if (!built.ok) {
@@ -107,9 +110,11 @@ async function captureTask({ projectRoot, config, taskId, session = null, runId 
     annotatedDir: config.artifacts.annotatedDir,
     theme: config.annotation.themes[config.annotation.activeTheme],
     redactionRules: config.privacy || {},
+    waits: resolveWaits(config),
     // BrowserSession 负责写回认证（成功总是写，失败只在凭据变化时写）并关闭 Context
     authRuntime: authRuntimeFor(auth, { refresh: ownsProvider }),
     ownsProvider,
+    variant: !!scenario.variant,
     ...(reconcile ? { sessionUrl: reconcile.sessionUrl, priorCaptureIds: reconcile.priorCaptureIds } : {}),
     ...(continueUrl ? { sessionUrl: continueUrl, priorEvidence, priorCaptureIds: task.lastCapture.captureIds, allowRefresh } : {}),
   });
@@ -132,8 +137,9 @@ async function captureTask({ projectRoot, config, taskId, session = null, runId 
     scenario: scenario.scenario,
     modelRevision: built.plan.modelRevision,
   });
-  // 观察提交：浏览器执行期间不持有项目锁；只写本任务的采集投影，不覆盖同时发生的定义修改
-  projectStore.commit({ base, kind: 'observation', changes: { tasks: [updatedTask] } });
+  // 观察提交：浏览器执行期间不持有项目锁；只写本任务的采集投影，不覆盖同时发生的定义修改。
+  // 变体采集只产生独立证据，不改写默认的 task.lastCapture。
+  if (!scenario.variant) projectStore.commit({ base, kind: 'observation', changes: { tasks: [updatedTask] } });
   return { task, updatedTask, plan: built.plan, planFile, evidence: { ...evidence, warnings: [...(evidence.warnings || []), ...warnings] }, scenario: scenario.scenario };
 }
 

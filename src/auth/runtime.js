@@ -14,6 +14,16 @@ function cacheRoot() {
  * 准备本次采集的认证状态。
  * status: disabled（未启用/匿名，不读缓存）/ missing / stored（文件可读，尚未证明线上有效）。
  */
+/**
+ * 去掉声明为界面状态的 localStorage 键（auth.ephemeralStorageKeys，`前缀*` 表示前缀匹配）。
+ * 认证档案只保存身份；侧栏收起之类的 UI 状态不能被某次采集写进档案、污染后续任务（B1-08）。
+ */
+function withoutEphemeral(storageState, keys = []) {
+  if (!storageState || !keys.length) return storageState;
+  const matches = (name) => keys.some((key) => key.endsWith('*') ? name.startsWith(key.slice(0, -1)) : name === key);
+  return { ...storageState, origins: (storageState.origins || []).map((origin) => ({ ...origin, localStorage: (origin.localStorage || []).filter((item) => !matches(item.name)) })) };
+}
+
 function prepareAuth(config, options = {}) {
   const profile = String(options.profile || config.auth.activeProfile);
   if (authDisabled(config, profile)) {
@@ -43,12 +53,15 @@ function prepareAuth(config, options = {}) {
     error.hint = `运行 \`manual auth login --profile ${profile}\` 重新建立当前站点的认证缓存。`;
     throw error;
   }
+  const ephemeralKeys = config.auth.ephemeralStorageKeys || [];
   return {
     ref,
     profile,
     expectedOrigin,
     status: state ? 'stored' : 'missing',
-    storageState: state?.storageState || null,
+    // 注入时同样剔除：已经被旧版本写进档案的 UI 状态也不再生效
+    storageState: withoutEphemeral(state?.storageState || null, ephemeralKeys),
+    ephemeralKeys,
     generation: state ? state.generation : null,
     identityRevision: identityRevision(config, profile),
     validatedAt: state?.identityRevision === identityRevision(config, profile) ? (state?.validatedAt || null) : null,
@@ -88,7 +101,7 @@ function reloadAuth(auth) {
   try {
     const state = cache.readState(auth.ref);
     if (state && state.generation !== auth.generation) {
-      auth.storageState = state.storageState;
+      auth.storageState = withoutEphemeral(state.storageState, auth.ephemeralKeys);
       auth.generation = state.generation;
     }
   } catch (_) { /* 读不到就沿用内存中的快照，由后续导航结果判断是否失效 */ }
@@ -121,7 +134,7 @@ async function refreshAuth(provider, auth, { onlyIfChanged = false } = {}) {
     if (observation?.url && LOGIN_PATH_RE.test(new URL(observation.url).pathname)) {
       return { updated: false, warning: '当前页面已回到登录页，未刷新认证缓存。' };
     }
-    const storageState = await provider.exportStorageState({ indexedDB: auth.capabilities.includes('indexedDB') });
+    const storageState = withoutEphemeral(await provider.exportStorageState({ indexedDB: auth.capabilities.includes('indexedDB') }), auth.ephemeralKeys);
     if (!storageState) return { updated: false, warning: 'Browser Provider 不支持导出认证状态。' };
     const lost = lostCookies(auth.storageState, storageState);
     if (lost.length) {
@@ -156,4 +169,4 @@ function authRuntimeFor(auth, { refresh = true } = {}) {
   };
 }
 
-module.exports = { prepareAuth, classifyAuthFailure, assertAuthenticated, refreshAuth, reloadAuth, lostCookies, authRuntimeFor, cacheRoot, LOGIN_PATH_RE };
+module.exports = { prepareAuth, withoutEphemeral, classifyAuthFailure, assertAuthenticated, refreshAuth, reloadAuth, lostCookies, authRuntimeFor, cacheRoot, LOGIN_PATH_RE };

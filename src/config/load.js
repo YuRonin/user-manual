@@ -203,6 +203,10 @@ function loadConfig(projectRoot) {
     return { ok: false, errors: ['privacy.rules.redact/preserve 需要是数组。'] };
   }
   const safeName = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+  const ephemeral = config.auth.ephemeralStorageKeys;
+  if (ephemeral !== undefined && (!Array.isArray(ephemeral) || ephemeral.some((key) => typeof key !== 'string' || !key.trim() || key === '*'))) {
+    return { ok: false, errors: ['auth.ephemeralStorageKeys 需要是 localStorage 键名数组（可用 `前缀*`，不能只写 `*`）。'] };
+  }
   if (!safeName.test(String(config.auth.cacheKey)) || !safeName.test(String(config.auth.activeProfile))) {
     return { ok: false, errors: ['auth.cacheKey 与 auth.activeProfile 只能使用安全名称字符。'] };
   }
@@ -223,6 +227,7 @@ function validateProjectBlock(project, errors, warnings) {
 }
 
 function validateCaptureBlock(capture, errors) {
+  require('./waits').validateWaits(capture?.waits, errors);
   const activeProfile = capture?.activeProfile;
   if (!activeProfile) { errors.push('配置缺少 capture.activeProfile。'); return; }
   const profile = capture?.profiles?.[activeProfile];

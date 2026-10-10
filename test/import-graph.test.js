@@ -112,6 +112,48 @@ async function main() {
     }
   });
 
+  await test('带点的模块名（api.client / date.utils）按源码解析；export * as 与 export type 纳入依赖', () => {
+    const root = fx.makeTempDir('manual-import-dotted-');
+    try {
+      fx.writeFile(root, 'tsconfig.json', '{ "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["src/*"] } } }\n');
+      fx.writeFile(root, 'src/app/page.tsx', [
+        "import { request } from './api.client'",
+        "import { format } from '@/lib/date.utils'",
+        "export * as icons from './icons'",
+        "export type { Props } from './types'",
+        "import notes from './notes.md'",
+        'export default function Page() {}',
+      ].join('\n'));
+      fx.writeFile(root, 'src/app/api.client.ts', "export * from './transport'\n");
+      fx.writeFile(root, 'src/app/transport.ts', 'export const request = 1\n');
+      fx.writeFile(root, 'src/lib/date.utils.ts', 'export const format = 1\n');
+      fx.writeFile(root, 'src/app/icons.ts', 'export const a = 1\n');
+      fx.writeFile(root, 'src/app/types.ts', 'export type Props = {}\n');
+      fx.writeFile(root, 'src/app/notes.md', '# notes\n');
+
+      const { buildImportGraph } = require('../src/inspect/import-graph');
+      const result = buildImportGraph(root, 'src/app/page.tsx');
+      assert.deepStrictEqual(result.files, ['src/app/api.client.ts', 'src/app/icons.ts', 'src/app/transport.ts', 'src/app/types.ts', 'src/lib/date.utils.ts']);
+      assert.deepStrictEqual(result.assets, ['src/app/notes.md']);
+      assert.strictEqual(result.completeness, 'complete');
+    } finally {
+      fx.cleanup(root);
+    }
+  });
+
+  await test('带点的模块名解析不到时报告 unresolved，页面不能声称 complete', () => {
+    const root = fx.makeTempDir('manual-import-dotted-missing-');
+    try {
+      fx.writeFile(root, 'src/app/page.tsx', "import { request } from './api.client'\nexport * as ns from './gone'\n");
+      const { buildImportGraph } = require('../src/inspect/import-graph');
+      const result = buildImportGraph(root, 'src/app/page.tsx');
+      assert.deepStrictEqual(result.unresolved, ['src/app/page.tsx: ./api.client', 'src/app/page.tsx: ./gone']);
+      assert.strictEqual(result.completeness, 'partial');
+    } finally {
+      fx.cleanup(root);
+    }
+  });
+
   process.stdout.write(`\n${passed} passed, ${failures.length} failed\n`);
   if (failures.length > 0) process.exitCode = 1;
 }

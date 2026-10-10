@@ -16,7 +16,8 @@ function extractSpecifiers(source) {
   const found = [];
   const patterns = [
     /\bimport\s+(?:[^'";]*?\s+from\s+)?['"]([^'"]+)['"]/g,
-    /\bexport\s+(?:\*|\{[^}]*\})\s+from\s+['"]([^'"]+)['"]/g,
+    // export * / export * as ns / export { a } / export type { T } from
+    /\bexport\s+(?:type\s+)?(?:\*(?:\s+as\s+[\w$]+)?|\{[^}]*\})\s+from\s+['"]([^'"]+)['"]/g,
     /\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
     /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
   ];
@@ -198,9 +199,9 @@ function resolveConfiguredImport(projectRoot, config, specifier) {
   return { matched: false, resolved: null };
 }
 
-function hasIgnoredExtension(specifier) {
-  const ext = path.posix.extname(specifier);
-  return ext !== '' && !SOURCE_EXTENSIONS.includes(ext);
+/** 资源引用只认已知资源扩展名；`./api.client`、`@/lib/date.utils` 这类带点的模块名按源码解析，不能静默跳过。 */
+function isAssetSpecifier(specifier) {
+  return ASSET_EXTENSIONS.includes(path.posix.extname(specifier).toLowerCase());
 }
 
 /** 资源引用（相对路径或 tsconfig 别名）→ 项目内绝对路径；第三方包返回 null（由 lockfile 指纹覆盖）。 */
@@ -243,8 +244,7 @@ function buildImportGraph(projectRoot, entry) {
     if (dynamicCount > 0) unresolved.add(`${toPosix(path.relative(root, file))}: ${dynamicCount} 处动态 import/require（无法静态解析）`);
 
     for (const specifier of extractSpecifiers(source)) {
-      if (hasIgnoredExtension(specifier)) {
-        if (!ASSET_EXTENSIONS.includes(path.posix.extname(specifier).toLowerCase())) continue;
+      if (isAssetSpecifier(specifier)) {
         const candidate = assetCandidate(root, file, aliasConfig, specifier);
         if (!candidate) continue;
         const asset = isInside(root, candidate) ? resolveAssetFile(candidate) : null;
@@ -263,6 +263,10 @@ function buildImportGraph(projectRoot, entry) {
         shouldReport = configured.matched;
       }
       if (!resolved) {
+        // 其他扩展名的本地文件（.md、.graphql 等）原样存在时按资源计入指纹，不再静默忽略
+        const literal = shouldReport ? assetCandidate(root, file, aliasConfig, specifier) : null;
+        const asset = literal && isInside(root, literal) && path.posix.extname(specifier) ? resolveAssetFile(literal) : null;
+        if (asset) { assets.add(toPosix(path.relative(root, asset))); continue; }
         if (shouldReport) unresolved.add(`${toPosix(path.relative(root, file))}: ${specifier}`);
         continue;
       }

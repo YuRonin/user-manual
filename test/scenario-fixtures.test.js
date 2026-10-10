@@ -160,6 +160,8 @@ exports.cleanup = async ({ namespace }) => { if (process.env.FIXTURE_FAIL_CLEANU
       assert.ok(live.summary.cache.every((c) => c.subject === 'page:dashboard'));
       const plan = await expectExit(root, ['capture', 'scenario:dashboard-empty', '--json'], 0, env);
       assert.ok(plan.cache.every((c) => c.subject === 'page:dashboard@dashboard-empty' && c.hit), JSON.stringify(plan.cache));
+      const pageLatest = JSON.parse(fs.readFileSync(path.join(state, 'evidence', 'latest.json'), 'utf8')).refs['page:dashboard'];
+      assert.strictEqual(yaml.load(fs.readFileSync(path.join(state, 'pages', 'dashboard.yaml'), 'utf8')).browser.latestCaptureId, pageLatest, '变体缓存命中不能改写页面默认截图');
       const file = path.join(state, 'fixtures', 'dashboard-empty.yaml');
       const def = yaml.load(fs.readFileSync(file, 'utf8'));
       def.mock.routes[0].body = def.mock.routes[0].body.replace('<h1>数据看板</h1>', '<h1>数据看板</h1><p>（演示）</p>');

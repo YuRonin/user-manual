@@ -311,6 +311,12 @@ class PlaywrightBrowserProvider extends BrowserProvider {
         .then((value) => { if (value && typeof this.onCredentialChange === 'function') this.onCredentialChange(); })
         .catch(() => { /* 页面已关闭 */ });
     });
+    // 进行中的数据请求（fetch / xhr / 流式 EventSource）：流式回复在请求结束前都不算完成（B1-09）
+    this.inflight = new Set();
+    const track = (request) => ['fetch', 'xhr', 'eventsource'].includes(request.resourceType());
+    this.context.on('request', (request) => { if (track(request)) this.inflight.add(request); });
+    this.context.on('requestfinished', (request) => this.inflight.delete(request));
+    this.context.on('requestfailed', (request) => this.inflight.delete(request));
     this.page = await this.context.newPage();
     this.registerPage('main', this.page);
     // 同一流程内打开的弹窗 / 新标签登记为 popup-N，由动作显式切换，不默认作用于旧 Page。
@@ -354,6 +360,16 @@ class PlaywrightBrowserProvider extends BrowserProvider {
    * 打开页面。
    * @returns {{ status: number|null, finalUrl: string, redirected: boolean }}
    */
+  /** 刷新当前页面（入口长期卡在加载中时由调用方有记录地使用一次）。 */
+  async reload({ timeout = DEFAULT_READY_OPTIONS.timeout } = {}) {
+    if (!this.page) throw Object.assign(new Error('没有可刷新的页面。'), { code: 'navigation-failed' });
+    try {
+      await this.page.reload({ waitUntil: 'domcontentloaded', timeout });
+    } catch (e) {
+      throw classifyNavigationError(e, this.page.url());
+    }
+  }
+
   async open(url, { timeout = DEFAULT_READY_OPTIONS.timeout } = {}) {
     await this.launch();
 
@@ -626,11 +642,37 @@ class PlaywrightBrowserProvider extends BrowserProvider {
     return { target, rect: await locator.boundingBox(), resolution: this.lastResolution, revealedBy };
   }
 
+  /**
+   * 目标被暂态浮层（保存成功提示条等）盖住时，只做无副作用的恢复：把指针移到页面左上角
+   * （悬停会让提示条保持显示），再在有限时间内等浮层消失。仍被遮挡就报 target-obscured，
+   * 不点击浮层、不反复点击目标，也不会让 Runtime 重放之前的保存（B1-11）。
+   */
+  async ensureUnobscured(locator, { timeoutMs = 5000 } = {}) {
+    await locator.scrollIntoViewIfNeeded().catch(() => {});
+    const probe = () => locator.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      if (!top || el === top || el.contains(top) || top.contains(el)) return null;
+      const label = top.getAttribute('role') || top.tagName.toLowerCase();
+      return `${label}「${(top.innerText || top.getAttribute('aria-label') || '').trim().slice(0, 40)}」`;
+    }).catch(() => null);
+    let cover = await probe();
+    if (!cover) return;
+    await this.page.mouse.move(0, 0).catch(() => {});
+    const deadline = Date.now() + timeoutMs;
+    while (cover && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      cover = await probe();
+    }
+    if (cover) throw Object.assign(new Error(`目标被 ${cover} 遮挡，等待 ${timeoutMs}ms 后仍未消失；未执行动作。`), { code: 'target-obscured' });
+  }
+
   async performAction(action) {
     if (action.page) await this.usePage(action.page);
     if (action.type === 'inspect' && !action.target) return { target: null, rect: null };
     if (action.type === 'inspect') return this.inspectTarget(action.target, { reveal: action.reveal !== false });
     const locator = await this.uniqueVisibleLocator(action.target);
+    await this.ensureUnobscured(locator);
     const rect = await locator.boundingBox();
     if (action.type === 'click') await locator.click();
     else if (action.type === 'hover') await locator.hover();
@@ -749,11 +791,17 @@ class PlaywrightBrowserProvider extends BrowserProvider {
    */
   async waitForQuiet({ quietMs = 400, maxMs = 5000 } = {}) {
     if (!this.page) return 'no-page';
+    // 先等数据请求清空（有上限）：流式回复的请求结束前，短暂停顿不能当作完成
+    const deadline = Date.now() + maxMs;
+    while (this.inflight?.size && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
+    const network = this.inflight?.size ? 'busy' : 'idle';
+    let dom;
     try {
-      return await this.page.evaluate(waitForDomQuiet, { quietMs, maxMs });
+      dom = await this.page.evaluate(waitForDomQuiet, { quietMs, maxMs: Math.max(deadline - Date.now(), quietMs) });
     } catch (_) {
-      return 'error';
+      dom = 'error';
     }
+    return { dom, network, pendingRequests: this.inflight?.size || 0 };
   }
 
   /**

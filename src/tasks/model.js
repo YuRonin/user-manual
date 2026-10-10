@@ -4,7 +4,8 @@ const schema = require('../model/schema');
 
 // 共享 schema 负责的结构规则：动作白名单、定位、断言、replay、截图时机、步骤标题、stepId 字符与版本。
 // 其余规则（必填字段、claims、状态）仍在本文件按旧格式输出，避免重复报错。
-const SHARED_CODES = new Set(['invalid-action', 'invalid-target', 'invalid-assertion', 'invalid-replay', 'invalid-capture', 'invalid-step-title', 'schema-too-new', 'invalid-schema-version']);
+// invalid-timeout：超出上限的 assertionTimeoutMs 以前被静默接受，现在明确拒绝
+const SHARED_CODES = new Set(['invalid-action', 'invalid-target', 'invalid-assertion', 'invalid-replay', 'invalid-capture', 'invalid-step-title', 'invalid-timeout', 'schema-too-new', 'invalid-schema-version']);
 
 const RISKS = ['read', 'local', 'write', 'destructive'];
 const STATUSES = ['candidate', 'approved', 'captured', 'generated', 'verified', 'stale'];

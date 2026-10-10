@@ -42,6 +42,8 @@ const POLICIES = {
   'network-access-denied': FAIL,
   // 标注排版失败是确定性的：同一页面重拍结果不变
   'annotation-layout-failed': FAIL,
+  // 目标被浮层遮挡且有界等待后仍未消失：不重试（重试会从头重放步骤，可能重复保存）
+  'target-obscured': FAIL,
   'lock-timeout': RETRY,
   'file-busy': RETRY,
   // 模型：只重试模型任务本身（由 runner 按 task kind 限定）。

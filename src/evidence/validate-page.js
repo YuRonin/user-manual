@@ -169,7 +169,28 @@ async function runAssertions(provider, assertions, { scope, idPrefix, phase = nu
   return validations;
 }
 
+/**
+ * 入口页在就绪上限后仍"加载中"（readiness-timeout）时刷新一次再判定（B1-10）。
+ * 只用于打开入口：此时还没有执行任何动作，刷新不会重放写操作。刷新后仍失败照常抛出。
+ * @param {() => Promise<{ ready, observation }>} settle  等待就绪并读取页面事实
+ * @param {(observation) => object} validate  validateNavigation 的调用
+ */
+async function validateWithReload(provider, { settle, validate, enabled = true, timeout }) {
+  let settled = await settle();
+  try {
+    return { ...settled, navigation: validate(settled.observation), reloaded: false };
+  } catch (error) {
+    if (!enabled || !provider.reload || (error.reason || error.code) !== REASON.READINESS_TIMEOUT) throw error;
+    await provider.reload({ timeout });
+    settled = await settle();
+    const navigation = validate(settled.observation);
+    navigation.warnings.push('page-reloaded: 页面在就绪等待上限后仍处于加载中，已刷新一次后重新判定。');
+    return { ...settled, navigation, reloaded: true };
+  }
+}
+
 module.exports = {
+  validateWithReload,
   LOGIN_PATH_RE,
   PAGE_STATES,
   validateNavigation,
