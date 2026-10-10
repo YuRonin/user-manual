@@ -26,7 +26,7 @@ const { validateCopy, checkPolishedMarkdown, formatFindings } = require('./markd
 const { validatePublication, validateCaptureCoverage, validateArtifact, summarizePrivacy, formatIssues } = require('../publication/validate');
 const { RuntimeError } = require('../runtime/errors');
 const { reconcileDocument } = require('./manual-store');
-const { checkedSections } = require('../model/links');
+const { checkedSections, validateTaskFeatureCoverage } = require('../model/links');
 
 function failure(code, errors, extra = {}) {
   const list = Array.isArray(errors) ? errors : [errors];
@@ -188,6 +188,8 @@ function publishTaskFinal({ projectRoot, config, taskId, prepared, force = false
   const linked = checkedSections({ projectRoot, stateDirAbs: path.join(projectRoot, config.artifacts.stateDir), pack: facts.factPack,
     captureIds: task.lastCapture?.captureIds || task.captureIds || (facts.images || []).map((image) => image.captureId), kind: 'task', subjectId: task.id, audience: config.privacy?.audience });
   if (linked.errors.length) throw failure(linked.errors[0].code, formatIssues(linked.errors));
+  const joint = validateTaskFeatureCoverage({ task, pages: loadTask({ projectRoot, config, taskId: task.id }).pages, proofs: linked.proofs });
+  if (joint.length) throw failure(joint[0].code, formatIssues(joint));
   try {
     published = publish({
       projectRoot,

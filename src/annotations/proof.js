@@ -42,7 +42,8 @@ function annotationArtifacts({ inventory, plan, rendered, candidates = [], cover
     plan: plan.map((item) => ({ feature_id: item.feature_id, label: item.label || null, priority: item.priority, ...(item.guide_id ? { guide_id: item.guide_id } : {}) })),
     rendered: rendered.map((item) => ({ feature_id: item.feature_id, label: item.label || null, located: !!item.located, outlined: !!item.outlined, intersects: !!item.intersects, drawn: !!item.drawn, reason: item.reason || null,
       ...(item.visible !== undefined ? { visible: item.visible } : {}),
-      ...(item.visibleRatio !== undefined ? { visibleRatio: item.visibleRatio, redactedRatio: item.redactedRatio } : {}) })),
+      ...(item.visibleRatio !== undefined ? { visibleRatio: item.visibleRatio, redactedRatio: item.redactedRatio } : {}),
+      ...(item.locator ? { locator: item.locator } : {}) })),
     candidates: candidates.map((item) => ({ candidate_id: item.candidate_id, label: item.label, role: item.role })),
   };
   return { document, proof };

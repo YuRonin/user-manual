@@ -273,15 +273,15 @@ Page.features [Feature ID + scope + source]
 - [x] **B2-03｜候选发现（弥补源头漏项）**：比对 DOM/ARIA 可交互元素、detectedActions、guide、task steps、显式 features，输出 `unresolvedCandidates`；未核实项不编造 Required，但重要未决不得被虚假隐藏。
 - [x] **B2-04｜稳定 ID**：为持久 Feature 使用稳定 ID，兼容旧 `feature_id`；重复标题不能冲突，文本变化不导致 ID 重新生成。
 - [x] **B2-05｜可审阅的 Plan**：独立记录 `featureRef`、`priority`、定位、Scenario、截图时机、reason、planRevision；Required 没进入计划必须产生 `missing-from-plan`。
-- [x] **B2-06｜清晰的作用域**：每张图的 Required 只包含其任务/步骤/状态真正应呈现的元素；一个任务跨多张图可联合覆盖，不能靠单图 5 个标注上限断定全部任务失败。（部分：按页面 / Scenario / 步骤限定作用域；同一任务跨多张图联合覆盖与单图上限拆图留给 B4-02）
+- [x] **B2-06｜清晰的作用域**：每张图的 Required 只包含其任务/步骤/状态真正应呈现的元素；一个任务跨多张图可联合覆盖，不能靠单图 5 个标注上限断定全部任务失败。（按页面 / Scenario / 步骤限定作用域，任务级 Required 跨多张图联合覆盖（missing-from-task-plan）；单图超上限自动拆图属于 B4-02）
 
 ### B2-B：让绘图与正文能够逐项对证
 
-- [x] **B2-07｜Renderer 逐项产物**：为每项记录 `{featureId, resolvedLocator, rect, imageRect, visibleRatio, marker, drawn, reason}`；不要将“几何预测”冒充像素验收结论。（部分：记录 featureId、imageRect、visibleRatio、redactedRatio、marker、drawn、visible、reason；实际采用的 locator 未记录，留给 B5-14）
+- [x] **B2-07｜Renderer 逐项产物**：为每项记录 `{featureId, resolvedLocator, rect, imageRect, visibleRatio, marker, drawn, reason}`；不要将“几何预测”冒充像素验收结论。（记录 featureId、locator、imageRect、visibleRatio、redactedRatio、marker、drawn、visible、reason；备选定位命中给出 annotation-locator-fallback 提示）
 - [x] **B2-08｜不可见与裁切检测**：区分不存在、不可见、在视口外、部分裁切、被遮挡、被打码；可见比例门槛建议先以 **80%** 作可配置候选值，通过样例验证后确定，不直接写死为产品真理。
 - [x] **B2-09｜编号、图、文强关联**：Section 引用真实 `annotationRefs` 而不是依靠“guide 下标 + 1”；调换 guide 顺序但未更新截图时应报 `annotation-label-mismatch`。
 - [x] **B2-10｜统一 Step 页面与跨实体引用**：规范 `stepPageId`、`step.featureRefs`、`guide.featureId`、`Capture.subject` 和 Section 的引用关系；现有 `validateUserTask(...,{pages})` 应真正接入。
-- [x] **B2-11｜新增 `validateLinks()`**：在模型提交、Capture 写入、草稿构建、发布/离线 verify 处检查引用存在和所属关系，典型错误 `missing-reference`、`capture-subject-mismatch`、`section-ref-invalid`。（已接入模型提交、任务草稿、发布、verify --artifacts；Capture 写入时未单独校验）
+- [x] **B2-11｜新增 `validateLinks()`**：在模型提交、Capture 写入、草稿构建、发布/离线 verify 处检查引用存在和所属关系，典型错误 `missing-reference`、`capture-subject-mismatch`、`section-ref-invalid`。（已接入模型提交、Capture 写入、任务草稿、发布、verify --artifacts）
 - [x] **B2-12｜修复跨机器证据**：将验收必要的精简 annotation 证明内嵌进入库 Capture 或归档到可持久化证据目录；`.manual/artifacts/` 可继续存可重建大文件。
 - [x] **B2-13｜修正历史验证语义**：发布时校验冻结 Capture 的有效性；当前 Page 定义变化只标记失效/待更新，不反向改变历史截图的含义。
 - [x] **B2-14｜收紧逃逸入口**：明确 `--no-screenshot` 的允许场景；当正式输出要求 Required 图片时不能绕过；缺 Capture / 缺 sidecar 不得默认为 pass。兼容行为必要时区分 internal 与 public。
@@ -591,7 +591,7 @@ Page.features [Feature ID + scope + source]
 |---|---|---|---|---|---|
 | B0 | 完成 | `main@6da5bf7` + 工作区未提交的标注覆盖改动 | 待提交 | unit 全部通过；browser 全部通过（基线 1 个失败 `generate.test.js` 已修复）；`annotation-coverage.test.js` 20 项 | 旧证据 `unknown` 仅提示不阻断（B2-14）；B0-01 发现页面/任务草稿错误顺序与 overflow 已在并发改动中修复 |
 | B1 | 完成 | `fa9b500` | 待提交 | unit / browser 全部通过；新增 task-scenario-variant、capture-stability、target-obscured 测试，import-graph / runtime-planner / runtime-runner / auth-cache / scenario-fixtures 增补正反例 | 侧栏等 UI 状态需项目在 `auth.ephemeralStorageKeys` 声明并用 `requires` 断言；网络未空闲只提示不阻断（长轮询页面）；`reply-ready` 语义仍由目标项目的状态断言定义 |
-| B2 | 完成 | `8cc2fd1` | 待提交 | unit / browser 全部通过（与并行的 Demo Capture 改动一起跑）；新增 model-links 测试，annotation-coverage 29 项，target-obscured 增加遮挡用例 | Required 只认显式 features，NeoAgent 现有页面需在 describe 中确认候选后才能 public 发布；跨图联合覆盖、拆图（B4）；locator 记录（B5） |
+| B2 | 完成 | `8cc2fd1` | 待提交 | unit / browser 全部通过（与并行的 Demo Capture 改动一起跑）；新增 model-links 测试，annotation-coverage 29 项，target-obscured 增加遮挡用例 | Required 只认显式 features，NeoAgent 现有页面需在 describe 中确认候选后才能 public 发布；单图超上限拆图在 B4-02 |
 | B3 | 未开始 | 待填 | 待填 | 待填 | 待填 |
 | B4 | 未开始 | 待填 | 待填 | 待填 | 待填 |
 | B5 | 未开始 | 待填 | 待填 | 待填 | 待填 |

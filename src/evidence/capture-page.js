@@ -225,14 +225,15 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
         const located = [];
         for (const [i, item] of annotationPlan.entries()) {
           const label = item.label || String(i + 1);
-          if (item.rect) { targets.push({ feature_id: item.feature_id, label, rect: item.rect }); continue; }
+          if (item.rect) { targets.push({ feature_id: item.feature_id, label, rect: item.rect, resolution: { source: 'declared-rect' } }); continue; }
           if (!item.target) { targets.push({ feature_id: item.feature_id, label, reason: 'target-not-declared' }); continue; }
           try {
             const found = await provider.performAction({ type: 'inspect', target: item.target });
             if (found.obscuredBy) { targets.push({ feature_id: item.feature_id, label, reason: 'target-occluded', obscuredBy: found.obscuredBy }); continue; }
             const rect = { ...found.rect };
             if (options.fullPage) { const geometry = await provider.collectGeometry({ fullPage: true }); rect.x += geometry.scroll.x; rect.y += geometry.scroll.y; }
-            targets.push({ feature_id: item.feature_id, label, rect });
+            // 记录实际命中的定位策略（主目标或第几个备选），备选命中不再静默（B2-07）
+            targets.push({ feature_id: item.feature_id, label, rect, resolution: found.resolution || null });
             located.push({ target: item.target, label, revealedBy: found.revealedBy || null });
           } catch (error) { targets.push({ feature_id: item.feature_id, label, reason: error.code || 'target-not-located' }); }
         }
@@ -257,6 +258,8 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
     const annotationOut = annotationArtifacts({ inventory, plan: annotationPlan, rendered: safe.rendered, candidates: captured.featureCandidates, coverage: safe.coverage });
     fs.writeFileSync(stagedAnnotations, JSON.stringify(annotationOut.document, null, 2));
     safe.proof = annotationOut.proof;
+    const fallbacks = safe.rendered.filter((item) => item.locator?.fallback).map((item) => `${item.feature_id}（备选 ${item.locator.strategyIndex}）`);
+    if (fallbacks.length) ready.warnings.push(`annotation-locator-fallback: 主定位未命中，改用备选定位：${fallbacks.join('、')}；确认后更新 target。`);
     ready.warnings.push(...safe.quality.warnings);
     if (safe.coverage?.pending.length) ready.warnings.push(`annotation-priority-undecided: ${safe.coverage.pending.map((item) => item.label).join('、')}`);
     if (safe.coverage && !safe.coverage.ok) ready.warnings.push(`annotation-coverage-failed: ${safe.coverage.failures.map((item) => `${item.feature_id}:${item.reason}`).join('、')}`);

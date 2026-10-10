@@ -82,5 +82,37 @@ test('T14 任务步骤章节引用了别的步骤的截图：capture-subject-mis
   assert.ok(codes(validateSectionLinks({ sections, captureIds: ['cap-step'], readRecord: reader([wrong]), kind: 'task', subjectId: 'upload-task' })).includes('capture-subject-mismatch'));
 });
 
+test('B2-11 Capture 写入：主体缺字段、计划引用清单外功能、覆盖结论与证明不一致都拒绝', () => {
+  const { validateCaptureLinks } = require('../src/model/links');
+  const ok = { ...stepRecord('cap-ok'), annotationCoverage: null };
+  assert.deepStrictEqual(validateCaptureLinks(ok), []);
+  assert.deepStrictEqual(codes(validateCaptureLinks({ ...ok, subject: { taskId: 'upload-task' } })), ['capture-subject-mismatch']);
+  const forged = JSON.parse(JSON.stringify(ok));
+  forged.annotationProof.plan.push({ feature_id: 'ghost', label: '9', priority: 'required' });
+  assert.ok(codes(validateCaptureLinks(forged)).includes('missing-reference'));
+  const record = pageRecord('cap-page', []);
+  const lying = { ...record, annotationCoverage: { ok: true, failures: [] } };
+  assert.deepStrictEqual(codes(validateCaptureLinks(lying)), ['annotation-metadata-invalid'], '证明里 upload 没画出，记录却声称通过');
+});
+
+test('B2-06 任务级联合覆盖：必标功能在任一张任务截图里画出即可；一张都没有报 missing-from-task-plan', () => {
+  const { validateTaskFeatureCoverage } = require('../src/model/links');
+  const drawnProof = stepRecord('cap-step').annotationProof;
+  assert.deepStrictEqual(validateTaskFeatureCoverage({ task, pages: [page], proofs: new Map([['other', { rendered: [] }], ['cap-step', drawnProof]]) }), []);
+  const orphan = { ...page, features: [...page.features, { id: 'export', label: '导出', priority: 'required', taskIds: ['upload-task'] }] };
+  assert.deepStrictEqual(codes(validateTaskFeatureCoverage({ task, pages: [orphan], proofs: new Map([['cap-step', drawnProof]]) })), ['missing-from-task-plan']);
+  assert.deepStrictEqual(validateTaskFeatureCoverage({ task: { id: 'other-task' }, pages: [orphan], proofs: new Map() }), [], '不属于这个任务的功能不计');
+});
+
+test('B2-07 渲染结果记录实际命中的定位（主目标 / 备选 / 声明矩形）', () => {
+  const { renderAnnotationResults } = require('../src/evidence/image-pipeline');
+  const item = (resolution) => ({ feature_id: 'f', label: '1', sourceRect: { x: 10, y: 10, width: 20, height: 20 }, target: { x: 8, y: 8, width: 24, height: 24 }, marker: { x: 40, y: 40, size: 20 }, resolution });
+  const [fallback, rect] = renderAnnotationResults([item({ strategyIndex: 1, fallback: true }), item({ source: 'declared-rect' })], { width: 100, height: 100, dpr: 1 });
+  assert.deepStrictEqual(fallback.locator, { strategyIndex: 1, fallback: true });
+  assert.deepStrictEqual(rect.locator, { source: 'declared-rect' });
+  const proof = annotationArtifacts({ inventory: [{ feature_id: 'f', priority: 'optional' }], plan: [{ feature_id: 'f' }], rendered: [fallback], coverage: null }).proof;
+  assert.deepStrictEqual(proof.rendered[0].locator, { strategyIndex: 1, fallback: true }, '定位结果随证明入库');
+});
+
 process.stdout.write(`\n${passed} passed, ${failures.length} failed\n`);
 if (failures.length) process.exitCode = 1;

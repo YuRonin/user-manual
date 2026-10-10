@@ -41,6 +41,46 @@ function validateModelLinks({ pages = [], tasks = [], changedPageIds = null, cha
   return errors;
 }
 
+/**
+ * Capture 写入时的一致性（B2-11）：主体字段与记录类型匹配；标注证明里计划只引用清单中的功能、
+ * 绘制结果只引用计划中的功能，记录的覆盖结论与证明重算一致。
+ */
+function validateCaptureLinks(record) {
+  const errors = [];
+  const subject = record?.subject || {};
+  if (record?.kind === 'task-step' && (!subject.taskId || !subject.stepId)) errors.push(issue('capture-subject-mismatch', 'task-step 记录缺少 subject.taskId / stepId'));
+  if (record?.kind === 'page' && !subject.pageId) errors.push(issue('capture-subject-mismatch', 'page 记录缺少 subject.pageId'));
+  const proof = record?.annotationProof;
+  if (!proof) return errors;
+  const listed = new Set((proof.inventory || []).map((item) => item.feature_id));
+  const planned = new Set((proof.plan || []).map((item) => item.feature_id));
+  for (const item of proof.plan || []) if (!listed.has(item.feature_id)) errors.push(issue('missing-reference', `标注计划引用了清单中没有的功能 ${item.feature_id}`));
+  for (const item of proof.rendered || []) if (item.feature_id && !planned.has(item.feature_id)) errors.push(issue('missing-reference', `绘制结果引用了计划中没有的功能 ${item.feature_id}`));
+  if (record.annotationCoverage) {
+    const { coverageFromProof } = require('../annotations/proof');
+    if (JSON.stringify(coverageFromProof(proof).failures) !== JSON.stringify(record.annotationCoverage.failures)) errors.push(issue('annotation-metadata-invalid', '记录的覆盖结论与标注证明不一致'));
+  }
+  return errors;
+}
+
+/**
+ * 任务级联合覆盖（B2-06）：页面上声明归属这个任务（taskIds）的 Required 功能，
+ * 只要在任务的任一张截图里画出即可；一张都没有（没有步骤对应它，或对应步骤的图没画出）就报 missing-from-task-plan。
+ */
+function validateTaskFeatureCoverage({ task, pages = [], proofs = new Map() }) {
+  const drawn = new Set([...proofs.values()].flatMap((proof) => (proof.rendered || []).filter((item) => item.drawn && item.visible !== false).map((item) => item.feature_id)));
+  const errors = [];
+  for (const page of pages) {
+    for (const feature of page.features || []) {
+      const taskIds = feature.taskIds ?? feature.task_ids ?? [];
+      if (feature.priority !== 'required' || !taskIds.includes(task.id)) continue;
+      const id = featureIdOf(feature);
+      if (!drawn.has(id)) errors.push(issue('missing-from-task-plan', `任务 ${task.id} 的必标功能 ${page.id}.${id}（${feature.label}）没有在任何一张任务截图里画出；给对应步骤写 feature_id 或 capture.annotations`));
+    }
+  }
+  return errors;
+}
+
 /** 截图里实际画出的项（来自冻结的标注证明）。 */
 function drawnFeatures(record) {
   return new Set((record?.annotationProof?.rendered || []).filter((item) => item.drawn).map((item) => item.feature_id));
@@ -105,7 +145,7 @@ function checkedSections({ projectRoot, stateDirAbs, pack, captureIds = [], kind
     try { const record = store.read(id); if (record?.annotationProof) proofs.set(id, record.annotationProof); } catch (_) { /* 缺失由 validateSectionLinks 报告 */ }
   }
   const { sections } = manualFromPack(pack, { audience, proofs });
-  return { sections, errors: validateSectionLinks({ sections, captureIds: ids, readRecord, kind, subjectId }) };
+  return { sections, proofs, errors: validateSectionLinks({ sections, captureIds: ids, readRecord, kind, subjectId }) };
 }
 
-module.exports = { validateModelLinks, validateSectionLinks, checkedSections, drawnFeatures };
+module.exports = { validateModelLinks, validateSectionLinks, validateCaptureLinks, validateTaskFeatureCoverage, checkedSections, drawnFeatures };

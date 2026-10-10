@@ -186,6 +186,9 @@ function createCaptureStore({ projectRoot, stateDirAbs }) {
     if (!validation.ok) {
       throw new CaptureStoreError('invalid-capture-record', `Capture 记录不完整: ${validation.errors.map((e) => `${e.path} ${e.message}`).join('；')}`);
     }
+    // 写入即校验引用（B2-11）：主体与类型一致、标注证明内部一致，坏记录不能落盘再等发布时才发现
+    const links = require('../model/links').validateCaptureLinks(full);
+    if (links.length) throw new CaptureStoreError(links[0].code, `Capture 记录引用不一致: ${links.map((e) => e.message).join('；')}`);
     fs.mkdirSync(path.dirname(recordFile), { recursive: true });
     writeFileAtomic(recordFile, JSON.stringify(full, null, 2) + '\n');
     abort(handle);

@@ -16,7 +16,7 @@ function layoutAnnotations(targets, image, theme) {
     let y = target.y - size / 2;
     if (x < 0) x = Math.min(image.width - size, target.x + target.width + 5);
     y = Math.max(0, Math.min(image.height - size, y));
-    return { feature_id: item.feature_id || null, label: item.label, sourceRect: item.rect, target, marker: { x, y, size }, line: x > target.x ? 'right' : 'left' };
+    return { feature_id: item.feature_id || null, label: item.label, sourceRect: item.rect, target, marker: { x, y, size }, line: x > target.x ? 'right' : 'left', ...(item.resolution ? { resolution: item.resolution } : {}) };
   });
   return { ok: true, annotations };
 }

@@ -114,7 +114,9 @@ function renderAnnotationResults(annotations, { width, height, dpr, redactions =
     const reason = !item.target ? 'target-not-located' : !intersects ? 'outside-image' : !marker ? 'marker-outside-image'
       : visibleRatio < minVisibleRatio ? 'partially-clipped' : redactedRatio > 0.5 ? 'target-redacted' : null;
     return { feature_id: item.feature_id || null, label: item.label || null, located: !!item.target, outlined: intersects, intersects, drawn, visible: drawn && !reason,
-      visibleRatio, redactedRatio, imageRect: shown || null, target: target || null, marker: marker || null, reason };
+      visibleRatio, redactedRatio, imageRect: shown || null, target: target || null, marker: marker || null, reason,
+      // 实际命中的定位：{ strategyIndex, fallback } 或 { source: 'declared-rect' }
+      ...(item.resolution ? { locator: item.resolution } : {}) };
   });
 }
 

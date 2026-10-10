@@ -63,7 +63,7 @@ function annotationResolver(provider, step, annotationPlan) {
     const out = [];
     const located = [];
     for (const annotation of annotationPlan) {
-      if (annotation.rect) { out.push({ feature_id: annotation.feature_id, label: annotation.label, rect: annotation.rect }); continue; }
+      if (annotation.rect) { out.push({ feature_id: annotation.feature_id, label: annotation.label, rect: annotation.rect, resolution: { source: 'declared-rect' } }); continue; }
       const target = annotation.target === 'action.target' ? step.action?.target : annotation.target;
       if (!target) { out.push({ feature_id: annotation.feature_id, label: annotation.label, reason: 'target-not-declared' }); continue; }
       try {
@@ -71,7 +71,7 @@ function annotationResolver(provider, step, annotationPlan) {
         if (!found?.rect) throw new Error('目标没有可用几何。');
         // 目标被浮层盖住：框会画在别的元素上，记为 target-occluded（B2-08）
         if (found.obscuredBy) { out.push({ feature_id: annotation.feature_id, label: annotation.label, reason: 'target-occluded' }); continue; }
-        out.push({ feature_id: annotation.feature_id, label: annotation.label, rect: found.rect });
+        out.push({ feature_id: annotation.feature_id, label: annotation.label, rect: found.rect, resolution: found.resolution || null });
         located.push({ target, label: annotation.label, revealedBy: found.revealedBy || null });
       } catch (error) {
         out.push({ feature_id: annotation.feature_id, label: annotation.label, reason: error.code || 'annotation-target-missing' });
@@ -116,6 +116,8 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
       const annotationOut = annotationArtifacts({ inventory, plan: annotationPlan, rendered: safe.rendered, coverage: safe.coverage });
       fs.writeFileSync(staging.file('annotations.json'), JSON.stringify(annotationOut.document, null, 2));
       safe.proof = annotationOut.proof;
+      const fallbacks = safe.rendered.filter((item) => item.locator?.fallback).map((item) => `${item.feature_id}（备选 ${item.locator.strategyIndex}）`);
+      if (fallbacks.length) captured.warnings = [...(captured.warnings || []), `annotation-locator-fallback: 主定位未命中，改用备选定位：${fallbacks.join('、')}；确认后更新 target。`];
       artifacts.push({ kind: 'annotations', file: staging.file('annotations.json'), dir: `${stateRelative}/artifacts/annotations`, prefix });
       artifacts.push({ kind: 'sanitized', file: staging.file('sanitized.png'), dir: `${stateRelative}/artifacts/sanitized`, prefix });
       if (safe.published) artifacts.push({ kind: 'published', file: staging.file('published.png'), dir: options.annotatedDir, prefix });
