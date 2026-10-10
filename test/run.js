@@ -14,6 +14,7 @@ const path = require('path');
 
 const FILES = [
   'annotation-coverage.test.js',
+  'model-links.test.js',
   'manual-quality.test.js',
   'catalog.test.js',
   'style-lint.test.js',

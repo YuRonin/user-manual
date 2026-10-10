@@ -12,6 +12,7 @@ const { DEFAULT_WAITS } = require('../config/waits');
 const { errorCode } = require('../runtime/errors');
 const { derivationSidecar } = require('../evidence/capture-page');
 const { stepInventory, buildPlan } = require('../annotations/coverage');
+const { annotationArtifacts } = require('../annotations/proof');
 
 class TaskExecutionError extends Error {
   constructor(code, message, details = {}) {
@@ -47,6 +48,8 @@ function annotationResolver(provider, step, annotationPlan) {
       try {
         const found = await provider.performAction({ type: 'inspect', target });
         if (!found?.rect) throw new Error('目标没有可用几何。');
+        // 目标被浮层盖住：框会画在别的元素上，记为 target-occluded（B2-08）
+        if (found.obscuredBy) { out.push({ feature_id: annotation.feature_id, label: annotation.label, reason: 'target-occluded' }); continue; }
         out.push({ feature_id: annotation.feature_id, label: annotation.label, rect: found.rect });
         located.push({ target, label: annotation.label, revealedBy: found.revealedBy || null });
       } catch (error) {
@@ -89,7 +92,9 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
         captured, rawPath, sanitizedPath: staging.file('sanitized.png'), publishedPath: staging.file('published.png'),
         theme: options.theme, redactionRules: options.redactionRules || {},
       });
-      fs.writeFileSync(staging.file('annotations.json'), JSON.stringify({ version: 1, inventory, plan: annotationPlan, rendered: safe.rendered, coverage: safe.coverage }, null, 2));
+      const annotationOut = annotationArtifacts({ inventory, plan: annotationPlan, rendered: safe.rendered, coverage: safe.coverage });
+      fs.writeFileSync(staging.file('annotations.json'), JSON.stringify(annotationOut.document, null, 2));
+      safe.proof = annotationOut.proof;
       artifacts.push({ kind: 'annotations', file: staging.file('annotations.json'), dir: `${stateRelative}/artifacts/annotations`, prefix });
       artifacts.push({ kind: 'sanitized', file: staging.file('sanitized.png'), dir: `${stateRelative}/artifacts/sanitized`, prefix });
       if (safe.published) artifacts.push({ kind: 'published', file: staging.file('published.png'), dir: options.annotatedDir, prefix });
@@ -116,7 +121,7 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
         validations: validations.filter((v) => v && v.scope && v.outcome),
         // 未做隐私检测的截图明确记为 not-run，发布时按 unknown 处理
         ...(safe ? { quality: safe.quality } : {}),
-        ...(safe ? { annotationCoverage: safe.coverage } : {}),
+        ...(safe ? { annotationCoverage: safe.coverage, annotationProof: safe.proof } : {}),
         privacy: safe ? safe.privacy : { status: 'not-run' },
         redactions: safe ? safe.redactions.map(({ kind, rect, result }) => ({ kind, rect, result })) : [],
         ...(options.fixture ? { fixture: options.fixture } : {}),

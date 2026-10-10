@@ -99,10 +99,10 @@ async function derivePublished({ captured, rawPath, sanitizedPath, publishedPath
   if (!layout.ok) throw captureError('annotation-layout-failed', layout.errors.join('；'));
   const privacy = buildPrivacyRecord({ redactions: detection.redactions, config: { privacy: redactionRules } });
   const image = await sharp(rawPath).metadata();
-  const rendered = renderAnnotationResults(layout.annotations, { width: image.width, height: image.height, dpr: geometry.dpr || 1 });
+  const rendered = renderAnnotationResults(layout.annotations, { width: image.width, height: image.height, dpr: geometry.dpr || 1, redactions: detection.redactions || [], minVisibleRatio: theme.minVisibleRatio ?? 0.8 });
   for (const target of overflow) rendered.push({ feature_id: target.feature_id || null, located: true, outlined: false, intersects: false, drawn: false, reason: 'marker-limit-exceeded' });
   for (const target of captured.targets || []) if (!target.rect) rendered.push({ feature_id: target.feature_id || null, located: false, outlined: false, intersects: false, drawn: false, reason: target.reason || 'target-not-located' });
-  const coverage = captured.inventory ? verifyCoverage({ inventory: captured.inventory, plan: captured.plan || [], rendered, discovered: captured.discovered || captured.inventory }) : null;
+  const coverage = captured.inventory ? verifyCoverage({ inventory: captured.inventory, plan: captured.plan || [], rendered, discovered: captured.discovered || captured.inventory, candidates: captured.featureCandidates || [] }) : null;
   // 隐私检测未通过（如高风险项无法定位）时只留私有 sanitized，不向文档目录写发布图。
   const published = privacy.status === 'passed' && (!coverage || coverage.ok) ? publishedPath : null;
   const derived = await deriveImages({

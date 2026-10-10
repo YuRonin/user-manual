@@ -79,7 +79,7 @@ function artifactsFor(root, config, target) {
   if (target.type === 'page') {
     const result = verifyPageArtifacts({ root, config, pageId: target.id });
     if (!result.ok) errors = result.errors;
-    else extra = { manual: result.manual, images: result.images, annotationCoverage: require('../verify/artifacts').annotationCoverageForImages(root, config, result.release.facts?.images || []) };
+    else extra = { manual: result.manual, images: result.images, warnings: result.warnings || [], annotationCoverage: require('../verify/artifacts').annotationCoverageForImages(root, config, result.release.facts?.images || []) };
   } else {
     const input = loadVerify(root, config, target.id);
     if (!input.ok) errors = input.errors;
@@ -92,7 +92,7 @@ function artifactsFor(root, config, target) {
         } catch (error) {
           errors = [`${error.code || 'write-failed'}: 验证通过，但任务状态写入失败。${error.message}`];
         }
-        extra = { manual: input.manual, images: (input.facts.images || []).map((image) => image.artifactPath), annotationCoverage: require('../verify/artifacts').annotationCoverageForImages(root, config, input.facts.images || []) };
+        extra = { manual: input.manual, images: (input.facts.images || []).map((image) => image.artifactPath), warnings: prepared.warnings || [], annotationCoverage: require('../verify/artifacts').annotationCoverageForImages(root, config, input.facts.images || []) };
       }
     }
   }
@@ -136,6 +136,8 @@ async function run(argv) {
       if (json) process.stdout.write(JSON.stringify({ ok: true, status: 'artifact-verified', scope: 'artifacts', onlineChecked: false, businessVerified: false, verificationId: only.report.id || null, ...only.extra }, null, 2) + '\n');
       else {
         process.stdout.write(`[manual verify] ${only.report.target} 产物验证通过（离线：不代表当前网页行为未变，在线检查用 --live）。\n`);
+        for (const warning of only.extra.warnings || []) process.stdout.write(`[manual verify] 提示: ${warning}
+`);
         const unknown = (only.extra.annotationCoverage?.captures || []).filter((item) => item.status === 'unknown').length;
         if (unknown) process.stdout.write(`[manual verify] ${unknown} 张图没有标注覆盖记录（旧证据，覆盖度未知）；重新采集后可得到覆盖结果。
 `);

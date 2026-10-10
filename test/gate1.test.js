@@ -74,7 +74,7 @@ const writeJson = (file, value) => { fs.writeFileSync(file, JSON.stringify(value
       await ok(root, ['init', '--base-url', server.baseUrl, '--audience', 'public']);
       await ok(root, ['inspect']);
       const input = writeJson(path.join(root, 'describe.json'), { pages: [
-        { id: 'chat', title: '工作台', purpose: '与 AI 助手对话。', detectedActions: ['点击「新对话」创建会话'] },
+        { id: 'chat', title: '工作台', purpose: '与 AI 助手对话。', detectedActions: ['点击「新对话」创建会话'], features: [{ id: 'new-chat', label: '新对话', priority: 'optional' }] },
         { id: 'task-profile', title: '个人中心', purpose: '管理个人资料。' },
       ] });
       await ok(root, ['describe', '--input', input]);

@@ -56,7 +56,7 @@ const snapshot = (file) => ({ bytes: fs.readFileSync(file, 'utf8'), mtime: fs.st
   const state = path.join(root, '.manual');
   const doc = (id) => path.join(root, 'docs', 'manual', `${id}.md`);
   const describe = (ids) => expectExit(root, ['describe', '--input', writeJson(path.join(root, 'describe.json'), {
-    pages: ids.map((id) => ({ id, title: { home: '首页', chat: '工作台', login: '登录' }[id], purpose: `${id} 页面。` })),
+    pages: ids.map((id) => ({ id, title: { home: '首页', chat: '工作台', login: '登录' }[id], purpose: `${id} 页面。`, ...(id === 'login' ? { features: [{ id: 'login-submit', label: '登 录', priority: 'skip' }] } : {}) })),
   })], 0, env);
   try {
     await step('准备：首页独占组件，chat / login 共用组件；三页已发布', async () => {

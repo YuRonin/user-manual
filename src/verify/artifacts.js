@@ -18,6 +18,7 @@ const { checkEvidenceUsable } = require('../model/approval');
 const { validateTaskFinal } = require('../generate/task-facts');
 const { validatePublication, formatIssues } = require('../publication/validate');
 const { createCaptureStore } = require('../evidence/store');
+const { validateSectionLinks } = require('../model/links');
 
 function annotationCoverageForImages(root, config, images = []) {
   const store = createCaptureStore({ projectRoot: root, stateDirAbs: path.join(root, config.artifacts.stateDir) });
@@ -27,9 +28,13 @@ function annotationCoverageForImages(root, config, images = []) {
     // 旧记录没有覆盖结果：明确为 unknown，不能当作通过
     return { captureId: image.captureId || null, status: !coverage ? 'unknown' : coverage.ok ? 'passed' : 'failed', coverage };
   });
-  return { status: !captures.length ? 'legacy-unknown' : captures.some((item) => item.coverage?.pending?.length) ? 'pending-review'
-    : captures.some((item) => item.coverage && !item.coverage.complete) ? 'incomplete'
-      : captures.some((item) => !item.coverage) ? 'legacy-unknown' : 'complete', captures };
+  // 没有已确认 Required 且没有待确认项：覆盖率是 N/A（not-applicable），既不是 100% 也不是"不完整"
+  const notApplicable = (c) => c.ok && c.required?.total === 0 && !c.pending?.length && !c.unresolvedCandidates?.length;
+  const review = (c) => c?.pending?.length || c?.unresolvedCandidates?.length;
+  return { status: !captures.length ? 'legacy-unknown' : captures.some((item) => review(item.coverage)) ? 'pending-review'
+    : captures.some((item) => item.coverage && !item.coverage.complete && !notApplicable(item.coverage)) ? 'incomplete'
+      : captures.some((item) => !item.coverage) ? 'legacy-unknown'
+        : captures.every((item) => notApplicable(item.coverage)) ? 'not-applicable' : 'complete', captures };
 }
 
 /** 读取任务、正式文档与事实文件。 */
@@ -66,10 +71,21 @@ function prepareVerify({ root, config, task, pages = [], manual, markdown, facts
   const checked = validateTaskFinal(markdown, facts);
   if (!checked.ok) return { ok: false, errors: [...releaseErrors, ...checked.errors] };
   // 图片按正式文档所在目录解析，核对产物位置、hash 与隐私记录（与 finalize 同一门槛）。
-  const gate = validatePublication({ projectRoot: root, manualFile: manual, markdown, images: facts.images, config });
+  // 核对已发布的冻结证据：截图之后定义变化只作提示（evidence 过期），不改写历史截图的结论
+  const gate = validatePublication({ projectRoot: root, manualFile: manual, markdown, images: facts.images, config, frozen: true });
   if (!gate.ok) return { ok: false, errors: [...releaseErrors, ...formatIssues(gate.errors)] };
+  const linkErrors = release ? sectionLinkErrors(root, config, release, 'task', task.id) : [];
+  if (linkErrors.length) return { ok: false, errors: [...releaseErrors, ...formatIssues(linkErrors)] };
   if (releaseErrors.length) return { ok: false, errors: releaseErrors };
-  return { ok: true, nextTask, releaseId: release?.id || null };
+  return { ok: true, nextTask, releaseId: release?.id || null, warnings: formatIssues(gate.warnings) };
+}
+
+/** 发布记录里章节的引用：Capture 存在、属于本步骤 / 页面、标注引用确实画出（B2-11）。 */
+function sectionLinkErrors(root, config, release, kind, subjectId) {
+  if (!Array.isArray(release?.sections)) return [];
+  const store = createCaptureStore({ projectRoot: root, stateDirAbs: path.join(root, config.artifacts.stateDir) });
+  const captureIds = [...(release.captureIds || []), ...(release.facts?.images || []).map((image) => image.captureId)];
+  return validateSectionLinks({ sections: release.sections, captureIds, readRecord: (id) => store.read(id), kind, subjectId });
 }
 
 /** 页面手册的产物验证：发布记录、文档 hash、图片与隐私门槛。 */
@@ -82,9 +98,10 @@ function verifyPageArtifacts({ root, config, pageId }) {
   const errors = [];
   if (fileHash(manual) !== release.documentHash) errors.push(`document-modified: ${release.documentPath} 与当前发布记录 ${release.id} 不一致（发布后被修改）。`);
   const markdown = fs.readFileSync(manual, 'utf8');
-  const gate = validatePublication({ projectRoot: root, manualFile: manual, markdown, images: release.facts?.images || [], config });
+  const gate = validatePublication({ projectRoot: root, manualFile: manual, markdown, images: release.facts?.images || [], config, frozen: true });
   if (!gate.ok) errors.push(...formatIssues(gate.errors));
-  return errors.length ? { ok: false, errors, release, manual } : { ok: true, release, manual, images: (release.facts?.images || []).map((i) => i.artifactPath) };
+  errors.push(...formatIssues(sectionLinkErrors(root, config, release, 'page', pageId)));
+  return errors.length ? { ok: false, errors, release, manual } : { ok: true, release, manual, images: (release.facts?.images || []).map((i) => i.artifactPath), warnings: formatIssues(gate.warnings) };
 }
 
 /** 错误列表 → 报告检查项。 */

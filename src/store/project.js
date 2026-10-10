@@ -236,6 +236,14 @@ function createProjectStore({ stateDirAbs, docsOutputDir = null, lockOptions = {
         tasks: mergeList('任务', base.model.tasks, fresh.model.tasks, (changes.tasks || []).map(canonicalTask), changes.removeTasks)
           .sort((a, b) => String(a.id).localeCompare(String(b.id))),
       };
+      if (kind === 'definition') {
+        // 跨实体引用（B2-10）：只查本次改动的页面 / 任务；inspect 标记为 stale 的任务由后续审批处理，不挡扫描
+        const errors = require('../model/links').validateModelLinks({
+          pages: next.pages, tasks: next.tasks.filter((task) => task.status !== 'stale'),
+          changedPageIds: new Set((changes.pages || []).map((page) => page.id)), changedTaskIds: new Set((changes.tasks || []).map((task) => task.id)),
+        });
+        if (errors.length) throw new ProjectStoreError('missing-reference', errors.map((error) => error.message).join('；'), { errors });
+      }
       const nextModel = snap.toJson(next);
       const modelRevision = snap.modelRevisionOf(nextModel);
       if (kind === 'observation' && modelRevision !== fresh.modelRevision) {

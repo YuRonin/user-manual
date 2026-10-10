@@ -1,17 +1,14 @@
 'use strict';
 
 const path = require('path');
-const { buildInventory } = require('./coverage');
+const { pageInventory } = require('./coverage');
 const { writeText } = require('../util/fsx');
 
 function inventorySnapshot(pages, tasks = []) {
   const features = [];
   for (const page of pages) {
-    const byId = new Map(buildInventory({ page }).map((item) => [item.feature_id, item]));
-    for (const task of tasks) {
-      for (const item of buildInventory({ page, task })) byId.set(item.feature_id, item);
-    }
-    features.push({ page_id: page.id, route: page.route, features: [...byId.values()] });
+    // 与采集、发布门禁同一个入口（默认 Scenario 的页面清单）；任务步骤的隐式标注是提示性的，不列入
+    features.push({ page_id: page.id, route: page.route, features: pageInventory({ page }) });
   }
   return { version: 1, pages: features, pending: features.flatMap((page) => page.features.filter((item) => item.priority === 'undecided').map((item) => ({ page_id: page.page_id, feature_id: item.feature_id, label: item.label }))) };
 }

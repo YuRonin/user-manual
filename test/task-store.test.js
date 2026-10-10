@@ -105,8 +105,17 @@ test('读取损坏任务时报告错误而不是静默忽略', (root) => {
   assert.match(result.errors[0], /broken\.yaml/);
 });
 
+test('批准时引用的页面必须存在：缺页面报 missing-reference，不写入审批', (root) => {
+  init(root);
+  require('../src/tasks/store').writeTask(path.join(root, '.manual'), task());
+  const result = runApprove(root, { decisions: [{ id: 'edit-profile', decision: 'approve' }] });
+  assert.notStrictEqual(result.status, 0);
+  assert.match(result.stdout, /missing-reference.*user-center/);
+});
+
 test('人工审批可以改名和排序字段，并推进为 approved', (root) => {
   init(root);
+  writePageModel(root);
   const store = require('../src/tasks/store');
   store.writeTask(path.join(root, '.manual'), task());
 

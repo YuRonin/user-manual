@@ -23,7 +23,8 @@ const { prepareAuth, classifyAuthFailure, refreshAuth } = require('../auth/runti
 const { validateNavigation, validateWithReload, runAssertions } = require('./validate-page');
 const { resolveWaits } = require('../config/waits');
 const { captureStable, derivePublished, confirmTargetsShown } = require('./capture-safe');
-const { pageInventory, buildPlan } = require('../annotations/coverage');
+const { pageInventory, buildPlan, domCandidates } = require('../annotations/coverage');
+const { annotationArtifacts } = require('../annotations/proof');
 const { createProjectStore } = require('../store/project');
 const { createCaptureStore, sanitizeUrl } = require('./store');
 const { definitionRevision } = require('../model/revision');
@@ -69,7 +70,7 @@ function joinUrl(baseUrl, route) {
 
 /** 截图派生输入（几何、标注目标、敏感元素候选）：私有 sidecar，隐私规则变化时据此从同一份 raw 重新派生。 */
 function derivationSidecar(captured) {
-  return JSON.stringify({ version: 2, geometry: captured.geometry, targets: captured.targets || [], candidates: captured.candidates || [], shotMeta: captured.shot?.meta || null, inventory: captured.inventory || null, plan: captured.plan || null });
+  return JSON.stringify({ version: 2, geometry: captured.geometry, targets: captured.targets || [], candidates: captured.candidates || [], shotMeta: captured.shot?.meta || null, inventory: captured.inventory || null, plan: captured.plan || null, featureCandidates: captured.featureCandidates || [] });
 }
 
 /**
@@ -225,6 +226,7 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
           if (!item.target) { targets.push({ feature_id: item.feature_id, label, reason: 'target-not-declared' }); continue; }
           try {
             const found = await provider.performAction({ type: 'inspect', target: item.target });
+            if (found.obscuredBy) { targets.push({ feature_id: item.feature_id, label, reason: 'target-occluded', obscuredBy: found.obscuredBy }); continue; }
             const rect = { ...found.rect };
             if (options.fullPage) { const geometry = await provider.collectGeometry({ fullPage: true }); rect.x += geometry.scroll.x; rect.y += geometry.scroll.y; }
             targets.push({ feature_id: item.feature_id, label, rect });
@@ -238,6 +240,8 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
     ready.warnings.push(...(captured.warnings || []));
     captured.inventory = inventory;
     captured.plan = annotationPlan;
+    // 默认 Scenario 的整页截图：无障碍树里清单未覆盖的可交互元素作为待确认候选（变体只看本状态声明的项）
+    captured.featureCandidates = isDefaultScenario ? domCandidates({ semantic, inventory, page, ignore: config.inventory?.ignoreCandidates || [] }) : [];
     fs.writeFileSync(stagedDerivation, derivationSidecar(captured));
     const safe = await derivePublished({
       captured,
@@ -247,7 +251,9 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
       theme: config.annotation.themes[config.annotation.activeTheme],
       redactionRules: config.privacy || {},
     });
-    fs.writeFileSync(stagedAnnotations, JSON.stringify({ version: 1, inventory, plan: annotationPlan, rendered: safe.rendered, coverage: safe.coverage }, null, 2));
+    const annotationOut = annotationArtifacts({ inventory, plan: annotationPlan, rendered: safe.rendered, candidates: captured.featureCandidates, coverage: safe.coverage });
+    fs.writeFileSync(stagedAnnotations, JSON.stringify(annotationOut.document, null, 2));
+    safe.proof = annotationOut.proof;
     ready.warnings.push(...safe.quality.warnings);
     if (safe.coverage?.pending.length) ready.warnings.push(`annotation-priority-undecided: ${safe.coverage.pending.map((item) => item.label).join('、')}`);
     if (safe.coverage && !safe.coverage.ok) ready.warnings.push(`annotation-coverage-failed: ${safe.coverage.failures.map((item) => `${item.feature_id}:${item.reason}`).join('、')}`);
@@ -328,6 +334,8 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
         privacy: safe.privacy,
         quality: safe.quality,
         annotationCoverage: safe.coverage,
+        // 精简标注证明随记录入库：删除 artifacts / 重新 clone 后仍能核对覆盖率（B2-12）
+        ...(safe.proof ? { annotationProof: safe.proof } : {}),
         redactions: safe.redactions.map(({ kind, rect, result }) => ({ kind, rect, result })),
         // simulated：界面由拦截的静态响应驱动，只证明"界面如何呈现这种数据"；fixture：登记的测试数据
         ...(data.fixture ? { fixture: data.fixture } : {}),

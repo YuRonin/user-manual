@@ -26,7 +26,7 @@ const { validateCopy, checkPolishedMarkdown, formatFindings } = require('./markd
 const { validatePublication, validateCaptureCoverage, validateArtifact, summarizePrivacy, formatIssues } = require('../publication/validate');
 const { RuntimeError } = require('../runtime/errors');
 const { reconcileDocument } = require('./manual-store');
-const { manualFromPack } = require('./manual-model');
+const { checkedSections } = require('../model/links');
 
 function failure(code, errors, extra = {}) {
   const list = Array.isArray(errors) ? errors : [errors];
@@ -105,7 +105,9 @@ function draftTask({ projectRoot, config, taskId }) {
   const built = buildCurrent({ root: projectRoot, config, task, pages, tasks });
   if (!built.ok) throw failure('draft-failed', built.errors);
   // 草稿阶段就执行同一产物门槛：隐私未知或位置非法时不给出可定稿的草稿。
-  const issues = built.facts.images.flatMap((image) => validateArtifact(image, { projectRoot, config }));
+  const draftWarnings = [];
+  const issues = built.facts.images.flatMap((image) => validateArtifact(image, { projectRoot, config, stage: 'draft', warnings: draftWarnings }));
+  for (const warning of formatIssues(draftWarnings)) process.stderr.write(`[manual gate] ${warning}\n`);
   if (issues.length) throw failure(issues[0].code || 'publication-gate', formatIssues(issues));
   // 草稿绑定的采集：定稿时据此判断草稿是否已被更新的采集取代。
   built.facts.evidence = task.lastCapture
@@ -169,6 +171,8 @@ function prepareTaskFinal({ projectRoot, config, taskId, copy = null, markdown =
   if (!checked.ok) throw failure(codeOf(checked.errors, 'fact-mismatch'), checked.errors);
   const gate = validatePublication({ projectRoot, manualFile, markdown: final, images: facts.images, config });
   if (!gate.ok) throw failure(gate.errors[0]?.code || 'publication-gate', formatIssues(gate.errors));
+  // internal 受众的待确认功能、旧证据覆盖度未知等：放行但必须说出来
+  for (const warning of formatIssues(gate.warnings || [])) process.stderr.write(`[manual gate] ${warning}\n`);
   // 定稿可以重复执行（重新生成已发布文档）；status 只记录最近完成的操作。
   return { final, generated, facts, manualFile, accepted: review.accepted || [], merge: reconciled };
 }
@@ -181,6 +185,9 @@ function publishTaskFinal({ projectRoot, config, taskId, prepared, force = false
   const { projectStore, base, task } = loadTask({ projectRoot, config, taskId });
   const { final, facts, manualFile, generated = null, merge = {} } = prepared;
   let published;
+  const linked = checkedSections({ projectRoot, stateDirAbs: path.join(projectRoot, config.artifacts.stateDir), pack: facts.factPack,
+    captureIds: task.lastCapture?.captureIds || task.captureIds || (facts.images || []).map((image) => image.captureId), kind: 'task', subjectId: task.id, audience: config.privacy?.audience });
+  if (linked.errors.length) throw failure(linked.errors[0].code, formatIssues(linked.errors));
   try {
     published = publish({
       projectRoot,
@@ -197,7 +204,7 @@ function publishTaskFinal({ projectRoot, config, taskId, prepared, force = false
       generated,
       baseDocHash: merge.baseDocHash || null,
       acceptedEdits: merge.acceptedEdits || [],
-      sections: facts.factPack ? manualFromPack(facts.factPack).sections : null,
+      sections: linked.sections,
     });
   } catch (error) {
     if (error.transactionId && error.code !== 'publication-conflict' && !['file-busy', 'write-failed'].includes(error.code)) {

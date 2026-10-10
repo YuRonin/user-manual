@@ -44,6 +44,8 @@ const POLICIES = {
   'annotation-layout-failed': FAIL,
   // 目标被浮层遮挡且有界等待后仍未消失：不重试（重试会从头重放步骤，可能重复保存）
   'target-obscured': FAIL,
+  // 截图后定义变了：重试同一计划无意义，需要重新规划 / 重采
+  'annotation-plan-changed': FAIL,
   'lock-timeout': RETRY,
   'file-busy': RETRY,
   // 模型：只重试模型任务本身（由 runner 按 task kind 限定）。

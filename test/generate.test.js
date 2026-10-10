@@ -83,6 +83,8 @@ async function prepareProject(baseUrl) {
       title: '工作台',
       purpose: '用户可以在这个页面与 AI 助手进行对话，并且能够对历史会话进行管理。',
       detectedActions: ['输入问题后点击「发送」', '点击「新对话」创建会话', '在左侧列表查看历史会话'],
+      // 公开手册发布前，候选功能都要有明确决定（B2）
+      features: [{ id: 'send', label: '发送', priority: 'optional' }, { id: 'new-chat', label: '新对话', priority: 'optional' }, { id: 'history', label: '在左侧列表查看历史会话', priority: 'skip' }],
     }],
   }), 'utf8');
   r = await run('describe', root, ['--input', describeInput]);

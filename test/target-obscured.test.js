@@ -50,6 +50,18 @@ function page(hideAfterMs) {
     } finally { await provider.close(); }
   });
 
+  await test('标注定位：被浮层盖住的目标报告 obscuredBy（采集记为 target-occluded），未遮挡时为 null', async () => {
+    const provider = createProvider({ id: 'obscured-test', providerConfig, profile });
+    try {
+      await provider.open(page(null));
+      const covered = await provider.performAction({ type: 'inspect', target: { role: 'button', name: '更多操作' } });
+      assert.match(covered.obscuredBy, /保存成功/);
+      await provider.page.evaluate(() => document.getElementById('toast').remove());
+      const clear = await provider.performAction({ type: 'inspect', target: { role: 'button', name: '更多操作' } });
+      assert.strictEqual(clear.obscuredBy, null);
+    } finally { await provider.close(); }
+  });
+
   process.stdout.write(`\n${passed} passed, ${failures.length} failed\n`);
   if (failures.length) process.exitCode = 1;
 })();

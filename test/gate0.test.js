@@ -64,7 +64,7 @@ async function step(name, fn) {
       await ok(root, ['init', '--base-url', server.baseUrl, '--audience', 'public']);
       await ok(root, ['inspect']);
       const input = path.join(root, 'describe.json');
-      fs.writeFileSync(input, JSON.stringify({ pages: [{ id: 'chat', title: '工作台', purpose: '与 AI 助手对话。', detectedActions: ['点击「新对话」创建会话'] }] }));
+      fs.writeFileSync(input, JSON.stringify({ pages: [{ id: 'chat', title: '工作台', purpose: '与 AI 助手对话。', detectedActions: ['点击「新对话」创建会话'], features: [{ id: 'new-chat', label: '新对话', priority: 'optional' }] }] }));
       await ok(root, ['describe', '--input', input]);
       const capture = JSON.parse((await ok(root, ['capture', 'chat', '--json'])).stdout);
       assert.strictEqual(capture.published.privacy.status, 'passed');

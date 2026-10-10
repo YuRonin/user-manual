@@ -10,7 +10,7 @@ const { renderTask } = require('./render');
 const { createCaptureStore } = require('../evidence/store');
 const { verifyCaptureRecord, describeProblems } = require('../evidence/integrity');
 
-function publishedFromCapture(projectRoot, stateDir, captureId, artifactPath) {
+function publishedFromCapture(projectRoot, stateDir, captureId, artifactPath, expected = null) {
   let captureRecord;
   try {
     captureRecord = createCaptureStore({ projectRoot, stateDirAbs: stateDir }).read(captureId);
@@ -18,6 +18,10 @@ function publishedFromCapture(projectRoot, stateDir, captureId, artifactPath) {
     return { ok: false, error: `${error.code || 'invalid-capture-record'}: ${error.message}` };
   }
   if (!captureRecord) return { ok: false, error: `capture-record-missing: ${captureId}` };
+  // 证据清单只是缓存：截图必须真的是这个任务这一步的截图（B2-11）
+  if (expected && (captureRecord.kind !== 'task-step' || captureRecord.subject?.taskId !== expected.taskId || captureRecord.subject?.stepId !== expected.stepId)) {
+    return { ok: false, error: `capture-subject-mismatch: Capture ${captureId} 属于 ${captureRecord.subject?.taskId || captureRecord.subject?.pageId}/${captureRecord.subject?.stepId || '-'}，不是 ${expected.taskId}/${expected.stepId}` };
+  }
   const artifact = (captureRecord.artifacts || []).find((a) => a.kind === 'published');
   if (!artifact || artifact.path !== artifactPath) return { ok: false, error: captureRecord.annotationCoverage && !captureRecord.annotationCoverage.ok
     ? `annotation-coverage-failed: ${captureRecord.annotationCoverage.failures.map((item) => `${item.feature_id}:${item.reason}`).join('、')}`
@@ -64,7 +68,7 @@ function buildTaskDraft(task, evidence, context = {}) {
       let sha256 = fileSha256(artifactFile);
       let privacy = shot.privacy || null;
       if (shot.captureId && context.stateDir) {
-        const fromRecord = publishedFromCapture(projectRoot, context.stateDir, shot.captureId, artifactPath);
+        const fromRecord = publishedFromCapture(projectRoot, context.stateDir, shot.captureId, artifactPath, { taskId: task.id, stepId: record.id });
         if (!fromRecord.ok) { errors.push(`步骤 ${record.id}: ${fromRecord.error}`); continue; }
         ({ sha256, privacy } = fromRecord);
       }

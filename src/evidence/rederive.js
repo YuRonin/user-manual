@@ -16,6 +16,7 @@ const { derivePublished } = require('./capture-safe');
 const { createCaptureStore } = require('./store');
 const { verifyCaptureRecord } = require('./integrity');
 const { RuntimeError } = require('../runtime/errors');
+const { annotationArtifacts } = require('../annotations/proof');
 
 function prefixOf(artifactPath) {
   const base = path.posix.basename(artifactPath).replace(/\.[^.]+$/, '');
@@ -51,12 +52,14 @@ async function rederiveCaptures({ projectRoot, config, captureIds, runId = null 
     fs.copyFileSync(path.join(projectRoot, raw.path), stagedRaw);
     fs.copyFileSync(path.join(projectRoot, derivation.path), handle.file('derivation.json'));
     try {
-      const captured = { shot: { meta: sidecar.shotMeta || {} }, geometry: sidecar.geometry, targets: sidecar.targets || [], candidates: sidecar.candidates || [], inventory: sidecar.inventory || null, plan: sidecar.plan || null };
+      const captured = { shot: { meta: sidecar.shotMeta || {} }, geometry: sidecar.geometry, targets: sidecar.targets || [], candidates: sidecar.candidates || [], inventory: sidecar.inventory || null, plan: sidecar.plan || null, featureCandidates: sidecar.featureCandidates || [], demoDecision: old.privacy?.demo || null };
       const safe = await derivePublished({
         captured, rawPath: stagedRaw, sanitizedPath: handle.file('sanitized.png'), publishedPath: handle.file('published.png'),
         theme: config.annotation.themes[config.annotation.activeTheme], redactionRules: config.privacy || {},
       });
-      if (captured.inventory) fs.writeFileSync(handle.file('annotations.json'), JSON.stringify({ version: 1, inventory: captured.inventory, plan: captured.plan, rendered: safe.rendered, coverage: safe.coverage }, null, 2));
+      // 沿用冻结的清单与计划：重新派生只换主题 / 隐私规则，不按当前定义重新解释（定义变了由 annotation-plan-changed 要求重采）
+      const annotationOut = captured.inventory ? annotationArtifacts({ inventory: captured.inventory, plan: captured.plan || [], rendered: safe.rendered, candidates: captured.featureCandidates, coverage: safe.coverage }) : null;
+      if (annotationOut) fs.writeFileSync(handle.file('annotations.json'), JSON.stringify(annotationOut.document, null, 2));
       const oldSanitized = old.artifacts.find((a) => a.kind === 'sanitized');
       const oldPublished = old.artifacts.find((a) => a.kind === 'published');
       const artifacts = [
@@ -76,6 +79,7 @@ async function rederiveCaptures({ projectRoot, config, captureIds, runId = null 
           runId,
           privacy: safe.privacy,
           ...(safe.coverage ? { annotationCoverage: safe.coverage } : {}),
+          ...(annotationOut ? { annotationProof: annotationOut.proof } : {}),
           redactions: safe.redactions.map(({ kind, rect, result }) => ({ kind, rect, result })),
           provenance: {
             mode: 'rederived',

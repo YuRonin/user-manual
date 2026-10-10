@@ -26,12 +26,24 @@ function section(id, kind, refs = {}) {
     taskRefs: unique(refs.taskRefs || []),
     claimRefs: unique(refs.claimRefs || []),
     captureRefs: unique(refs.captureRefs || []),
+    // 图文对应（B2-09）：只在有冻结标注证明时出现；旧数据保持原形状
+    ...(refs.annotationRefs?.length ? { annotationRefs: unique(refs.annotationRefs) } : {}),
+    ...(refs.featureRefs?.length ? { featureRefs: unique(refs.featureRefs) } : {}),
     ownership: 'generated',
   };
 }
 
+/** 截图上实际画出的项 → annotationRef（<captureId>#<featureId>）；显式确认的功能另列 featureRef。 */
+function annotationRefsOf(captureId, proof, keep = () => true) {
+  if (!captureId || !proof) return { annotationRefs: [], featureRefs: [] };
+  const explicit = new Set((proof.inventory || []).filter((item) => (item.source || []).includes('page.features')).map((item) => item.feature_id));
+  const planned = new Map((proof.plan || []).map((item) => [item.feature_id, item]));
+  const drawn = (proof.rendered || []).filter((item) => item.drawn && planned.has(item.feature_id) && keep(planned.get(item.feature_id)));
+  return { annotationRefs: drawn.map((item) => `${captureId}#${item.feature_id}`), featureRefs: drawn.map((item) => item.feature_id).filter((id) => explicit.has(id)) };
+}
+
 /** 任务指南的章节。步骤章节引用步骤所在页面与截图的 Capture。 */
-function taskSections(pack) {
+function taskSections(pack, proofs = new Map()) {
   const taskRefs = [pack.manualId];
   const captureOf = new Map(pack.artifacts.map((a) => [a.id, a.captureId || null]));
   const pages = unique(pack.steps.map((s) => s.pageId));
@@ -41,7 +53,9 @@ function taskSections(pack) {
     section('steps', 'heading', { taskRefs }),
   ];
   for (const step of pack.steps) {
-    out.push(section(`step.${step.id}`, 'step', { taskRefs, pageRefs: [step.pageId], captureRefs: step.artifactRefs.map((ref) => captureOf.get(ref)) }));
+    const captureRefs = step.artifactRefs.map((ref) => captureOf.get(ref)).filter(Boolean);
+    const refs = captureRefs.map((id) => annotationRefsOf(id, proofs.get(id)));
+    out.push(section(`step.${step.id}`, 'step', { taskRefs, pageRefs: [step.pageId], captureRefs, annotationRefs: refs.flatMap((r) => r.annotationRefs), featureRefs: refs.flatMap((r) => r.featureRefs) }));
   }
   out.push(section('completion', 'completion', {
     taskRefs,
@@ -55,13 +69,18 @@ function taskSections(pack) {
 }
 
 /** 页面 overview 手册的章节。 */
-function pageSections(pack) {
+function pageSections(pack, proofs = new Map()) {
   const pageRefs = [pack.manualId];
   const out = [
     section('overview', 'overview', { pageRefs }),
     section('location', 'location', { pageRefs, captureRefs: pack.artifacts.map((a) => a.captureId) }),
   ];
-  for (const item of pack.guide || []) out.push(section(`guide.${item.id}`, 'instructions', { pageRefs, taskRefs: item.taskId ? [item.taskId] : [] }));
+  const captureId = pack.artifacts.find((a) => a.captureId)?.captureId || null;
+  for (const item of pack.guide || []) {
+    // guide 小节引用页面截图上为它画出的那一项（不再靠"下标 + 1"约定对应）
+    const refs = annotationRefsOf(captureId, proofs.get(captureId), (planned) => planned.guide_id === item.id);
+    out.push(section(`guide.${item.id}`, 'instructions', { pageRefs, taskRefs: item.taskId ? [item.taskId] : [], ...(refs.annotationRefs.length ? { captureRefs: [captureId], ...refs } : {}) }));
+  }
   if (!pack.guide?.length && pack.actions.length) out.push(section('actions', 'actions-inferred', { pageRefs }));
   return out;
 }
@@ -72,7 +91,7 @@ function pageSections(pack) {
  * @param {string} p.documentPath 项目根相对路径
  * @param {string} [p.audience]
  */
-function manualFromPack(pack, { documentPath, audience = 'public' } = {}) {
+function manualFromPack(pack, { documentPath, audience = 'public', proofs = new Map() } = {}) {
   const kind = pack.kind === 'task' ? 'task-guide' : 'page-overview';
   return {
     id: releases.manualIdFor(pack.kind, pack.manualId),
@@ -81,7 +100,7 @@ function manualFromPack(pack, { documentPath, audience = 'public' } = {}) {
     audience,
     language: pack.language,
     documentPath: documentPath || null,
-    sections: pack.kind === 'task' ? taskSections(pack) : pageSections(pack),
+    sections: pack.kind === 'task' ? taskSections(pack, proofs) : pageSections(pack, proofs),
   };
 }
 

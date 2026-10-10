@@ -58,7 +58,8 @@ async function completeTask(root, stateDir, taskId) {
 
   result = runSync(['verify', taskId, '--project-root', root, '--json']);
   assert.strictEqual(result.status, 0, result.stdout + result.stderr);
-  assert.strictEqual(JSON.parse(result.stdout).annotationCoverage.status, 'complete');
+  // 任务没有显式确认的必标功能：覆盖率 N/A，不显示 100%（B2）
+  assert.strictEqual(JSON.parse(result.stdout).annotationCoverage.status, 'not-applicable');
   assert.strictEqual(require('../src/tasks/store').readTask(stateDir, taskId).status, 'generated');
   return evidence;
 }

@@ -14,8 +14,8 @@ const { checkDocumentImages, normalizeImageFact, toPosix } = require('./paths');
 const { fileSha256, revisionOf } = require('../util/hash');
 const { createCaptureStore } = require('../evidence/store');
 const { verifyCaptureRecord } = require('../evidence/integrity');
-const { verifyCoverage, verifyExplanations, pageInventory, stepInventory } = require('../annotations/coverage');
-const { stepPageId } = require('../tasks/model');
+const { verifyCoverage, verifyExplanations } = require('../annotations/coverage');
+const { currentScope, staleness } = require('../annotations/proof');
 const { createProjectStore } = require('../store/project');
 
 const DETECTOR_VERSION = '1';
@@ -90,24 +90,6 @@ function issue(code, message, extra = {}) {
   return { code, message, ...extra };
 }
 
-function discoveredForCapture(projectRoot, config, record) {
-  const stateDirAbs = path.join(projectRoot, config.artifacts.stateDir);
-  const model = createProjectStore({ stateDirAbs, docsOutputDir: config.docs.outputDir }).load().model;
-  if (record.kind === 'page') {
-    const page = model.pages.find((item) => item.id === record.subject.pageId);
-    if (!page) throw new Error(`page ${record.subject.pageId} missing`);
-    return pageInventory({ page, scenarioId: record.scenarioId });
-  }
-  if (record.kind === 'task-step') {
-    const task = model.tasks.find((item) => item.id === record.subject.taskId);
-    const step = task?.steps?.find((item) => item.id === record.subject.stepId);
-    const page = model.pages.find((item) => item.id === stepPageId(step));
-    if (!task || !step || !page) throw new Error(`task step ${record.subject.taskId}/${record.subject.stepId} missing`);
-    return stepInventory({ page, task, step });
-  }
-  return [];
-}
-
 function validateCaptureCoverage({ projectRoot, config, captureIds = [] }) {
   const store = createCaptureStore({ projectRoot, stateDirAbs: path.join(projectRoot, config.artifacts.stateDir) });
   const errors = [];
@@ -125,10 +107,66 @@ function validateCaptureCoverage({ projectRoot, config, captureIds = [] }) {
 }
 
 /**
+ * 标注门禁（B2-12 / B2-13 / B2-14）。真值来源：Capture 记录内嵌的精简证明（随仓库提交）；
+ * 没有证明的旧记录退回读 annotations.json。artifacts 被删除时 annotations.json 只是可重建资源，不判失败。
+ * frozen=true（verify 已发布的手册）：定义变化只提示证据过期，不改写历史截图的结论；发布前则必须重采。
+ * 未确认的候选功能：public 阻断，internal 警告。
+ */
+function checkAnnotations({ projectRoot, config, record, captureId, markdown, audience, frozen, warnings, stage }) {
+  const errors = [];
+  const proof = record.annotationProof || null;
+  const metadata = record.artifacts?.find((item) => item.kind === 'annotations');
+  let data = proof;
+  if (metadata && fs.existsSync(path.join(projectRoot, metadata.path))) {
+    const integrity = verifyCaptureRecord(projectRoot, record, { kinds: ['annotations'] });
+    if (!integrity.ok) return [issue('annotation-metadata-invalid', `Capture ${captureId} annotations.json failed integrity verification`)];
+    if (!proof) {
+      try {
+        data = JSON.parse(fs.readFileSync(path.join(projectRoot, metadata.path), 'utf8'));
+        if (data.version !== 1 || !Array.isArray(data.inventory) || !Array.isArray(data.plan) || !Array.isArray(data.rendered)) throw new Error('invalid annotations.json structure');
+      } catch (error) { return [issue('annotation-metadata-invalid', `Capture ${captureId}: ${error.message}`)]; }
+    }
+  } else if (!proof && metadata) {
+    return [issue('annotation-metadata-invalid', `Capture ${captureId}: annotations.json 缺失且记录里没有内嵌标注证明（旧证据），需要重新采集`)];
+  }
+  if (!data) {
+    if (record.annotationCoverage) return [issue('annotation-metadata-missing', `Capture ${captureId} lacks annotations.json`)];
+    // 旧证据没有覆盖结果：public 不能当作通过（T27），internal 只提示
+    const unknown = issue('annotation-coverage-unknown', `Capture ${captureId} 没有标注覆盖记录（旧证据），覆盖度未知；重新采集后可发布。`);
+    if (audience === 'public') return [unknown];
+    warnings.push(unknown);
+    return [];
+  }
+  const coverage = verifyCoverage({ inventory: data.inventory, plan: data.plan, rendered: data.rendered, candidates: data.candidates || [] });
+  if (record.annotationCoverage && JSON.stringify(record.annotationCoverage.failures) !== JSON.stringify(coverage.failures)) {
+    return [issue('annotation-metadata-invalid', `Capture ${captureId}: 标注证明与记录的覆盖结果不一致`)];
+  }
+  if (!coverage.ok) errors.push(issue('annotation-coverage-failed', `Capture ${captureId}: ${coverage.failures.map((item) => `${item.feature_id}:${item.reason}`).join(', ')}`));
+  if (proof) {
+    let scope;
+    try { scope = currentScope(createProjectStore({ stateDirAbs: path.join(projectRoot, config.artifacts.stateDir), docsOutputDir: config.docs.outputDir }).load().model, record); }
+    catch (error) { scope = { missing: `无法读取当前模型：${error.message}` }; }
+    for (const problem of staleness(proof, scope, record)) {
+      const found = issue(problem.code, `Capture ${captureId}: ${problem.message}`, { hint: '重新采集（manual generate --refresh 或 manual capture）后再发布' });
+      if (frozen) warnings.push(found); else errors.push(found);
+    }
+  }
+  const review = [...coverage.pending.map((item) => item.label), ...(coverage.unresolvedCandidates || []).map((item) => `${item.label}（页面发现）`)];
+  if (review.length) {
+    const found = issue('inventory-review-required', `Capture ${captureId}: ${review.length} 个功能待确认是否需要标注与说明：${review.slice(0, 10).join('、')}${review.length > 10 ? ' 等' : ''}`,
+      { hint: '用 manual describe --input 在页面 features 里把它们确认为 required / optional / skip' });
+    // 正式发布才阻断；草稿阶段只提示，便于先看到文案再补确认
+    if (audience === 'public' && stage !== 'draft') errors.push(found); else warnings.push(found);
+  }
+  if (markdown !== null) for (const failure of verifyExplanations(markdown, data.inventory)) errors.push(issue('annotation-explanation-missing', `${failure.feature_id}: ${failure.reason}`));
+  return errors;
+}
+
+/**
  * 检查一个产物条目本身（不含文档引用）：位置、hash、privacy。
  * @param entry { artifactPath, sha256, privacy }
  */
-function validateArtifact(entry, { projectRoot, config, markdown = null }) {
+function validateArtifact(entry, { projectRoot, config, markdown = null, frozen = false, warnings = [], stage = 'publish' }) {
   const errors = [];
   const audience = config.privacy?.audience === 'internal' ? 'internal' : 'public';
   const artifactPath = path.posix.normalize(toPosix(entry.artifactPath));
@@ -175,23 +213,7 @@ function validateArtifact(entry, { projectRoot, config, markdown = null }) {
     try { record = createCaptureStore({ projectRoot, stateDirAbs }).read(entry.captureId); }
     catch (error) { errors.push(issue('annotation-record-invalid', error.message)); }
     if (record && !record.artifacts?.some((item) => item.kind === 'published' && item.path === artifactPath)) errors.push(issue('annotation-capture-mismatch', `Capture ${entry.captureId} does not publish ${artifactPath}`));
-    const metadata = record?.artifacts?.find((item) => item.kind === 'annotations');
-    if (record?.annotationCoverage && !metadata) errors.push(issue('annotation-metadata-missing', `Capture ${entry.captureId} lacks annotations.json`));
-    if (metadata) {
-      const integrity = verifyCaptureRecord(projectRoot, record, { kinds: ['annotations'] });
-      if (!integrity.ok) errors.push(issue('annotation-metadata-invalid', `Capture ${entry.captureId} annotations.json failed integrity verification`));
-      else {
-        try {
-          const data = JSON.parse(fs.readFileSync(path.join(projectRoot, metadata.path), 'utf8'));
-          if (data.version !== 1 || !Array.isArray(data.inventory) || !Array.isArray(data.plan) || !Array.isArray(data.rendered)) throw new Error('invalid annotations.json structure');
-          if (record.annotationCoverage && JSON.stringify(data.coverage) !== JSON.stringify(verifyCoverage(data))) throw new Error('annotations.json coverage does not match its items');
-          const discovered = discoveredForCapture(projectRoot, config, record);
-          const coverage = verifyCoverage({ ...data, discovered });
-          if (!coverage.ok) errors.push(issue('annotation-coverage-failed', `Capture ${entry.captureId}: ${coverage.failures.map((item) => `${item.feature_id}:${item.reason}`).join(', ')}`));
-          if (markdown !== null) for (const failure of verifyExplanations(markdown, data.inventory)) errors.push(issue('annotation-explanation-missing', `${failure.feature_id}: ${failure.reason}`));
-        } catch (error) { errors.push(issue('annotation-metadata-invalid', `Capture ${entry.captureId}: ${error.message}`)); }
-      }
-    }
+    if (record) errors.push(...checkAnnotations({ projectRoot, config, record, captureId: entry.captureId, markdown, audience, frozen, warnings, stage }));
   }
   return errors;
 }
@@ -204,10 +226,12 @@ function validateArtifact(entry, { projectRoot, config, markdown = null }) {
  * @param {string} p.markdown     将要写入/已写入的内容
  * @param {Array}  p.images       facts 中的图片条目 { artifactPath, markdownHref, sha256, privacy }
  * @param {object} p.config
- * @returns {{ ok: boolean, errors: Array<{code, message}> }}
+ * @param {boolean} [p.frozen]  核对已发布手册（verify）：定义变化只作提示
+ * @returns {{ ok: boolean, errors: Array<{code, message}>, warnings: Array<{code, message}> }}
  */
-function validatePublication({ projectRoot, manualFile, markdown, images = [], config }) {
+function validatePublication({ projectRoot, manualFile, markdown, images = [], config, frozen = false }) {
   const errors = [];
+  const warnings = [];
   const refs = checkDocumentImages({
     projectRoot, manualFile, markdown, publishRoot: config.docs.outputDir, expected: images,
   });
@@ -215,9 +239,9 @@ function validatePublication({ projectRoot, manualFile, markdown, images = [], c
   for (const entry of images) {
     const fact = normalizeImageFact(entry);
     if (fact.legacy) continue; // checkDocumentImages 已报告 legacy-image-facts
-    errors.push(...validateArtifact({ ...entry, artifactPath: fact.artifactPath }, { projectRoot, config, markdown }));
+    errors.push(...validateArtifact({ ...entry, artifactPath: fact.artifactPath }, { projectRoot, config, markdown, frozen, warnings }));
   }
-  return { ok: errors.length === 0, errors };
+  return { ok: errors.length === 0, errors, warnings };
 }
 
 function formatIssues(errors) {

@@ -13,6 +13,8 @@ const DEFAULT_THEME = {
   targetPadding: 5,
   targetRadius: 8,
   maxMarkersPerImage: 5,
+  // 目标在截图里至少露出这么大比例才算"标到了"（B2-08）；样例验证前先作为可配置的候选值
+  minVisibleRatio: 0.8,
 };
 const DEFAULT_ANNOTATION = { activeTheme: 'default', themes: { default: DEFAULT_THEME } };
 const COLOR_KEYS = ['primary', 'primaryDark', 'halo', 'labelBackground', 'labelText', 'focusMask', 'fallbackColor'];
@@ -28,6 +30,7 @@ function resolveAnnotationConfig(raw = {}) {
     if (!Number.isFinite(theme.markerSize) || theme.markerSize < 20 || theme.markerSize > 64) errors.push(`annotation.themes.${id}.markerSize 需在 20-64 之间。`);
     if (!Number.isInteger(theme.maxMarkersPerImage) || theme.maxMarkersPerImage < 1 || theme.maxMarkersPerImage > 10) errors.push(`annotation.themes.${id}.maxMarkersPerImage 需在 1-10 之间。`);
     if (!Number.isFinite(theme.targetPadding) || theme.targetPadding < 0 || theme.targetPadding > 20) errors.push(`annotation.themes.${id}.targetPadding 需在 0-20 之间。`);
+    if (!Number.isFinite(theme.minVisibleRatio) || theme.minVisibleRatio < 0.1 || theme.minVisibleRatio > 1) errors.push(`annotation.themes.${id}.minVisibleRatio 需在 0.1-1 之间。`);
   }
   return errors.length ? { ok: false, errors } : { ok: true, config };
 }

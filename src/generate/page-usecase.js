@@ -31,7 +31,8 @@ const { createCaptureStore } = require('../evidence/store');
 const { verifyCaptureRecord, describeProblems } = require('../evidence/integrity');
 const { RuntimeError } = require('../runtime/errors');
 const { reconcileDocument } = require('./manual-store');
-const { manualFromPack } = require('./manual-model');
+const { checkedSections } = require('../model/links');
+const { pageInventory } = require('../annotations/coverage');
 
 function failure(code, errors, extra = {}) {
   const list = Array.isArray(errors) ? errors : [errors];
@@ -100,6 +101,11 @@ function draftPage({ projectRoot, config, pageId, noScreenshot = false }) {
       `先用 \`manual describe --id ${page.id} --title ... --purpose ...\` 补上。`
     );
   }
+  // --no-screenshot 不能绕过已确认的必标功能：公开手册里 Required 功能必须有带标注的截图（B2-14）
+  if (noScreenshot && config.privacy?.audience !== 'internal') {
+    const required = pageInventory({ page }).filter((item) => item.priority === 'required');
+    if (required.length) errors.push(`screenshot-required: "${page.id}" 有 ${required.length} 个已确认的必标功能（${required.map((item) => item.label).join('、')}），公开手册不能用 --no-screenshot 跳过截图。`);
+  }
   if (!isActivePage(page)) errors.push(`page-not-active: "${page.id}" 当前是 ${page.lifecycle}，不能生成当前手册（历史发布仍保留）。`);
   if (page.includeInManual === false) errors.push(`"${page.id}" 标记为 includeInManual: false，不在手册范围内。`);
   if (errors.length > 0) throw failure(page.status?.sourceAnalysis !== ANALYSIS.COMPLETED ? 'analysis-required' : 'draft-precondition', errors);
@@ -130,7 +136,9 @@ function draftPage({ projectRoot, config, pageId, noScreenshot = false }) {
       privacy: source.privacy,
       ...(source.captureId ? { captureId: source.captureId } : {}),
     };
-    const issues = validateArtifact(image, { projectRoot, config });
+    const draftWarnings = [];
+    const issues = validateArtifact(image, { projectRoot, config, stage: 'draft', warnings: draftWarnings });
+    for (const warning of formatIssues(draftWarnings)) process.stderr.write(`[manual gate] ${warning}\n`);
     if (issues.length > 0) throw failure(issues[0].code || 'publication-gate', formatIssues(issues));
   }
 
@@ -224,6 +232,8 @@ function preparePageFinal({ projectRoot, config, pageId, copy = null, markdown =
   if (coverageErrors.length) throw failure(coverageErrors[0].code, formatIssues(coverageErrors));
   const gate = validatePublication({ projectRoot, manualFile: finalPath, markdown: body, images: draftFacts.images || [], config });
   if (!gate.ok) throw failure(gate.errors[0]?.code || 'publication-gate', formatIssues(gate.errors));
+  // internal 受众的待确认功能、旧证据覆盖度未知等：放行但必须说出来
+  for (const warning of formatIssues(gate.warnings || [])) process.stderr.write(`[manual gate] ${warning}\n`);
   return { page, body, generated, merge, finalPath, draftPath, draftFacts, factCheck: result.ok ? 'passed' : 'failed-used-draft', violations: result.violations };
 }
 
@@ -231,6 +241,8 @@ function preparePageFinal({ projectRoot, config, pageId, copy = null, markdown =
 function publishPageFinal({ projectRoot, config, prepared, force = false, runId = null, hooks = {} }) {
   const stateDirAbs = path.join(projectRoot, config.artifacts.stateDir);
   const { page, body, finalPath, draftFacts, generated = null, merge = {} } = prepared;
+  const linked = checkedSections({ projectRoot, stateDirAbs, pack: draftFacts.factPack, captureIds: (draftFacts.images || []).map((image) => image.captureId), kind: 'page', subjectId: page.id, audience: config.privacy?.audience });
+  if (linked.errors.length) throw failure(linked.errors[0].code, formatIssues(linked.errors));
   try {
     const published = publish({
       projectRoot,
@@ -247,7 +259,7 @@ function publishPageFinal({ projectRoot, config, prepared, force = false, runId 
       generated,
       baseDocHash: merge.baseDocHash || null,
       acceptedEdits: merge.acceptedEdits || [],
-      sections: draftFacts.factPack ? manualFromPack(draftFacts.factPack).sections : null,
+      sections: linked.sections,
     });
     return { finalPath, release: published.release };
   } catch (error) {

@@ -53,7 +53,7 @@ manual approve-tasks --input <决策.json>            # 用户确认后才批准
 
 ### 标注计划与待确认功能
 
-`inspect` / `describe` / 任务审批后读取 `.manual/feature-inventory.json` 的 `pending`。结合读者要完成的任务，在 `describe --input` 的 `features` 中为相关功能写稳定的 `feature_id`、`required|optional|skip` 决策、Scenario 和说明；Required 要关联页面 `guide` 或任务步骤及截图目标。采集后的 `annotations.json` 和 `verify --artifacts --json` 会分别报告逐项绘制与覆盖状态。`pending-review` 需要明确报告为待确认，Required 失败时按失败原因补计划或截图，再生成手册。字段与判定细节见 [标注覆盖率](docs/ANNOTATION_COVERAGE.md)。
+Required 只来自 `describe --input` 里页面 `features` 的显式决定；带 target 的 guide、`detectedActions` 和截图时在页面上发现的按钮 / 标签页 / 菜单项都只是**待确认候选**（照常标注出图，但不算分母）。`inspect` / `describe` / 任务审批后读取 `.manual/feature-inventory.json` 的 `pending`，结合读者要完成的任务，在 `features` 里给每个候选写稳定的 `id`、`required|optional|skip` 决策和说明（名称或目标与候选一致即可覆盖它；guide 可用 `featureId` 显式对应）。public 手册存在未确认候选时定稿会被 `inventory-review-required` 阻断（internal 只提示）。没有已确认 Required 的页面覆盖率显示 N/A，不是 100%。Required 失败时按失败原因补计划或截图，再生成手册。字段与判定细节见 [标注覆盖率](docs/ANNOTATION_COVERAGE.md)。
 
 ## 3. 生成
 

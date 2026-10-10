@@ -113,7 +113,7 @@ const writeJson = (file, v) => { fs.writeFileSync(file, JSON.stringify(v)); retu
       fx.writeFile(root, 'app/dashboard/page.tsx');
       await expectExit(root, ['init', '--base-url', server.baseUrl, '--audience', 'public'], 0, env);
       await expectExit(root, ['inspect'], 0, env);
-      await expectExit(root, ['describe', '--input', writeJson(path.join(root, 'describe.json'), { pages: [{ id: 'dashboard', title: '数据看板', purpose: '查看本周数据。' }] })], 0, env);
+      await expectExit(root, ['describe', '--input', writeJson(path.join(root, 'describe.json'), { pages: [{ id: 'dashboard', title: '数据看板', purpose: '查看本周数据。', features: [{ id: 'export', label: '导出报表', priority: 'optional' }] }] })], 0, env);
       const file = path.join(state, 'pages', 'dashboard.yaml');
       const page = yaml.load(fs.readFileSync(file, 'utf8'));
       page.states = { default: { assertions: [{ id: 'dashboard-heading', type: 'visible', target: { role: 'heading', name: '数据看板' } }] } };

@@ -5,7 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const sharp = require('sharp');
-const { buildInventory, buildPlan, verifyCoverage, verifyExplanations, pageInventory, stepInventory, stepFeatures } = require('../src/annotations/coverage');
+const { buildInventory, buildPlan, verifyCoverage, verifyExplanations, pageInventory, stepInventory, stepFeatures, domCandidates } = require('../src/annotations/coverage');
 const { renderAnnotationResults } = require('../src/evidence/image-pipeline');
 const { layoutAnnotations } = require('../src/artifacts/annotation');
 const { derivePublished } = require('../src/evidence/capture-safe');
@@ -16,6 +16,7 @@ const { stepPageId } = require('../src/tasks/model');
 const { validateArtifact, validateCaptureCoverage } = require('../src/publication/validate');
 const { createCaptureStore } = require('../src/evidence/store');
 const { annotationCoverageForImages } = require('../src/verify/artifacts');
+const { annotationArtifacts } = require('../src/annotations/proof');
 const pageStore = require('../src/inspect/store');
 
 let passed = 0;
@@ -36,20 +37,20 @@ const plan = inventory.slice(0, 6).map((feature) => ({ feature_id: feature.featu
 const rendered = plan.map((item) => ({ feature_id: item.feature_id, located: true, outlined: true, intersects: true, drawn: true }));
 const drawn = (feature_id) => ({ feature_id, located: true, outlined: true, intersects: true, drawn: true });
 const upload = { role: 'button', name: '上传附件' };
-const workspace = { id: 'workspace', detectedActions: ['上传附件', '选择仙技'], guide: [{ id: 'upload', title: '上传附件', instruction: '点击上传附件。', target: upload }] };
+const workspace = { id: 'workspace', detectedActions: ['上传附件', '选择仙技'], features: [{ id: 'upload', label: '上传附件', priority: 'required', description: '上传资料', target: upload }], guide: [{ id: 'upload', title: '上传附件', instruction: '点击上传附件。', target: upload }] };
 
 function png(width = 100, height = 100) {
   return sharp({ create: { width, height, channels: 3, background: '#ffffff' } }).png().toBuffer();
 }
 
-function config() {
+function config(audience = 'public') {
   return {
     docs: { outputDir: 'docs/manual', imagesDir: 'docs/manual/images' },
     artifacts: {
       stateDir: '.manual', rawDir: '.manual/artifacts/raw/pages', taskRawDir: '.manual/artifacts/raw', sanitizedDir: '.manual/artifacts/sanitized',
       diagnosticsDir: '.manual/artifacts/diagnostics', manifestsDir: '.manual/artifacts/manifests', annotatedDir: 'docs/manual/images/annotated',
     },
-    privacy: { audience: 'public', redaction: 'balanced', maskStyle: 'neutral-mosaic', rules: { redact: [], preserve: [] } },
+    privacy: { audience, redaction: 'balanced', maskStyle: 'neutral-mosaic', rules: { redact: [], preserve: [] } },
   };
 }
 
@@ -58,18 +59,19 @@ function modelPage(overrides = {}) {
     id: 'workspace', route: '/workspace', dynamic: false, params: [], title: '工作台', purpose: '上传资料', detectedActions: [], entry: 'app/workspace/page.tsx',
     source: ['app/workspace/page.tsx'], dependencies: { files: [], unresolved: [] }, includeInManual: true, confidence: 'inferred',
     browser: { verified: false }, states: { default: { assertions: [{ type: 'url', value: '/workspace' }] } }, status: { router: 'app', sourceAnalysis: 'completed' },
-    guide: workspace.guide, ...overrides,
+    features: workspace.features, guide: workspace.guide, ...overrides,
   };
 }
 
 /** 真实 Capture 记录：发布图 + annotations.json；返回发布条目与记录。 */
-async function seedCapture(root, { pages = [modelPage()], coverage = 'computed', annotations = true, rendered: drawnItems = null } = {}) {
+async function seedCapture(root, { pages = [modelPage()], coverage = 'computed', annotations = true, rendered: drawnItems = null, proof = true, page = modelPage(), candidates = [] } = {}) {
   const stateDirAbs = path.join(root, '.manual');
   pageStore.writeModel(stateDirAbs, { name: 'x', framework: 'nextjs', router: 'app', generatedAt: '2026-10-10T00:00:00.000Z' }, pages);
-  const items = pageInventory({ page: modelPage(), scenarioId: 'page-workspace' });
-  const planned = buildPlan({ inventory: items, page: modelPage() });
-  const data = { version: 1, inventory: items, plan: planned, rendered: drawnItems || planned.map((item) => drawn(item.feature_id)) };
-  data.coverage = verifyCoverage(data);
+  const items = pageInventory({ page, scenarioId: 'page-workspace' });
+  const planned = buildPlan({ inventory: items, page });
+  const rendered = drawnItems || planned.map((item) => drawn(item.feature_id));
+  const out = annotationArtifacts({ inventory: items, plan: planned, rendered, candidates, coverage: verifyCoverage({ inventory: items, plan: planned, rendered, candidates }) });
+  const data = out.document;
   const store = createCaptureStore({ projectRoot: root, stateDirAbs });
   const handle = store.begin();
   fs.writeFileSync(handle.file('raw.png'), await png());
@@ -85,6 +87,7 @@ async function seedCapture(root, { pages = [modelPage()], coverage = 'computed',
     inputHash: `sha256:${'1'.repeat(64)}`, modelRevision: `sha256:${'2'.repeat(64)}`, finalUrl: { origin: 'http://localhost:5173', pathname: '/workspace' },
     spec: { viewport: { width: 100, height: 100 }, dpr: 1, fullPage: false }, validations: [], privacy: { status: 'passed' },
     ...(coverage === 'computed' ? { annotationCoverage: data.coverage } : coverage ? { annotationCoverage: coverage } : {}),
+    ...(proof && coverage ? { annotationProof: out.proof } : {}),
   } });
   const published = record.artifacts.find((item) => item.kind === 'published');
   return { record, entry: { artifactPath: published.path, sha256: published.sha256, privacy: { status: 'passed' }, captureId: record.id } };
@@ -119,6 +122,21 @@ const annotationCodes = (errors) => errors.map((item) => item.code).filter((code
       assert.strictEqual(result.drawn, false);
       assert.strictEqual(result.reason, 'outside-image');
     }
+  });
+
+  await test('B2-08 大半在图外（partially-clipped）或被隐私遮罩盖住（target-redacted）不算标到；可见比例门槛可配置', () => {
+    const item = (sourceRect) => ({ feature_id: 'f', label: '1', sourceRect, target: { x: sourceRect.x - 2, y: sourceRect.y - 2, width: sourceRect.width + 4, height: sourceRect.height + 4 }, marker: { x: 10, y: 10, size: 20 } });
+    const [clipped] = renderAnnotationResults([item({ x: 80, y: 40, width: 40, height: 20 })], { width: 100, height: 100, dpr: 1 });
+    assert.strictEqual(clipped.drawn, true);
+    assert.strictEqual(clipped.visible, false);
+    assert.strictEqual(clipped.reason, 'partially-clipped');
+    assert.strictEqual(clipped.visibleRatio, 0.5);
+    const [lenient] = renderAnnotationResults([item({ x: 80, y: 40, width: 40, height: 20 })], { width: 100, height: 100, dpr: 1, minVisibleRatio: 0.4 });
+    assert.strictEqual(lenient.visible, true);
+    const [masked] = renderAnnotationResults([item({ x: 20, y: 40, width: 40, height: 20 })], { width: 100, height: 100, dpr: 1, redactions: [{ rect: { x: 20, y: 40, width: 30, height: 20 } }] });
+    assert.strictEqual(masked.reason, 'target-redacted');
+    const required = [{ feature_id: 'f', priority: 'required', description: 'x' }];
+    assert.deepStrictEqual(verifyCoverage({ inventory: required, plan: [{ feature_id: 'f' }], rendered: [clipped] }).failures.map((f) => f.reason), ['partially-clipped']);
   });
 
   await test('缺说明报 description-missing；optional / skip 不计入 Required', () => {
@@ -179,6 +197,42 @@ const annotationCodes = (errors) => errors.map((item) => item.code).filter((code
     const report = verifyCoverage({ inventory: items, plan: planned, rendered: [{ feature_id: 'intro', located: false, drawn: false, reason: 'target-not-declared' }] });
     assert.strictEqual(report.ok, false);
     assert.deepStrictEqual(report.failures.map((item) => `${item.feature_id}:${item.reason}`), ['intro:target-not-declared']);
+  });
+
+  await test('只有 guide 的页面：带 target 的 guide 是待确认候选，Required 显示 N/A 而不是 100%', () => {
+    const page = { id: 'workspace', guide: workspace.guide };
+    const items = buildInventory({ page });
+    assert.deepStrictEqual(items.map((item) => [item.feature_id, item.priority]), [['page:workspace:upload', 'undecided']]);
+    const planned = buildPlan({ inventory: items, page });
+    assert.strictEqual(planned.length, 1, '候选照常进入标注计划');
+    const report = verifyCoverage({ inventory: items, plan: planned, rendered: [drawn(planned[0].feature_id)] });
+    assert.strictEqual(report.ok, true);
+    assert.strictEqual(report.required.percent, null);
+    assert.strictEqual(report.complete, false);
+    assert.deepStrictEqual(report.pending.map((item) => item.label), ['上传附件']);
+  });
+
+  await test('同名功能按目标对应、不互相覆盖；新旧字段写法（id / taskIds）都可读', () => {
+    const delA = { role: 'button', name: '删除', within: { role: 'row', name: 'A' } };
+    const delB = { role: 'button', name: '删除', within: { role: 'row', name: 'B' } };
+    const page = { id: 'list', features: [{ id: 'del-a', label: '删除', priority: 'required', description: '删除 A', target: delA, taskIds: ['t'] }, { feature_id: 'del-b', label: '删除', priority: 'optional', target: delB }],
+      guide: [{ id: 'g-b', title: '删除', instruction: '删除 B。', target: delB }, { id: 'g-a', title: '删除', instruction: '删除 A。', target: delA }] };
+    const items = buildInventory({ page });
+    assert.deepStrictEqual(items.map((item) => [item.feature_id, item.guide_id, item.priority]), [['del-a', 'g-a', 'required'], ['del-b', 'g-b', 'optional']]);
+    assert.deepStrictEqual(buildPlan({ inventory: items, page }).map((item) => [item.feature_id, item.label]), [['del-b', '1'], ['del-a', '2']]);
+    assert.deepStrictEqual(stepFeatures({ page, task: { id: 't' }, step: { id: 's', action: { target: delA } } }).map((item) => item.id), ['del-a']);
+  });
+
+  await test('页面上观察到、清单未覆盖的可交互元素成为候选；链接 / 输入框 / 已知 / 忽略名单不计', () => {
+    const semantic = { items: [{ role: 'button', name: '导出' }, { role: 'button', name: '上传附件' }, { role: 'link', name: '首页' }, { role: 'textbox', name: '搜索' }, { role: 'button', name: '帮助中心' }, { role: 'button', name: '导出' }, { role: 'button', name: '[redacted]' }] };
+    const items = pageInventory({ page: workspace, scenarioId: 'page-workspace' });
+    const candidates = domCandidates({ semantic, inventory: items, page: workspace, ignore: ['帮助*'] });
+    assert.deepStrictEqual(candidates.map((item) => item.label), ['导出']);
+    assert.strictEqual(domCandidates({ semantic, inventory: items, page: workspace, ignore: ['帮助*'] })[0].candidate_id, candidates[0].candidate_id, 'id 稳定');
+    const report = verifyCoverage({ inventory: items, plan: buildPlan({ inventory: items, page: workspace }), rendered: [drawn('upload')], candidates });
+    assert.strictEqual(report.ok, true);
+    assert.strictEqual(report.complete, false);
+    assert.deepStrictEqual(report.unresolvedCandidates.map((item) => item.label), ['导出']);
   });
 
   await test('T03 变体 Scenario 只校验本 Scenario 的项，不混入默认 guide', () => {
@@ -267,7 +321,7 @@ const annotationCodes = (errors) => errors.map((item) => item.code).filter((code
   });
 
   await test('发布门禁：记录有覆盖结果却缺 annotations.json → annotation-metadata-missing', async (root) => {
-    const { entry } = await seedCapture(root, { annotations: false });
+    const { entry } = await seedCapture(root, { annotations: false, proof: false });
     assert.ok(annotationCodes(validateArtifact(entry, { projectRoot: root, config: config() })).includes('annotation-metadata-missing'));
   });
 
@@ -281,23 +335,70 @@ const annotationCodes = (errors) => errors.map((item) => item.code).filter((code
   });
 
   await test('发布门禁：Required 未画出 → annotation-coverage-failed（记录与门禁两处）', async (root) => {
-    const { entry } = await seedCapture(root, { rendered: [{ feature_id: 'page:workspace:upload', located: true, drawn: false, reason: 'outside-image' }] });
+    const { entry } = await seedCapture(root, { rendered: [{ feature_id: 'upload', located: true, drawn: false, reason: 'outside-image' }] });
     assert.ok(annotationCodes(validateArtifact(entry, { projectRoot: root, config: config() })).includes('annotation-coverage-failed'));
     assert.deepStrictEqual(validateCaptureCoverage({ projectRoot: root, config: config(), captureIds: [entry.captureId] }).map((item) => item.code), ['annotation-coverage-failed']);
   });
 
-  await test('发布门禁：Capture 对应页面已删除 → annotation-metadata-invalid；记录缺失 → capture-record-missing', async (root) => {
+  await test('发布门禁：Capture 对应页面已删除 → annotation-plan-changed；记录缺失 → capture-record-missing', async (root) => {
     const { entry } = await seedCapture(root, { pages: [modelPage({ id: 'other', route: '/other' })] });
-    assert.ok(annotationCodes(validateArtifact(entry, { projectRoot: root, config: config() })).includes('annotation-metadata-invalid'));
+    assert.ok(annotationCodes(validateArtifact(entry, { projectRoot: root, config: config() })).includes('annotation-plan-changed'));
     assert.deepStrictEqual(validateCaptureCoverage({ projectRoot: root, config: config(), captureIds: ['00000000-0000-4000-8000-000000000000'] }).map((item) => item.code), ['capture-record-missing']);
   });
 
-  await test('旧证据没有覆盖结果：不阻断，但 verify 明确标为 unknown', async (root) => {
+  await test('T27 旧证据没有覆盖结果：public 阻断（annotation-coverage-unknown），internal 只警告；verify 标为 unknown', async (root) => {
     const { entry } = await seedCapture(root, { coverage: null, annotations: false });
-    assert.deepStrictEqual(annotationCodes(validateArtifact(entry, { projectRoot: root, config: config() })), []);
+    assert.deepStrictEqual(annotationCodes(validateArtifact(entry, { projectRoot: root, config: config() })), ['annotation-coverage-unknown']);
+    const warnings = [];
+    assert.deepStrictEqual(annotationCodes(validateArtifact(entry, { projectRoot: root, config: config('internal'), warnings })), []);
+    assert.deepStrictEqual(warnings.map((item) => item.code), ['annotation-coverage-unknown']);
     const report = annotationCoverageForImages(root, config(), [{ captureId: entry.captureId }]);
     assert.strictEqual(report.status, 'legacy-unknown');
     assert.strictEqual(report.captures[0].status, 'unknown');
+  });
+
+  await test('AC-06 删除 .manual/artifacts 后：内嵌证明仍能完成标注验收；没有证明的旧记录明确要求重采', async (root) => {
+    const { entry } = await seedCapture(root);
+    fs.rmSync(path.join(root, '.manual', 'artifacts'), { recursive: true, force: true });
+    assert.deepStrictEqual(annotationCodes(validateArtifact(entry, { projectRoot: root, config: config() })), []);
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.mkdirSync(root);
+    const legacy = await seedCapture(root, { proof: false });
+    fs.rmSync(path.join(root, '.manual', 'artifacts'), { recursive: true, force: true });
+    assert.deepStrictEqual(annotationCodes(validateArtifact(legacy.entry, { projectRoot: root, config: config() })), ['annotation-metadata-invalid']);
+  });
+
+  await test('B2-13 截图后定义变化：发布前要求重采（annotation-plan-changed），核对已发布证据时只提示', async (root) => {
+    const { entry } = await seedCapture(root, { pages: [modelPage({ features: [...workspace.features, { id: 'export', label: '导出', priority: 'required', description: '导出报告', target: { role: 'button', name: '导出' } }] })] });
+    assert.ok(annotationCodes(validateArtifact(entry, { projectRoot: root, config: config() })).includes('annotation-plan-changed'));
+    const warnings = [];
+    assert.deepStrictEqual(annotationCodes(validateArtifact(entry, { projectRoot: root, config: config(), frozen: true, warnings })), [], '历史截图的结论不被当前定义改写');
+    assert.deepStrictEqual(warnings.map((item) => item.code), ['annotation-plan-changed']);
+  });
+
+  await test('B2-14 public 页面有已确认的必标功能时不能用 --no-screenshot 跳过截图；internal 允许', async (root) => {
+    pageStore.writeModel(path.join(root, '.manual'), { name: 'x', framework: 'nextjs', router: 'app', generatedAt: '2026-10-10T00:00:00.000Z' }, [modelPage()]);
+    const { draftPage } = require('../src/generate/page-usecase');
+    assert.throws(() => draftPage({ projectRoot: root, config: config(), pageId: 'workspace', noScreenshot: true }), (error) => /screenshot-required/.test((error.errors || [error.message]).join(' ')));
+    let internalError = null;
+    try { draftPage({ projectRoot: root, config: config('internal'), pageId: 'workspace', noScreenshot: true }); } catch (error) { internalError = error; }
+    assert.ok(!/screenshot-required/.test(String(internalError?.errors || internalError?.message || '')), 'internal 不因必标功能拒绝纯文字草稿');
+  });
+
+  await test('T13 调换 guide 顺序但沿用旧图：annotation-label-mismatch', async (root) => {
+    const intro = { id: 'intro', title: '了解工作台', instruction: '工作台汇总了资料。' };
+    const before = modelPage({ guide: [...workspace.guide, intro] });
+    const { entry } = await seedCapture(root, { page: before, pages: [modelPage({ guide: [intro, ...workspace.guide] })] });
+    assert.ok(annotationCodes(validateArtifact(entry, { projectRoot: root, config: config() })).includes('annotation-label-mismatch'));
+  });
+
+  await test('未确认的候选功能：public 发布阻断（inventory-review-required），internal 只警告', async (root) => {
+    const candidates = [{ candidate_id: 'page:workspace:dom:x', label: '导出', role: 'button' }];
+    const { entry } = await seedCapture(root, { candidates });
+    assert.ok(validateArtifact(entry, { projectRoot: root, config: config() }).some((item) => item.code === 'inventory-review-required' && /导出（页面发现）/.test(item.message)));
+    const warnings = [];
+    assert.ok(!validateArtifact(entry, { projectRoot: root, config: config('internal'), warnings }).some((item) => item.code === 'inventory-review-required'));
+    assert.deepStrictEqual(warnings.map((item) => item.code), ['inventory-review-required']);
   });
 
   process.stdout.write(`${passed} passed, ${failures.length} failed\n`);

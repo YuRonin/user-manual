@@ -639,7 +639,8 @@ class PlaywrightBrowserProvider extends BrowserProvider {
       revealedBy = 'hover';
       if (await this.isTransparent(locator)) throw transparent();
     }
-    return { target, rect: await locator.boundingBox(), resolution: this.lastResolution, revealedBy };
+    // 被浮层盖住的目标照常返回几何，由调用方判定为 target-occluded（B2-08）
+    return { target, rect: await locator.boundingBox(), resolution: this.lastResolution, revealedBy, obscuredBy: await this.coverOf(locator) };
   }
 
   /**
@@ -647,15 +648,20 @@ class PlaywrightBrowserProvider extends BrowserProvider {
    * （悬停会让提示条保持显示），再在有限时间内等浮层消失。仍被遮挡就报 target-obscured，
    * 不点击浮层、不反复点击目标，也不会让 Runtime 重放之前的保存（B1-11）。
    */
-  async ensureUnobscured(locator, { timeoutMs = 5000 } = {}) {
-    await locator.scrollIntoViewIfNeeded().catch(() => {});
-    const probe = () => locator.evaluate((el) => {
+  /** 盖在目标中心点上的其他元素（描述文字）；没有遮挡或中心点不在视口内返回 null。不滚动页面。 */
+  coverOf(locator) {
+    return locator.evaluate((el) => {
       const r = el.getBoundingClientRect();
       const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
       if (!top || el === top || el.contains(top) || top.contains(el)) return null;
       const label = top.getAttribute('role') || top.tagName.toLowerCase();
       return `${label}「${(top.innerText || top.getAttribute('aria-label') || '').trim().slice(0, 40)}」`;
     }).catch(() => null);
+  }
+
+  async ensureUnobscured(locator, { timeoutMs = 5000 } = {}) {
+    await locator.scrollIntoViewIfNeeded().catch(() => {});
+    const probe = () => this.coverOf(locator);
     let cover = await probe();
     if (!cover) return;
     await this.page.mouse.move(0, 0).catch(() => {});

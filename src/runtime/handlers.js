@@ -21,6 +21,7 @@ const { approvalState, APPROVAL_STATES, approvalMessage } = require('../model/ap
 const { ANALYSIS } = require('../inspect/model');
 const { createCaptureStore } = require('../evidence/store');
 const { annotationSummary } = require('../evidence/integrity');
+const { currentScope, staleness } = require('../annotations/proof');
 const { capturePage, pageProjection } = require('../evidence/capture-page');
 const { rederiveCaptures } = require('../evidence/rederive');
 const { captureTask, taskProjection } = require('../tasks/capture-usecase');
@@ -341,6 +342,13 @@ async function deriveImage(ctx, task) {
   const current = currentSubjectInputs(ctx, subject);
   const source = dependencyOutputs(ctx, task, 'capture');
   const captureIds = source.filter((r) => r.kind === 'capture').map((r) => r.ref);
+  // 重新派生沿用截图时冻结的计划：定义已经变了就不能用旧计划产出"新定义下的有效图"，必须重采（B2-15）
+  const model = loadModel(ctx).load().model;
+  for (const record of readRecords(ctx, captureIds)) {
+    if (!record.annotationProof) continue;
+    const stale = staleness(record.annotationProof, currentScope(model, record), record);
+    if (stale.length) throw new RuntimeError('annotation-plan-changed', `Capture ${record.id}: ${stale.map((p) => p.message).join('；')}；需要重新采集（generate --refresh）。`);
+  }
   const { records, mapping } = await rederiveCaptures({ projectRoot: ctx.projectRoot, config: ctx.config, captureIds, runId: ctx.runId });
   const projectStore = loadModel(ctx);
   const base = projectStore.load();

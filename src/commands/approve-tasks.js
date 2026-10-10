@@ -128,7 +128,11 @@ function run(argv) {
       }),
     };
     const checked = validateTask(next);
+    // 批准即可执行：此刻引用的页面与状态必须存在（B2-10）。完成声明的断言可能在任务级定义，不在这里判。
+    const refs = require('../model/schema').validateUserTask(next, { pages: pages.pages }).errors
+      .filter((error) => error.code === 'missing-reference' && !/assertionRefs|checkpoint/.test(error.path));
     if (!checked.ok) errors.push(...checked.errors.map((error) => `${where}: ${error}`));
+    else if (refs.length) errors.push(...refs.map((error) => `${where}: missing-reference ${error.path}: ${error.message}`));
     else operations.push({ type: 'approve', task: checked.task });
   });
 

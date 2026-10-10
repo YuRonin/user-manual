@@ -85,14 +85,36 @@ function annotationSvg({ width, height, annotations, dpr, theme }) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">${parts.join('')}</svg>`;
 }
 
-function renderAnnotationResults(annotations, { width, height, dpr }) {
+const area = (rect) => (rect ? rect.width * rect.height : 0);
+function overlap(a, b) {
+  const x = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
+  const y = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
+  return x * y;
+}
+
+/**
+ * 逐项渲染结果（B2-07 / B2-08）。几何上的判断，不冒充像素验收：
+ *   visibleRatio  元素本身（sourceRect）落在截图内的面积比例；低于 minVisibleRatio 记 partially-clipped
+ *   redactedRatio 元素被隐私遮罩盖住的比例；超过一半记 target-redacted（框画在马赛克上没有意义）
+ * visible=false 的项不算"标到了"。
+ */
+function renderAnnotationResults(annotations, { width, height, dpr, redactions = [], minVisibleRatio = 0.8 }) {
+  const masks = redactions.map((item) => item.rect && toImageRect(item.rect, { width, height, dpr })).filter(Boolean);
   return annotations.map((item) => {
     const target = item.target && toImageRect(item.target, { width, height, dpr });
     const source = item.sourceRect && toImageRect(item.sourceRect, { width, height, dpr });
     const marker = item.marker && toImageRect({ x: item.marker.x, y: item.marker.y, width: item.marker.size, height: item.marker.size }, { width, height, dpr });
     const intersects = !!(item.sourceRect ? source : target);
     const drawn = intersects && !!marker;
-    return { feature_id: item.feature_id || null, located: !!item.target, outlined: intersects, intersects, drawn, target: target || null, marker: marker || null, reason: drawn ? null : !item.target ? 'target-not-located' : !intersects ? 'outside-image' : 'marker-outside-image' };
+    const raw = item.sourceRect || item.target;
+    const full = raw ? Number(raw.width) * Number(raw.height) * dpr * dpr : 0;
+    const shown = item.sourceRect ? source : target;
+    const visibleRatio = full > 0 ? Math.round((area(shown) / full) * 1000) / 1000 : 0;
+    const redactedRatio = shown && area(shown) > 0 ? Math.round((masks.reduce((sum, mask) => sum + overlap(shown, mask), 0) / area(shown)) * 1000) / 1000 : 0;
+    const reason = !item.target ? 'target-not-located' : !intersects ? 'outside-image' : !marker ? 'marker-outside-image'
+      : visibleRatio < minVisibleRatio ? 'partially-clipped' : redactedRatio > 0.5 ? 'target-redacted' : null;
+    return { feature_id: item.feature_id || null, label: item.label || null, located: !!item.target, outlined: intersects, intersects, drawn, visible: drawn && !reason,
+      visibleRatio, redactedRatio, imageRect: shown || null, target: target || null, marker: marker || null, reason };
   });
 }
 

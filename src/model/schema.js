@@ -296,12 +296,15 @@ function validatePage(page) {
       page.features.forEach((item, i) => {
         const at = `features[${i}]`;
         if (!isObject(item)) { c.error(at, 'invalid-feature', 'feature must be an object'); return; }
-        if (!nonEmpty(item.feature_id) || ids.has(item.feature_id)) c.error(`${at}.feature_id`, 'invalid-feature', 'feature_id must be unique');
-        ids.add(item.feature_id);
+        // 新写法 id / taskIds，旧写法 feature_id / task_ids，两种都接受（B2-04）
+        const featureId = item.id ?? item.feature_id;
+        if (!nonEmpty(featureId) || ids.has(featureId)) c.error(`${at}.id`, 'invalid-feature', 'feature id 需要非空且在页面内唯一');
+        ids.add(featureId);
         if (!nonEmpty(item.label)) c.error(`${at}.label`, 'invalid-feature', 'label is required');
         if (!['required', 'optional', 'skip', 'undecided'].includes(item.priority)) c.error(`${at}.priority`, 'invalid-feature', 'priority must be required, optional, skip, or undecided');
         if (item.target) validateTarget(c, item.target, `${at}.target`);
-        if (item.task_ids !== undefined && (!Array.isArray(item.task_ids) || item.task_ids.some((id) => !nonEmpty(id)))) c.error(`${at}.task_ids`, 'invalid-feature', 'task_ids must be an array of ids');
+        const taskIds = item.taskIds ?? item.task_ids;
+        if (taskIds !== undefined && (!Array.isArray(taskIds) || taskIds.some((id) => !nonEmpty(id)))) c.error(`${at}.taskIds`, 'invalid-feature', 'taskIds 需要是任务 id 数组');
       });
     }
   }

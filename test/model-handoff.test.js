@@ -40,11 +40,13 @@ function project(baseUrl) {
   cli(root, ['init', '--base-url', baseUrl, '--audience', 'public']);
   cli(root, ['inspect']);
   cli(root, ['describe', '--input', writeJson(path.join(root, 'describe.json'), { pages: [
-    { id: 'chat', title: '工作台', purpose: '与 AI 助手对话。', detectedActions: ['点击「新对话」创建会话'] },
+    { id: 'chat', title: '工作台', purpose: '与 AI 助手对话。', detectedActions: ['点击「新对话」创建会话'], features: [{ id: 'new-chat', label: '新对话', priority: 'optional' }] },
   ] })]);
   const file = path.join(root, '.manual', 'pages', 'task-profile.yaml');
   const page = yaml.load(fs.readFileSync(file, 'utf8'));
   page.states = { default: { assertions: [{ id: 'profile-heading', type: 'visible', target: { role: 'heading', name: '个人中心' } }] } };
+  // 页面上的按钮都要有明确决定，公开手册才能发布（B2）
+  page.features = [{ id: 'edit-profile', label: '编辑资料', priority: 'optional' }, { id: 'benefits', label: '学校权益', priority: 'optional' }];
   fs.writeFileSync(file, yaml.dump(page));
   return root;
 }
