@@ -194,7 +194,7 @@ function run(argv) {
     }
     return fail([`${e.code || 'model-commit-failed'}: ${e.message}`], { json });
   }
-  const { detected, scan, result, fingerprinted, impact, staleTasks, pruned, meta, graphRevision, written, projectFile, stateDirAbs } = refreshed;
+  const { detected, scan, result, fingerprinted, impact, staleTasks, pruned, meta, graphRevision, written, projectFile, stateDirAbs, featureInventory } = refreshed;
   const warnings = [...loaded.warnings, ...refreshed.dependencyWarnings];
   const worklist = buildWorklist(result.pages);
 
@@ -243,6 +243,7 @@ function run(argv) {
           skipped: scan.skipped,
           conflicts: scan.conflicts,
           worklist,
+          featureInventory: { file: featureInventory.file, pending: featureInventory.snapshot.pending, pages: featureInventory.snapshot.pages },
           warnings,
           staleTasks: staleTasks.staleIds,
           writtenFiles: written,

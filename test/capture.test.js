@@ -125,6 +125,33 @@ async function main() {
     }
   });
 
+  await test('页面 Required 功能未进入计划时保留原图和失败清单，但不发布标注图', async () => {
+    const root = await prepareProject(server.baseUrl);
+    try {
+      const file = path.join(root, '.manual', 'pages', 'chat.yaml');
+      const page = pageYaml(root, 'chat');
+      page.features = [
+        { feature_id: 'workspace-title', label: '工作台', priority: 'required', description: '找到工作台标题。' },
+        { feature_id: 'history', label: '历史会话', priority: 'required', description: '查看历史会话。' },
+      ];
+      page.guide = [{ id: 'title', title: '工作台', instruction: '找到工作台标题。', target: { role: 'heading', name: '工作台' } }];
+      fs.writeFileSync(file, yaml.dump(page), 'utf8');
+      const result = await run('capture', root, ['chat', '--json']);
+      assert.strictEqual(result.status, 0, result.stderr || result.stdout);
+      const updated = pageYaml(root, 'chat');
+      assert.ok(fs.existsSync(path.join(root, updated.browser.screenshot)));
+      assert.strictEqual(updated.browser.published, null);
+      const record = require('../src/evidence/store').createCaptureStore({ projectRoot: root, stateDirAbs: path.join(root, '.manual') }).read(updated.browser.latestCaptureId);
+      assert.strictEqual(record.annotationCoverage.required.total, 2);
+      assert.strictEqual(record.annotationCoverage.required.verified, 1);
+      assert.ok(record.annotationCoverage.failures.some((item) => item.feature_id === 'history' && item.reason === 'missing-from-plan'));
+      assert.ok(record.artifacts.some((item) => item.kind === 'annotations'));
+      const attempted = await run('generate', root, ['chat', '--no-screenshot', '--json']);
+      assert.notStrictEqual(attempted.status, 0);
+      assert.match(attempted.stdout + attempted.stderr, /annotation-coverage-failed/);
+    } finally { fx.cleanup(root); }
+  });
+
   await test('输出路径是 .manual/artifacts/raw/pages/<page-id>.png（原图不进文档目录）', async () => {
     const root = await prepareProject(server.baseUrl);
     try {

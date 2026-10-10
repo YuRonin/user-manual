@@ -10,6 +10,7 @@ const { revisionOf } = require('../util/hash');
 const { validateNavigation, runAssertions, isUrlOnly, DEFAULT_ASSERTION_TIMEOUT_MS } = require('../evidence/validate-page');
 const { errorCode } = require('../runtime/errors');
 const { derivationSidecar } = require('../evidence/capture-page');
+const { stepInventory, buildPlan } = require('../annotations/coverage');
 
 class TaskExecutionError extends Error {
   constructor(code, message, details = {}) {
@@ -34,21 +35,21 @@ async function diagnosticScreenshot(provider, stateDir, plan, step) {
  * 截图时刻解析标注目标：after 截图必须重新定位，不能沿用动作前的旧矩形。
  * 目标找不到时返回 annotation-target-missing（需要在 capture.annotations 里另指定目标）。
  */
-function annotationResolver(provider, step) {
+function annotationResolver(provider, step, annotationPlan) {
   return async () => {
     const out = [];
     const located = [];
-    for (const annotation of step.capture?.annotations || []) {
-      if (annotation.rect) { out.push({ label: annotation.label, rect: annotation.rect }); continue; }
+    for (const annotation of annotationPlan) {
+      if (annotation.rect) { out.push({ feature_id: annotation.feature_id, label: annotation.label, rect: annotation.rect }); continue; }
       const target = annotation.target === 'action.target' ? step.action?.target : annotation.target;
-      if (!target) continue;
+      if (!target) { out.push({ feature_id: annotation.feature_id, label: annotation.label, reason: 'target-not-declared' }); continue; }
       try {
         const found = await provider.performAction({ type: 'inspect', target });
         if (!found?.rect) throw new Error('目标没有可用几何。');
-        out.push({ label: annotation.label, rect: found.rect });
+        out.push({ feature_id: annotation.feature_id, label: annotation.label, rect: found.rect });
         located.push({ target, label: annotation.label, revealedBy: found.revealedBy || null });
       } catch (error) {
-        throw Object.assign(new Error(`步骤 ${step.id} 的标注目标在截图时不可见：${error.message}`), { code: 'annotation-target-missing' });
+        out.push({ feature_id: annotation.feature_id, label: annotation.label, reason: error.code || 'annotation-target-missing' });
       }
     }
     await confirmTargetsShown(provider, located);
@@ -67,8 +68,15 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
   const prefix = `${plan.taskId}--${step.id}--${timing}`;
   const rawPath = staging.file('raw.png');
   const publish = provider.collectSensitiveElements && options.projectRoot && options.annotatedDir;
+  const task = { id: plan.taskId, scenarioId: plan.scenario?.id || 'default', steps: [step] };
+  // capture-plan 已把归属本步骤的页面功能放进 step.capture.features；发布门禁用同一个 stepInventory 复算
+  const page = { id: step.page, features: step.capture?.features || [], guide: [], detectedActions: [] };
+  const inventory = stepInventory({ page, task, step });
+  const annotationPlan = buildPlan({ inventory, page, task, step });
   try {
-    const captured = await captureStable(provider, { rawPath, resolveTargets: publish ? annotationResolver(provider, step) : async () => [] });
+    const captured = await captureStable(provider, { rawPath, resolveTargets: publish ? annotationResolver(provider, step, annotationPlan) : async () => [] });
+    captured.inventory = inventory;
+    captured.plan = annotationPlan;
     const stateRelative = path.relative(projectRoot, stateDir).replace(/\\/g, '/') || '.';
     const artifacts = [{ kind: 'raw', file: rawPath, dir: `${stateRelative}/artifacts/raw`, prefix }];
     let safe = null;
@@ -80,6 +88,8 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
         captured, rawPath, sanitizedPath: staging.file('sanitized.png'), publishedPath: staging.file('published.png'),
         theme: options.theme, redactionRules: options.redactionRules || {},
       });
+      fs.writeFileSync(staging.file('annotations.json'), JSON.stringify({ version: 1, inventory, plan: annotationPlan, rendered: safe.rendered, coverage: safe.coverage }, null, 2));
+      artifacts.push({ kind: 'annotations', file: staging.file('annotations.json'), dir: `${stateRelative}/artifacts/annotations`, prefix });
       artifacts.push({ kind: 'sanitized', file: staging.file('sanitized.png'), dir: `${stateRelative}/artifacts/sanitized`, prefix });
       if (safe.published) artifacts.push({ kind: 'published', file: staging.file('published.png'), dir: options.annotatedDir, prefix });
     }
@@ -105,6 +115,7 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
         validations: validations.filter((v) => v && v.scope && v.outcome),
         // 未做隐私检测的截图明确记为 not-run，发布时按 unknown 处理
         ...(safe ? { quality: safe.quality } : {}),
+        ...(safe ? { annotationCoverage: safe.coverage } : {}),
         privacy: safe ? safe.privacy : { status: 'not-run' },
         redactions: safe ? safe.redactions.map(({ kind, rect, result }) => ({ kind, rect, result })) : [],
         ...(options.fixture ? { fixture: options.fixture } : {}),
@@ -127,6 +138,7 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
       // 实际执行过检测的记录；缺这条记录的截图在发布时按 privacy unknown 处理。
       output.privacy = safe.privacy;
       output.annotations = safe.annotations;
+      output.annotationCoverage = safe.coverage;
       output.quality = safe.quality;
       output.derivedFromRawHash = safe.derived.rawHash;
       output.geometryHash = safe.derived.geometryHash;

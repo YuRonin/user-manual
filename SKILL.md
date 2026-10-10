@@ -49,7 +49,11 @@ manual discover-tasks <page-id|--all>              # 取得候选工作清单 �
 manual approve-tasks --input <决策.json>            # 用户确认后才批准
 ```
 
-候选任务的名称、目标、步骤、风险和证据摘要要先展示给用户；只在用户本次或先前明确授权的范围内批准，范围不清就问。只有已批准的任务才会被采集和发布。任务模型里直接面向读者的字段（标题、`readerPreconditions`、完成声明、`readerChecks`、`branches`、`capture.readerCaption`）按[写作规范](references/manual-writing-style.md)第三、五节写。细节见[任务工作流](references/task-workflow.md)。
+候选任务的名称、目标、步骤、风险和证据摘要要先展示给用户；只在用户本次或先前明确授权的范围内批准，范围不清就问。只有已批准的任务才会被采集和发布。任务模型里直接面向读者的字段（标题、步骤 `title`（帮助中心目录用的短名称）、`readerPreconditions`、完成声明、`readerChecks`、`branches`、`capture.readerCaption`）按[写作规范](references/manual-writing-style.md)第三、五节写。细节见[任务工作流](references/task-workflow.md)。
+
+### 标注计划与待确认功能
+
+`inspect` / `describe` / 任务审批后读取 `.manual/feature-inventory.json` 的 `pending`。结合读者要完成的任务，在 `describe --input` 的 `features` 中为相关功能写稳定的 `feature_id`、`required|optional|skip` 决策、Scenario 和说明；Required 要关联页面 `guide` 或任务步骤及截图目标。采集后的 `annotations.json` 和 `verify --artifacts --json` 会分别报告逐项绘制与覆盖状态。`pending-review` 需要明确报告为待确认，Required 失败时按失败原因补计划或截图，再生成手册。字段与判定细节见 [标注覆盖率](docs/ANNOTATION_COVERAGE.md)。
 
 ## 3. 生成
 

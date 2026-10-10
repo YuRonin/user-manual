@@ -198,6 +198,12 @@ function validateEntry(entry, index, knownIds, errors) {
     }
   }
 
+  if (entry.features !== undefined) {
+    const checked = require('../model/schema').validatePage({ id: entry.id, route: '/', features: entry.features });
+    if (!checked.ok) errors.push(...checked.errors.map(e => `${where}.${e.path}: ${e.message}`));
+    else { patch.features = entry.features; touched = true; }
+  }
+
   if (entry.source !== undefined) {
     if (!Array.isArray(entry.source) || entry.source.some((s) => typeof s !== 'string')) {
       errors.push(`${where}.source 需要是字符串数组。`);
@@ -238,6 +244,7 @@ function applyPatch(page, patch) {
   const next = {
     ...page,
     ...(patch.guide !== undefined ? { guide: patch.guide } : {}),
+    ...(patch.features !== undefined ? { features: patch.features } : {}),
     title: patch.title !== undefined ? patch.title : page.title,
     purpose: patch.purpose !== undefined ? patch.purpose : page.purpose,
     detectedActions: patch.detectedActions !== undefined ? patch.detectedActions : (page.detectedActions || []),
@@ -351,6 +358,7 @@ function run(argv) {
   }
   const projectFile = store.projectFileFor(stateDirAbs);
   const allPages = [...byId.values()].sort((a, b) => String(a.route).localeCompare(String(b.route)));
+  const featureInventory = require('../annotations/store').writeInventory(stateDirAbs, allPages, base.model.tasks);
 
   const remaining = allPages.filter(
     (p) => p.includeInManual !== false && p.status?.sourceAnalysis !== ANALYSIS.COMPLETED
@@ -370,6 +378,7 @@ function run(argv) {
             confidence: p.confidence,
           })),
           remaining: remaining.map((p) => ({ id: p.id, route: p.route })),
+          featureInventory: { file: featureInventory.file, pending: featureInventory.snapshot.pending },
         },
         null,
         2

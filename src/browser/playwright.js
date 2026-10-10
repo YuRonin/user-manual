@@ -744,6 +744,19 @@ class PlaywrightBrowserProvider extends BrowserProvider {
   }
 
   /**
+   * 等 DOM 连续 quietMs 毫秒无变动（最多 maxMs）。任务截图前调用：动作后的收尾渲染
+   * （如回复落地后的逐字补齐）会让前后几何不一致，不等就会把有限的重试次数耗在同一段变化里。
+   */
+  async waitForQuiet({ quietMs = 400, maxMs = 5000 } = {}) {
+    if (!this.page) return 'no-page';
+    try {
+      return await this.page.evaluate(waitForDomQuiet, { quietMs, maxMs });
+    } catch (_) {
+      return 'error';
+    }
+  }
+
+  /**
    * 截图前后的几何快照。首次调用时安装 MutationObserver 计数器；
    * 截图前后 generation / 滚动 / 尺寸不一致，说明像素与矩形可能不属于同一时刻。
    */

@@ -82,6 +82,19 @@ test('同一块两边都改：冲突，提案取新生成并保留人工块外�
   assert.match(merged.proposed, /人工说明/);
 });
 
+test('旧手册升级出步骤标题注释：未手改的步骤直接更新，手改过的同一步骤报冲突', () => {
+  const step = (id, text, title) => [`<!-- step:${id} -->`, ...(title ? [`<!-- step-title: ${title} -->`] : []), text].join('\n');
+  const base = doc({ 'step.a': step('a', '1. 点击「保存」'), 'step.b': step('b', '2. 点击「发布」') });
+  const next = doc({ 'step.a': step('a', '1. 点击「保存」', '保存草稿'), 'step.b': step('b', '2. 点击「发布」', '发布活动') });
+  const clean = mergeManual({ base, current: base, next });
+  assert.ok(clean.ok);
+  assert.strictEqual(clean.markdown, next);
+  const edited = doc({ 'step.a': step('a', '1. 点击「保存」'), 'step.b': step('b', '2. 点击「发布」\n\n   人工补充') });
+  const merged = mergeManual({ base, current: edited, next });
+  assert.strictEqual(merged.ok, false);
+  assert.deepStrictEqual(merged.conflicts.map((c) => c.blockId), ['step.b']);
+});
+
 test('owner=human 的块由人接管：生成器不覆盖也不报冲突；新生成删掉的块也保留', () => {
   const base = doc({ a: 'A1', b: 'B1' });
   const current = doc({ a: 'A 我的版本', b: 'B1' }, { a: 'human' });

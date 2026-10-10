@@ -132,8 +132,20 @@ test('候选可引用页面指南目标，仍须明确动作类型并保持待�
   assert.strictEqual(saved.steps[0].id, 'edit');
   assert.strictEqual(saved.steps[0].instruction, '点击「编辑资料」打开编辑面板。');
   assert.deepStrictEqual(saved.steps[0].action.target, { role: 'button', name: '编辑资料' });
+  assert.strictEqual(saved.steps[0].title, '编辑资料', '指南小标题作为步骤目录名的默认值');
   assert.strictEqual(saved.status, 'candidate');
   assert.strictEqual(saved.approval.status, 'pending');
+});
+
+test('引用指南时显式 title 覆盖指南小标题', (root) => {
+  const stateDir = prepare(root);
+  const input = path.join(root, 'candidates.json');
+  const task = candidate();
+  task.steps[0] = { guideStep: 'edit', title: '打开编辑面板', action: { type: 'click' } };
+  fs.writeFileSync(input, JSON.stringify({ tasks: [task] }), 'utf8');
+  const result = run(root, ['user-center', '--input', input]);
+  assert.strictEqual(result.status, 0, result.stdout);
+  assert.strictEqual(require('../src/tasks/store').readTask(stateDir, 'edit-profile').steps[0].title, '打开编辑面板');
 });
 
 test('不存在的指南目标与缺失动作类型均拒绝落盘', (root) => {

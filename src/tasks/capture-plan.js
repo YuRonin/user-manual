@@ -2,7 +2,8 @@
 
 const path = require('path');
 const { writeText } = require('../util/fsx');
-const { effectiveRisk } = require('./model');
+const { effectiveRisk, stepPageId } = require('./model');
+const { stepFeatures } = require('../annotations/coverage');
 const { approvalState, approvalMessage, scopeHash, pageRevisionsFor, APPROVAL_STATES } = require('../model/approval');
 const { definitionRevision } = require('../model/revision');
 const { resolveEntryLocation } = require('../scenarios/model');
@@ -44,7 +45,7 @@ function buildCapturePlan(task, pages, options = {}) {
   const byId = new Map(pages.map((page) => [page.id, page]));
   const entryPage = byId.get(task.entryPage);
   if (!entryPage) errors.push(`入口页面不存在: ${task.entryPage}`);
-  for (const pageId of new Set([task.entryPage, ...(task.steps || []).map((step) => step.page)])) {
+  for (const pageId of new Set([task.entryPage, ...(task.steps || []).map(stepPageId)])) {
     const lifecycle = byId.get(pageId)?.lifecycle || 'active';
     if (byId.has(pageId) && lifecycle !== 'active') errors.push(`page-not-active: 页面 ${pageId} 当前是 ${lifecycle}，不能采集。`);
   }
@@ -64,19 +65,20 @@ function buildCapturePlan(task, pages, options = {}) {
   }
 
   const steps = (task.steps || []).map((step, index) => {
-    const page = byId.get(step.page);
+    const pageId = stepPageId(step);
+    const page = byId.get(pageId);
     if (!page) {
-      errors.push(`steps[${index}] 引用不存在的页面: ${step.page}`);
+      errors.push(`steps[${index}] 引用不存在的页面: ${pageId}`);
       return null;
     }
     const states = { default: implicitDefaultState(page), ...(page.states || {}) };
     const before = step.stateBefore || 'default';
-    const nextPage = task.steps[index + 1]?.page;
-    const pageAfter = step.pageAfter || (!step.stateAfter && step.action?.type === 'click' && nextPage && nextPage !== step.page ? nextPage : step.page);
+    const nextPage = stepPageId(task.steps[index + 1]);
+    const pageAfter = step.pageAfter || (!step.stateAfter && step.action?.type === 'click' && nextPage && nextPage !== pageId ? nextPage : pageId);
     const destination = byId.get(pageAfter);
     if (!destination || (destination.lifecycle && destination.lifecycle !== 'active')) errors.push(`steps[${index}].pageAfter 不存在或不可用: ${pageAfter}`);
     const afterStates = destination ? { default: implicitDefaultState(destination), ...(destination.states || {}) } : {};
-    const after = step.stateAfter || (pageAfter !== step.page ? 'default' : before);
+    const after = step.stateAfter || (pageAfter !== pageId ? 'default' : before);
     if (!states[before]) errors.push(`steps[${index}].stateBefore 不存在: ${before}`);
     if (!afterStates[after]) errors.push(`steps[${index}].stateAfter 不存在: ${after}`);
     // 状态必须能被断言验证：空断言的状态无法区分"到达"与"没到达"。
@@ -91,11 +93,14 @@ function buildCapturePlan(task, pages, options = {}) {
       execution = 'stop-before-action';
       riskReason = 'unclassified-high-risk';
     }
-    const previousPage = index === 0 ? task.entryPage : task.steps[index - 1].page;
+    const previousPage = index === 0 ? task.entryPage : stepPageId(task.steps[index - 1]);
     return {
       id: step.id,
+      // 任务内原始序号（1 起）：隐式动作标注用它编号，与正文步骤号一致
+      number: index + 1,
+      ...(step.feature_id ? { feature_id: step.feature_id } : {}),
       instruction: step.instruction,
-      page: step.page,
+      page: pageId,
       route: page.route,
       stateBefore: before,
       beforeState: states[before] ? { id: before, ...states[before] } : null,
@@ -110,9 +115,13 @@ function buildCapturePlan(task, pages, options = {}) {
       execution,
       willExecute: execution === 'auto',
       // 跨页面步骤：执行前的 stateBefore 断言会确认已经到达新页面
-      crossPage: step.page !== previousPage,
+      crossPage: pageId !== previousPage,
       expectedState: execution === 'auto' ? { id: after, page: pageAfter, ...afterStates[after] } : null,
-      capture: step.capture ? { ...step.capture, annotations: (step.capture.annotations || []).map(a => ({ ...a, label: String(index + 1) })) } : null,
+      capture: step.capture ? { ...step.capture,
+        // 只带归属本步骤的功能（feature_id 或目标与动作一致），不按 task_ids 注入到每一步
+        features: stepFeatures({ page, task, step }),
+        annotations: (step.capture.annotations || []).map((a, markerIndex) => ({ ...a, label: String(markerIndex + 1) })),
+      } : null,
     };
   }).filter(Boolean);
 

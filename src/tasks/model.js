@@ -2,9 +2,9 @@
 
 const schema = require('../model/schema');
 
-// 共享 schema 负责的结构规则：动作白名单、定位、断言、replay、截图时机、stepId 字符与版本。
+// 共享 schema 负责的结构规则：动作白名单、定位、断言、replay、截图时机、步骤标题、stepId 字符与版本。
 // 其余规则（必填字段、claims、状态）仍在本文件按旧格式输出，避免重复报错。
-const SHARED_CODES = new Set(['invalid-action', 'invalid-target', 'invalid-assertion', 'invalid-replay', 'invalid-capture', 'schema-too-new', 'invalid-schema-version']);
+const SHARED_CODES = new Set(['invalid-action', 'invalid-target', 'invalid-assertion', 'invalid-replay', 'invalid-capture', 'invalid-step-title', 'schema-too-new', 'invalid-schema-version']);
 
 const RISKS = ['read', 'local', 'write', 'destructive'];
 const STATUSES = ['candidate', 'approved', 'captured', 'generated', 'verified', 'stale'];
@@ -18,6 +18,11 @@ const FORWARD_STATUS = {
 
 function nonEmpty(value) {
   return typeof value === 'string' && value.trim() !== '';
+}
+
+/** 步骤所属页面：新模型写 pageId，旧模型写 page；读取一律走这里。 */
+function stepPageId(step) {
+  return step?.pageId ?? step?.page;
 }
 
 function effectiveRisk(task, step) {
@@ -35,7 +40,8 @@ function normalizeStep(step, taskRisk) {
     ...step,
     id: typeof step?.id === 'string' ? step.id.trim() : step?.id,
     instruction: typeof step?.instruction === 'string' ? step.instruction.trim() : step?.instruction,
-    page: typeof step?.page === 'string' ? step.page.trim() : step?.page,
+    ...(typeof step?.title === 'string' ? { title: step.title.trim() } : {}),
+    page: typeof stepPageId(step) === 'string' ? stepPageId(step).trim() : stepPageId(step),
   };
   const risk = RISKS.includes(step?.risk) ? step.risk : taskRisk;
   normalized.execution = executionFor(risk);
@@ -86,7 +92,7 @@ function validateTask(input) {
       else if (ids.has(step.id)) errors.push(`${where}.step.id 重复: ${step.id}`);
       else ids.add(step.id);
       if (!nonEmpty(step.instruction)) errors.push(`${where}.instruction 需要是非空字符串。`);
-      if (!nonEmpty(step.page)) errors.push(`${where}.page 需要是非空字符串。`);
+      if (!nonEmpty(stepPageId(step))) errors.push(`${where}.page 需要是非空字符串。`);
       if (!step.action || typeof step.action !== 'object' || !nonEmpty(step.action.type)) {
         errors.push(`${where}.action.type 需要是非空字符串。`);
       }
@@ -180,6 +186,7 @@ module.exports = {
   STATUSES,
   COMPLETION_VERIFICATIONS,
   effectiveRisk,
+  stepPageId,
   normalizeTask,
   validateTask,
   transitionTask,

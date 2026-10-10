@@ -19,7 +19,9 @@ function publishedFromCapture(projectRoot, stateDir, captureId, artifactPath) {
   }
   if (!captureRecord) return { ok: false, error: `capture-record-missing: ${captureId}` };
   const artifact = (captureRecord.artifacts || []).find((a) => a.kind === 'published');
-  if (!artifact || artifact.path !== artifactPath) return { ok: false, error: `证据清单与 Capture ${captureId} 的发布图不一致。` };
+  if (!artifact || artifact.path !== artifactPath) return { ok: false, error: captureRecord.annotationCoverage && !captureRecord.annotationCoverage.ok
+    ? `annotation-coverage-failed: ${captureRecord.annotationCoverage.failures.map((item) => `${item.feature_id}:${item.reason}`).join('、')}`
+    : `证据清单与 Capture ${captureId} 的发布图不一致。` };
   const integrity = verifyCaptureRecord(projectRoot, captureRecord, { kinds: ['published'] });
   if (!integrity.ok) return { ok: false, error: describeProblems(integrity.problems).join('；') };
   return { ok: true, sha256: artifact.sha256, privacy: captureRecord.privacy };
@@ -42,6 +44,11 @@ function buildTaskDraft(task, evidence, context = {}) {
     for (const shot of record.screenshots || []) {
       // 证据中仍保留截图；标注误导时可显式不放进面向读者的正文。
       if (step?.capture?.readerVisible === false) continue;
+      // 标注覆盖失败时本来就不会有发布图：先报真实原因，再报"缺 annotated 图"
+      if (!shot.annotated && shot.annotationCoverage && !shot.annotationCoverage.ok) {
+        errors.push(`步骤 ${record.id}: annotation-coverage-failed: ${shot.annotationCoverage.failures.map((item) => `${item.feature_id}:${item.reason}`).join('、')}`);
+        continue;
+      }
       const artifactPath = toPosix(shot.annotated);
       if (!shot.annotated || !artifactPath.includes('/images/annotated/')) {
         errors.push(`步骤 ${record.id} 的正式图片必须来自 annotated 目录。`);

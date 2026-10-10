@@ -71,6 +71,41 @@ test('没有可见名称的目标回退到已批准的步骤说明，不编造�
   assert.strictEqual(p.steps[0].sentenceSource, 'instruction');
 });
 
+test('步骤标题：只在 step 注释后多一行 step-title 注释，读者正文逐字不变', () => {
+  const titled = task();
+  titled.steps = titled.steps.map((step, i) => (i === 0 ? { ...step, title: '打开编辑面板' } : step));
+  const plain = renderTask(pack());
+  const md = renderTask(pack({ task: titled }));
+  assert.strictEqual(pack({ task: titled }).steps[0].title, '打开编辑面板');
+  assert.strictEqual(pack().steps[0].title, null);
+  assert.match(md, /<!-- step:open -->\n<!-- step-title: 打开编辑面板 -->\n1\. 点击「编辑资料」/);
+  assert.strictEqual(md.replace('<!-- step-title: 打开编辑面板 -->\n', ''), plain, '去掉标题注释后与无标题输出完全相同');
+  assert.doesNotMatch(plain, /step-title/, '没有标题的步骤不输出注释（旧格式）');
+});
+
+test('步骤标题：润色稿删改 step-title 注释无法通过定稿校验', () => {
+  const titled = task();
+  titled.steps = titled.steps.map((step) => ({ ...step, title: `标题${step.id}` }));
+  const p = pack({ task: titled });
+  const md = renderTask(p);
+  const facts = { title: p.title, stepIds: p.steps.map((s) => s.id), images, uiTexts: [...md.matchAll(/「([^」]+)」/g)].map((m) => m[1]), claims: p.claims, factPack: p };
+  assert.strictEqual(validateTaskFinal(md, facts).ok, true);
+  const edited = validateTaskFinal(md.replace('标题open', '别的标题'), facts);
+  assert.strictEqual(edited.ok, false);
+  assert.ok(edited.errors.some((e) => /step-title/.test(e)), edited.errors.join('；'));
+  assert.strictEqual(validateTaskFinal(md.replace('<!-- step-title: 标题save -->\n', ''), facts).ok, false);
+});
+
+test('步骤标题：改标题改变定义 revision 与 factsHash，但不改变审批范围', () => {
+  const { definitionRevision } = require('../src/model/revision');
+  const { scopeHash } = require('../src/model/approval');
+  const titled = task();
+  titled.steps = titled.steps.map((step, i) => (i === 0 ? { ...step, title: '打开编辑面板' } : step));
+  assert.notStrictEqual(definitionRevision('userTask', titled), definitionRevision('userTask', task()));
+  assert.notStrictEqual(pack({ task: titled }).factsHash, pack().factsHash);
+  assert.strictEqual(scopeHash(titled), scopeHash(task()), '标题是读者文字，不影响浏览器执行范围');
+});
+
 test('读者核对项进入事实包与完成段，改动使旧草稿失效', () => {
   const original = pack();
   const withCheck = pack({ task: task({ completion: { description: '完成', readerChecks: ['核对新昵称是否正确。'] } }) });

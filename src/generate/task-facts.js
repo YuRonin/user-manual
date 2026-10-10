@@ -14,6 +14,7 @@ function extract(markdown, language = 'zh-CN') {
   return {
     title: (/^# (.+)$/m.exec(markdown) || [])[1] || null,
     stepIds: [...markdown.matchAll(/<!-- step:([^ ]+) -->/g)].map((m) => m[1]),
+    stepTitles: [...markdown.matchAll(/<!-- step:([^ ]+) -->[ \t]*\r?\n[ \t]*<!-- step-title: (.+?) -->/g)].map((m) => ({ id: m[1], title: m[2] })),
     images: listMarkdownImages(markdown),
     uiTexts: [...markdown.matchAll(/「([^」]+)」/g)].map((m) => m[1]),
     claims: [...markdown.matchAll(CLAIM_RE)].map((m) => ({ id: m[1], label: labelOf(m[2]) })),
@@ -58,6 +59,9 @@ function validateTaskFinal(markdown, facts, { renderedFromPack = false } = {}) {
   const errors = [];
   if (got.title !== facts.title) errors.push('一级标题与任务标题不一致。');
   if (JSON.stringify(got.stepIds) !== JSON.stringify(facts.stepIds)) errors.push('step.id 或步骤顺序发生变化。');
+  // 步骤标题来自任务模型：润色稿不能增删或改写，要改就改 steps[].title 后重新生成
+  const titles = (facts.factPack?.steps || []).filter((step) => step.title).map(({ id, title }) => ({ id, title }));
+  if (facts.factPack && JSON.stringify(got.stepTitles) !== JSON.stringify(titles)) errors.push('步骤标题（step-title）与任务模型不一致。');
   const expected = (facts.images || []).map(normalizeImageFact);
   if (expected.some((item) => item.legacy)) {
     errors.push('事实文件使用旧版图片路径格式，请重新运行 generate-task 生成草稿。');

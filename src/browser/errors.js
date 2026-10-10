@@ -31,6 +31,7 @@ const REASON = {
   PAGE_IDENTITY_FAILED: 'page-identity-failed',
   GEOMETRY_UNSTABLE: 'geometry-unstable',
   PRIVACY_UNCERTAIN: 'privacy-uncertain',
+  ANNOTATION_LAYOUT_FAILED: 'annotation-layout-failed',
 };
 
 /** 每类失败给一条「接下来做什么」。 */
@@ -56,6 +57,7 @@ const HINTS = {
   [REASON.UNEXPECTED_STATE]: '页面显示的是错误或加载状态，而不是预期的正常状态。先在浏览器里确认数据与服务是否正常。',
   [REASON.GEOMETRY_UNSTABLE]: '截图前后页面仍在变化（动画、轮询或延迟渲染）。用 --wait-for 等待真正稳定的元素后重试。',
   [REASON.PRIVACY_UNCERTAIN]: '隐私规则存在冲突（redact 与 preserve 同时命中）。修正 config.yaml 的 privacy.rules 后重试。',
+  [REASON.ANNOTATION_LAYOUT_FAILED]: '标注无法排版（目标几何或画布尺寸异常）。这不是导航问题，重试同一张图结果不变：检查 guide / capture.annotations 的目标，或调整 annotation 主题后重新派生。',
   [REASON.PAGE_IDENTITY_FAILED]: '页面身份断言未通过：打开的不是预期页面。检查页面模型 states.default 的断言与当前账号权限。',
 };
 

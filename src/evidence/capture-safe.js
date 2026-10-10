@@ -14,6 +14,9 @@ const { planRedactions } = require('../artifacts/redaction');
 const { layoutAnnotations } = require('../artifacts/annotation');
 const { buildPrivacyRecord } = require('../publication/validate');
 const { deriveImages } = require('./image-pipeline');
+const { renderAnnotationResults } = require('./image-pipeline');
+const { verifyCoverage } = require('../annotations/coverage');
+const sharp = require('sharp');
 const { checkpoint } = require('../runtime/faults');
 
 const MAX_ATTEMPTS = 3;
@@ -56,6 +59,8 @@ async function confirmTargetsShown(provider, located) {
  */
 async function captureStable(provider, { rawPath, fullPage = false, format = 'png', resolveTargets = async () => [], maxAttempts = MAX_ATTEMPTS }) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    // 先等页面静置再取几何：否则收尾渲染期间的连续重试会全部落在同一段变化里。
+    if (provider.waitForQuiet) await provider.waitForQuiet();
     const before = provider.collectGeometry ? await provider.collectGeometry({ fullPage }) : null;
     const targets = await resolveTargets();
     const candidates = provider.collectSensitiveElements ? await provider.collectSensitiveElements({ fullPage }) : null;
@@ -81,16 +86,24 @@ async function derivePublished({ captured, rawPath, sanitizedPath, publishedPath
   if (!detection.ok) throw captureError('privacy-uncertain', detection.errors.join('；'));
   const { geometry } = captured;
   const canvas = geometry.fullPage && geometry.documentSize ? geometry.documentSize : (geometry.viewport || captured.shot.meta.viewport);
-  const layout = layoutAnnotations(captured.targets || [], canvas, theme);
+  const locatedTargets = (captured.targets || []).filter((item) => item.rect);
+  const maxMarkers = Number.isInteger(theme.maxMarkersPerImage) ? theme.maxMarkersPerImage : locatedTargets.length;
+  const overflow = locatedTargets.slice(maxMarkers);
+  const layout = layoutAnnotations(locatedTargets.slice(0, maxMarkers), canvas, theme);
   if (!layout.ok) throw captureError('annotation-layout-failed', layout.errors.join('；'));
   const privacy = buildPrivacyRecord({ redactions: detection.redactions, config: { privacy: redactionRules } });
+  const image = await sharp(rawPath).metadata();
+  const rendered = renderAnnotationResults(layout.annotations, { width: image.width, height: image.height, dpr: geometry.dpr || 1 });
+  for (const target of overflow) rendered.push({ feature_id: target.feature_id || null, located: true, outlined: false, intersects: false, drawn: false, reason: 'marker-limit-exceeded' });
+  for (const target of captured.targets || []) if (!target.rect) rendered.push({ feature_id: target.feature_id || null, located: false, outlined: false, intersects: false, drawn: false, reason: target.reason || 'target-not-located' });
+  const coverage = captured.inventory ? verifyCoverage({ inventory: captured.inventory, plan: captured.plan || [], rendered, discovered: captured.discovered || captured.inventory }) : null;
   // 隐私检测未通过（如高风险项无法定位）时只留私有 sanitized，不向文档目录写发布图。
-  const published = privacy.status === 'passed' ? publishedPath : null;
+  const published = privacy.status === 'passed' && (!coverage || coverage.ok) ? publishedPath : null;
   const derived = await deriveImages({
     rawPath, geometry, redactions: detection.redactions, annotations: layout.annotations, theme, sanitizedPath, publishedPath: published,
   });
   const quality = require('../generate/quality').imageQuality(captured, detection.redactions, layout.annotations);
-  return { redactions: detection.redactions, annotations: layout.annotations, privacy, quality, derived, published: !!published };
+  return { redactions: detection.redactions, annotations: layout.annotations, rendered, coverage, privacy, quality, derived, published: !!published };
 }
 
 module.exports = { captureStable, confirmTargetsShown, derivePublished, sameGeometry, MAX_ATTEMPTS };

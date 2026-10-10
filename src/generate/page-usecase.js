@@ -26,7 +26,7 @@ const { definitionRevision } = require('../model/revision');
 const { validateCopy, checkPolishedMarkdown, formatFindings } = require('./markdown-validate');
 const { writeText, displayPath } = require('../util/fsx');
 const { toMarkdownHref } = require('../publication/paths');
-const { validateArtifact, validatePublication, formatIssues } = require('../publication/validate');
+const { validateArtifact, validatePublication, validateCaptureCoverage, formatIssues } = require('../publication/validate');
 const { createCaptureStore } = require('../evidence/store');
 const { verifyCaptureRecord, describeProblems } = require('../evidence/integrity');
 const { RuntimeError } = require('../runtime/errors');
@@ -66,7 +66,9 @@ function publishedFromRecord({ projectRoot, stateDirAbs, captureId, sourceRevisi
   }
   if (!record) return { ok: false, errors: [`capture-record-missing: 页面引用的 Capture ${captureId} 不存在。`] };
   const artifact = (record.artifacts || []).find((a) => a.kind === 'published');
-  if (!artifact) return { ok: false, errors: [`unsafe-page-artifact: Capture ${captureId} 没有通过隐私检测的发布图。`] };
+  if (!artifact) return { ok: false, errors: [record.annotationCoverage && !record.annotationCoverage.ok
+    ? `annotation-coverage-failed: ${record.annotationCoverage.failures.map((item) => `${item.feature_id}:${item.reason}`).join('、')}`
+    : `unsafe-page-artifact: Capture ${captureId} 没有通过隐私检测的发布图。`] };
   // 截图之后源码变了：记录仍是真实的历史观察，但不再适用于当前页面
   if (record.sourceFingerprint && sourceRevision && record.sourceFingerprint !== sourceRevision) {
     return { ok: false, errors: [`evidence-stale: 页面源码在截图（${record.observedAt}）之后发生了变化，截图不再适用。`] };
@@ -82,6 +84,8 @@ function publishedFromRecord({ projectRoot, stateDirAbs, captureId, sourceRevisi
  */
 function draftPage({ projectRoot, config, pageId, noScreenshot = false }) {
   const { page, stateDirAbs, indexContext } = loadPage(projectRoot, config, pageId);
+  const coverageErrors = validateCaptureCoverage({ projectRoot, config, captureIds: [page.browser?.latestCaptureId] });
+  if (coverageErrors.length) throw failure(coverageErrors[0].code, formatIssues(coverageErrors));
   const errors = [];
   // 事实优先级第一条：没有真实截图就没有可信的手册
   if (!page.browser?.screenshot && !noScreenshot) {
@@ -216,6 +220,8 @@ function preparePageFinal({ projectRoot, config, pageId, copy = null, markdown =
   // 统一发布门槛（含 --fallback-draft）：图片引用、hash、产物位置与隐私记录都以草稿 facts 为准。
   if (!fs.existsSync(factsFile)) throw failure('draft-missing', [`缺少草稿事实文件: ${displayPath(factsFile, projectRoot)}`, `重新运行 \`manual generate ${page.id}\`。`]);
   const draftFacts = JSON.parse(fs.readFileSync(factsFile, 'utf8'));
+  const coverageErrors = validateCaptureCoverage({ projectRoot, config, captureIds: [page.browser?.latestCaptureId] });
+  if (coverageErrors.length) throw failure(coverageErrors[0].code, formatIssues(coverageErrors));
   const gate = validatePublication({ projectRoot, manualFile: finalPath, markdown: body, images: draftFacts.images || [], config });
   if (!gate.ok) throw failure(gate.errors[0]?.code || 'publication-gate', formatIssues(gate.errors));
   return { page, body, generated, merge, finalPath, draftPath, draftFacts, factCheck: result.ok ? 'passed' : 'failed-used-draft', violations: result.violations };

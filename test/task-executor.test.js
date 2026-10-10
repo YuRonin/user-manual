@@ -4,6 +4,9 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const sharp = require('sharp');
+const { createCaptureStore } = require('../src/evidence/store');
+const { rederiveCaptures } = require('../src/evidence/rederive');
 // 截图必须是真实 PNG：发布图由离线图像管线从 raw 字节派生。
 const { TINY_PNG } = require('./server');
 
@@ -20,7 +23,7 @@ class FakeProvider {
   async waitUntilReady() { this.calls.push(['ready']); return { steps: {}, warnings: [] }; }
   async performAction(action) { this.calls.push(['action', action.type]); return { target: action.target, rect: { x: 1, y: 2, width: 3, height: 4 } }; }
   async assertCondition(assertion) { this.calls.push(['assert', assertion.type]); if (this.failAssertion) throw new Error('not visible'); return { ok: true }; }
-  async screenshot({ path: file }) { this.calls.push(['shot', file]); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, TINY_PNG); return { path: file, bytes: TINY_PNG.length, meta: { viewport: { width: 100, height: 100 }, deviceScaleFactor: 2 } }; }
+  async screenshot({ path: file }) { this.calls.push(['shot', file]); fs.mkdirSync(path.dirname(file), { recursive: true }); await sharp({ create: { width: 200, height: 200, channels: 3, background: '#ffffff' } }).png().toFile(file); return { path: file, bytes: fs.statSync(file).size, meta: { viewport: { width: 100, height: 100 }, deviceScaleFactor: 2 } }; }
   async collectSensitiveElements() { return []; }
   async close() { this.calls.push(['close']); }
 }
@@ -43,7 +46,7 @@ function plan() {
       const provider = new FakeProvider();
       const { executeCapturePlan } = require('../src/tasks/executor');
       const result = await executeCapturePlan(plan(), provider, { baseUrl: 'http://example.test', stateDir: path.join(root, '.manual'), projectRoot: root, annotatedDir: 'docs/manual/images/annotated', theme: { maxMarkersPerImage: 5, markerSize: 30, targetPadding: 5 } });
-      assert.deepStrictEqual(provider.calls.filter((call) => call[0] === 'action').map((call) => call[1]), ['click']);
+      assert.deepStrictEqual(provider.calls.filter((call) => call[0] === 'action').map((call) => call[1]), ['click', 'inspect']);
       assert.strictEqual(result.steps[0].status, 'verified');
       assert.strictEqual(result.steps[1].status, 'not-executed');
       assert.strictEqual(result.steps[1].reason, 'stop-before-action');
@@ -62,6 +65,28 @@ function plan() {
         () => executeCapturePlan(plan(), provider, { baseUrl: 'http://example.test', stateDir: path.join(root, '.manual') }),
         (error) => error.code === 'state-assertion-failed' && error.step === 'open' && fs.existsSync(error.diagnostic)
       );
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  await test('原图与坐标可复用，改标注主题时只重新派生而不重新采集', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'manual-rederive-'));
+    try {
+      const provider = new FakeProvider();
+      const stateDir = path.join(root, '.manual');
+      const first = await require('../src/tasks/executor').executeCapturePlan(plan(), provider, { baseUrl: 'http://example.test', stateDir, projectRoot: root, annotatedDir: 'docs/manual/images/annotated', theme: require('../src/config/annotation').DEFAULT_THEME });
+      const original = first.steps[0].screenshots[0];
+      const store = createCaptureStore({ projectRoot: root, stateDirAbs: stateDir });
+      const prior = store.read(original.captureId);
+      assert.ok(prior.artifacts.some((item) => item.kind === 'annotations'));
+      assert.strictEqual(prior.annotationCoverage.ok, true);
+      const config = { artifacts: { stateDir: '.manual', annotatedDir: 'docs/manual/images/annotated' }, annotation: { activeTheme: 'changed', themes: { changed: { ...require('../src/config/annotation').DEFAULT_THEME, primary: '#0044aa' } } }, privacy: { audience: 'public', rules: { redact: [], preserve: [] } } };
+      const replay = await rederiveCaptures({ projectRoot: root, config, captureIds: [original.captureId] });
+      const next = replay.records[0].record;
+      assert.strictEqual(provider.calls.filter((item) => item[0] === 'shot').length, 1);
+      assert.strictEqual(next.provenance.derivedFrom, original.captureId);
+      assert.strictEqual(next.annotationCoverage.ok, true);
+      assert.strictEqual(next.artifacts.find((item) => item.kind === 'raw').sha256, prior.artifacts.find((item) => item.kind === 'raw').sha256);
+      assert.notStrictEqual(next.artifacts.find((item) => item.kind === 'published').sha256, prior.artifacts.find((item) => item.kind === 'published').sha256);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 

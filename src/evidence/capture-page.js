@@ -22,6 +22,7 @@ const { readIndexes, findForwardPage } = require('../inspect/index-store');
 const { prepareAuth, classifyAuthFailure, refreshAuth } = require('../auth/runtime');
 const { validateNavigation, runAssertions } = require('./validate-page');
 const { captureStable, derivePublished, confirmTargetsShown } = require('./capture-safe');
+const { pageInventory, buildPlan } = require('../annotations/coverage');
 const { createProjectStore } = require('../store/project');
 const { createCaptureStore, sanitizeUrl } = require('./store');
 const { definitionRevision } = require('../model/revision');
@@ -67,7 +68,7 @@ function joinUrl(baseUrl, route) {
 
 /** 截图派生输入（几何、标注目标、敏感元素候选）：私有 sidecar，隐私规则变化时据此从同一份 raw 重新派生。 */
 function derivationSidecar(captured) {
-  return JSON.stringify({ version: 1, geometry: captured.geometry, targets: captured.targets || [], candidates: captured.candidates || [], shotMeta: captured.shot?.meta || null });
+  return JSON.stringify({ version: 2, geometry: captured.geometry, targets: captured.targets || [], candidates: captured.candidates || [], shotMeta: captured.shot?.meta || null, inventory: captured.inventory || null, plan: captured.plan || null });
 }
 
 /**
@@ -167,11 +168,14 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
     : {};
   const checkpoint = (scenario.checkpoints || []).find((c) => c.id === 'default') || scenario.checkpoints?.[0] || null;
   const identityAssertions = ((isDefaultScenario ? page.states?.default?.assertions : checkpoint?.assertions) || []).filter((a) => a && a.type !== 'url');
+  const inventory = pageInventory({ page, scenarioId: scenario.id, checkpoint });
+  const annotationPlan = buildPlan({ inventory, page, annotations: isDefaultScenario ? null : (checkpoint?.capture?.annotations || []) });
   const staging = captureStore.begin();
   const stagedRaw = staging.file(`raw.${format}`);
   const stagedSanitized = staging.file('sanitized.png');
   const stagedPublished = staging.file('published.png');
   const stagedDerivation = staging.file('derivation.json');
+  const stagedAnnotations = staging.file('annotations.json');
 
   const work = async (provider) => {
     if (data.routes.length) {
@@ -207,18 +211,24 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
       resolveTargets: async () => {
         const targets = [];
         const located = [];
-        for (const [i, item] of (page.guide || []).entries()) {
-          if (!item.target) continue;
-          const found = await provider.performAction({ type: 'inspect', target: item.target });
-          const rect = { ...found.rect };
-          if (options.fullPage) { const geometry = await provider.collectGeometry({ fullPage: true }); rect.x += geometry.scroll.x; rect.y += geometry.scroll.y; }
-          targets.push({ label: String(i + 1), rect });
-          located.push({ target: item.target, label: String(i + 1), revealedBy: found.revealedBy || null });
+        for (const [i, item] of annotationPlan.entries()) {
+          const label = item.label || String(i + 1);
+          if (item.rect) { targets.push({ feature_id: item.feature_id, label, rect: item.rect }); continue; }
+          if (!item.target) { targets.push({ feature_id: item.feature_id, label, reason: 'target-not-declared' }); continue; }
+          try {
+            const found = await provider.performAction({ type: 'inspect', target: item.target });
+            const rect = { ...found.rect };
+            if (options.fullPage) { const geometry = await provider.collectGeometry({ fullPage: true }); rect.x += geometry.scroll.x; rect.y += geometry.scroll.y; }
+            targets.push({ feature_id: item.feature_id, label, rect });
+            located.push({ target: item.target, label, revealedBy: found.revealedBy || null });
+          } catch (error) { targets.push({ feature_id: item.feature_id, label, reason: error.code || 'target-not-located' }); }
         }
         await confirmTargetsShown(provider, located);
         return targets;
       },
     });
+    captured.inventory = inventory;
+    captured.plan = annotationPlan;
     fs.writeFileSync(stagedDerivation, derivationSidecar(captured));
     const safe = await derivePublished({
       captured,
@@ -228,7 +238,10 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
       theme: config.annotation.themes[config.annotation.activeTheme],
       redactionRules: config.privacy || {},
     });
+    fs.writeFileSync(stagedAnnotations, JSON.stringify({ version: 1, inventory, plan: annotationPlan, rendered: safe.rendered, coverage: safe.coverage }, null, 2));
     ready.warnings.push(...safe.quality.warnings);
+    if (safe.coverage?.pending.length) ready.warnings.push(`annotation-priority-undecided: ${safe.coverage.pending.map((item) => item.label).join('、')}`);
+    if (safe.coverage && !safe.coverage.ok) ready.warnings.push(`annotation-coverage-failed: ${safe.coverage.failures.map((item) => `${item.feature_id}:${item.reason}`).join('、')}`);
     if (!safe.published) ready.warnings.push(`页面隐私检测未通过（${safe.privacy.unresolved.length} 项无法定位），未生成发布图；手册只能出文字版。`);
     if (!session) {
       const refreshed = await refreshAuth(provider, auth);
@@ -281,6 +294,7 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
       { kind: 'raw', file: stagedRaw, dir: config.artifacts.rawDir, prefix: pageId },
       { kind: 'sanitized', file: stagedSanitized, dir: `${config.artifacts.sanitizedDir}/pages`, prefix: pageId },
       { kind: 'derivation', file: stagedDerivation, dir: `${config.artifacts.stateDir}/artifacts/derivation`, prefix: pageId },
+      { kind: 'annotations', file: stagedAnnotations, dir: `${config.artifacts.stateDir}/artifacts/annotations`, prefix: pageId },
     ];
     if (safe.published) artifacts.push({ kind: 'published', file: stagedPublished, dir: config.artifacts.annotatedDir, prefix: `page--${pageId}` });
     record = captureStore.commit(staging, {
@@ -304,6 +318,7 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
         ...(environment ? { environment } : {}),
         privacy: safe.privacy,
         quality: safe.quality,
+        annotationCoverage: safe.coverage,
         redactions: safe.redactions.map(({ kind, rect, result }) => ({ kind, rect, result })),
         // simulated：界面由拦截的静态响应驱动，只证明"界面如何呈现这种数据"；fixture：登记的测试数据
         ...(data.fixture ? { fixture: data.fixture } : {}),

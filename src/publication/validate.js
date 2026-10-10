@@ -12,6 +12,11 @@ const path = require('path');
 
 const { checkDocumentImages, normalizeImageFact, toPosix } = require('./paths');
 const { fileSha256, revisionOf } = require('../util/hash');
+const { createCaptureStore } = require('../evidence/store');
+const { verifyCaptureRecord } = require('../evidence/integrity');
+const { verifyCoverage, verifyExplanations, pageInventory, stepInventory } = require('../annotations/coverage');
+const { stepPageId } = require('../tasks/model');
+const { createProjectStore } = require('../store/project');
 
 const DETECTOR_VERSION = '1';
 const SAFE_MASK_STYLES = ['neutral-mosaic', 'soft-solid'];
@@ -85,11 +90,45 @@ function issue(code, message, extra = {}) {
   return { code, message, ...extra };
 }
 
+function discoveredForCapture(projectRoot, config, record) {
+  const stateDirAbs = path.join(projectRoot, config.artifacts.stateDir);
+  const model = createProjectStore({ stateDirAbs, docsOutputDir: config.docs.outputDir }).load().model;
+  if (record.kind === 'page') {
+    const page = model.pages.find((item) => item.id === record.subject.pageId);
+    if (!page) throw new Error(`page ${record.subject.pageId} missing`);
+    return pageInventory({ page, scenarioId: record.scenarioId });
+  }
+  if (record.kind === 'task-step') {
+    const task = model.tasks.find((item) => item.id === record.subject.taskId);
+    const step = task?.steps?.find((item) => item.id === record.subject.stepId);
+    const page = model.pages.find((item) => item.id === stepPageId(step));
+    if (!task || !step || !page) throw new Error(`task step ${record.subject.taskId}/${record.subject.stepId} missing`);
+    return stepInventory({ page, task, step });
+  }
+  return [];
+}
+
+function validateCaptureCoverage({ projectRoot, config, captureIds = [] }) {
+  const store = createCaptureStore({ projectRoot, stateDirAbs: path.join(projectRoot, config.artifacts.stateDir) });
+  const errors = [];
+  for (const captureId of [...new Set(captureIds.filter(Boolean))]) {
+    let record;
+    try { record = store.read(captureId); }
+    catch (error) { errors.push(issue('annotation-record-invalid', `${captureId}: ${error.message}`)); continue; }
+    // 记录缺失是证据完整性问题，沿用 capture-record-missing，不改写成标注问题
+    if (!record) { errors.push(issue('capture-record-missing', `Capture ${captureId} 不存在。`)); continue; }
+    if (record?.annotationCoverage && !record.annotationCoverage.ok) {
+      errors.push(issue('annotation-coverage-failed', `Capture ${captureId}: ${record.annotationCoverage.failures.map((item) => `${item.feature_id}:${item.reason}`).join(', ')}`));
+    }
+  }
+  return errors;
+}
+
 /**
  * 检查一个产物条目本身（不含文档引用）：位置、hash、privacy。
  * @param entry { artifactPath, sha256, privacy }
  */
-function validateArtifact(entry, { projectRoot, config }) {
+function validateArtifact(entry, { projectRoot, config, markdown = null }) {
   const errors = [];
   const audience = config.privacy?.audience === 'internal' ? 'internal' : 'public';
   const artifactPath = path.posix.normalize(toPosix(entry.artifactPath));
@@ -130,6 +169,30 @@ function validateArtifact(entry, { projectRoot, config }) {
       errors.push(issue('privacy-policy-changed', `隐私策略已变更，需要重新采集: ${shown}`));
     }
   }
+  if (entry.captureId) {
+    const stateDirAbs = path.join(projectRoot, config.artifacts.stateDir);
+    let record;
+    try { record = createCaptureStore({ projectRoot, stateDirAbs }).read(entry.captureId); }
+    catch (error) { errors.push(issue('annotation-record-invalid', error.message)); }
+    if (record && !record.artifacts?.some((item) => item.kind === 'published' && item.path === artifactPath)) errors.push(issue('annotation-capture-mismatch', `Capture ${entry.captureId} does not publish ${artifactPath}`));
+    const metadata = record?.artifacts?.find((item) => item.kind === 'annotations');
+    if (record?.annotationCoverage && !metadata) errors.push(issue('annotation-metadata-missing', `Capture ${entry.captureId} lacks annotations.json`));
+    if (metadata) {
+      const integrity = verifyCaptureRecord(projectRoot, record, { kinds: ['annotations'] });
+      if (!integrity.ok) errors.push(issue('annotation-metadata-invalid', `Capture ${entry.captureId} annotations.json failed integrity verification`));
+      else {
+        try {
+          const data = JSON.parse(fs.readFileSync(path.join(projectRoot, metadata.path), 'utf8'));
+          if (data.version !== 1 || !Array.isArray(data.inventory) || !Array.isArray(data.plan) || !Array.isArray(data.rendered)) throw new Error('invalid annotations.json structure');
+          if (record.annotationCoverage && JSON.stringify(data.coverage) !== JSON.stringify(verifyCoverage(data))) throw new Error('annotations.json coverage does not match its items');
+          const discovered = discoveredForCapture(projectRoot, config, record);
+          const coverage = verifyCoverage({ ...data, discovered });
+          if (!coverage.ok) errors.push(issue('annotation-coverage-failed', `Capture ${entry.captureId}: ${coverage.failures.map((item) => `${item.feature_id}:${item.reason}`).join(', ')}`));
+          if (markdown !== null) for (const failure of verifyExplanations(markdown, data.inventory)) errors.push(issue('annotation-explanation-missing', `${failure.feature_id}: ${failure.reason}`));
+        } catch (error) { errors.push(issue('annotation-metadata-invalid', `Capture ${entry.captureId}: ${error.message}`)); }
+      }
+    }
+  }
   return errors;
 }
 
@@ -152,7 +215,7 @@ function validatePublication({ projectRoot, manualFile, markdown, images = [], c
   for (const entry of images) {
     const fact = normalizeImageFact(entry);
     if (fact.legacy) continue; // checkDocumentImages 已报告 legacy-image-facts
-    errors.push(...validateArtifact({ ...entry, artifactPath: fact.artifactPath }, { projectRoot, config }));
+    errors.push(...validateArtifact({ ...entry, artifactPath: fact.artifactPath }, { projectRoot, config, markdown }));
   }
   return { ok: errors.length === 0, errors };
 }
@@ -169,6 +232,7 @@ module.exports = {
   summarizePrivacy,
   validateArtifact,
   validatePublication,
+  validateCaptureCoverage,
   formatIssues,
   legacyRawPrefixes,
 };

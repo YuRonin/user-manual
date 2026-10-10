@@ -115,7 +115,7 @@ process.stdout.write('\nimage pipeline\n');
   }
   const plan = () => ({
     taskId: 't', entry: { page: 'p', route: '/p', assertions: [] },
-    steps: [{ id: 'open', page: 'p', stateBefore: 'default', beforeState: { assertions: [] }, action: { type: 'click', target: { role: 'button', name: '打开' } }, willExecute: true, execution: 'auto',
+    steps: [{ id: 'open', instruction: '打开面板', page: 'p', stateBefore: 'default', beforeState: { assertions: [] }, action: { type: 'click', target: { role: 'button', name: '打开' } }, willExecute: true, execution: 'auto',
       expectedState: { id: 'open', assertions: [{ type: 'visible', target: { role: 'dialog', name: '面板' } }] }, capture: { timing: 'after', annotations: [{ target: 'action.target', label: 1 }] } }],
   });
   const opts = (root) => ({ baseUrl: 'http://x.test', stateDir: path.join(root, '.manual'), projectRoot: root, annotatedDir: 'docs/manual/images/annotated', theme: DEFAULT_THEME, redactionRules: { audience: 'public', rules: { redact: [], preserve: [] } }, assertionTimeoutMs: 10 });
@@ -134,8 +134,23 @@ process.stdout.write('\nimage pipeline\n');
     assert.strictEqual(provider.shots, 1, '发布图不再由浏览器重新截图');
   });
 
-  await test('执行器：after 目标消失时返回 annotation-target-missing，不写发布图', async (root) => {
-    await assert.rejects(() => executeCapturePlan(plan(), new Provider({ targetGone: true }), opts(root)), (e) => e.code === 'annotation-target-missing');
+  await test('执行器：after 隐式动作目标消失时仍出发布图（提示性标注不阻断）', async (root) => {
+    const result = await executeCapturePlan(plan(), new Provider({ targetGone: true }), opts(root));
+    const shot = result.steps[0].screenshots[0];
+    assert.ok(shot.annotated, '隐式动作标注是 optional，目标消失不应让整图失败');
+    assert.strictEqual(shot.annotationCoverage.ok, true);
+    assert.strictEqual(shot.annotationCoverage.required.total, 0);
+  });
+
+  await test('执行器：显式 Required 功能的 after 目标消失时记录结构化失败，不写发布图', async (root) => {
+    const required = plan();
+    const target = required.steps[0].action.target;
+    required.steps[0].feature_id = 'open-panel';
+    required.steps[0].capture.features = [{ feature_id: 'open-panel', label: '打开', priority: 'required', task_ids: ['t'], description: '打开面板', target }];
+    const result = await executeCapturePlan(required, new Provider({ targetGone: true }), opts(root));
+    const shot = result.steps[0].screenshots[0];
+    assert.strictEqual(shot.annotated, null);
+    assert.ok(shot.annotationCoverage.failures.some((item) => item.feature_id === 'open-panel' && item.reason === 'target-not-visible'));
     assert.ok(!fs.existsSync(path.join(root, 'docs')), '失败产物不能进入文档目录');
   });
 

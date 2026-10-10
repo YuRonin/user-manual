@@ -33,7 +33,7 @@ const SHA256_RE = /^(sha256:)?[0-9a-f]{64}$/;
 
 const KNOWN_FIELDS = {
   page: ['schemaVersion', 'id', 'revision', 'lifecycle', 'title', 'purpose', 'route', 'dynamic', 'params', 'routeBindings',
-    'entry', 'source', 'dependencies', 'includeInManual', 'detectedActions', 'guide', 'states', 'identityAssertions', 'confidence',
+    'entry', 'source', 'dependencies', 'includeInManual', 'detectedActions', 'features', 'guide', 'states', 'identityAssertions', 'confidence',
     'browser', 'status', 'analysis', 'latestCaptureId'],
   userTask: ['schemaVersion', 'id', 'revision', 'title', 'goal', 'entryPage', 'priority', 'preconditions', 'readerPreconditions', 'risk', 'status',
     'approval', 'environment', 'fixtures', 'writeAuthorization', 'steps', 'branches', 'relatedTasks', 'completion', 'evidence', 'evidenceManifest',
@@ -162,6 +162,25 @@ function validateAssertions(c, list, path) {
   });
 }
 
+/*
+ * 步骤标题（可选）：帮助中心目录显示的短名称，渲染成 <!-- step-title: … --> 注释。
+ * 注释里不能出现 -- 与尖括号；「」、句末标点和自带编号会和目录的「N. 标题」格式冲突。
+ */
+const STEP_TITLE_MAX = 16;
+const STEP_TITLE_FORBIDDEN_RE = /--|[<>\r\n「」]/;
+const STEP_TITLE_TRAILING_RE = /[。．.！!？?；;，,：:、]$/;
+const STEP_TITLE_NUMBERED_RE = /^(?:第\s*\d+\s*步|\d+\s*[.、)）])/;
+
+function validateStepTitle(c, title, path) {
+  if (title === undefined || title === null) return;
+  if (!nonEmpty(title)) { c.error(path, 'invalid-step-title', 'title 需要是非空字符串。'); return; }
+  const text = title.trim();
+  if ([...text].length > STEP_TITLE_MAX) c.error(path, 'invalid-step-title', `title 不超过 ${STEP_TITLE_MAX} 个字: ${text}`);
+  if (STEP_TITLE_FORBIDDEN_RE.test(text)) c.error(path, 'invalid-step-title', `title 不能包含换行、「」、尖括号或 --: ${text}`);
+  if (STEP_TITLE_TRAILING_RE.test(text)) c.error(path, 'invalid-step-title', `title 结尾不加标点: ${text}`);
+  if (STEP_TITLE_NUMBERED_RE.test(text)) c.error(path, 'invalid-step-title', `title 不写编号，目录会自动加序号: ${text}`);
+}
+
 function validateCaptureSpec(c, capture, path) {
   if (capture === undefined || capture === null) return;
   if (!isObject(capture)) { c.error(path, 'invalid-capture', 'capture 需要是对象。'); return; }
@@ -270,6 +289,22 @@ function validatePage(page) {
       });
     }
   }
+  if (page.features !== undefined) {
+    if (!Array.isArray(page.features)) c.error('features', 'invalid-features', 'features must be an array');
+    else {
+      const ids = new Set();
+      page.features.forEach((item, i) => {
+        const at = `features[${i}]`;
+        if (!isObject(item)) { c.error(at, 'invalid-feature', 'feature must be an object'); return; }
+        if (!nonEmpty(item.feature_id) || ids.has(item.feature_id)) c.error(`${at}.feature_id`, 'invalid-feature', 'feature_id must be unique');
+        ids.add(item.feature_id);
+        if (!nonEmpty(item.label)) c.error(`${at}.label`, 'invalid-feature', 'label is required');
+        if (!['required', 'optional', 'skip', 'undecided'].includes(item.priority)) c.error(`${at}.priority`, 'invalid-feature', 'priority must be required, optional, skip, or undecided');
+        if (item.target) validateTarget(c, item.target, `${at}.target`);
+        if (item.task_ids !== undefined && (!Array.isArray(item.task_ids) || item.task_ids.some((id) => !nonEmpty(id)))) c.error(`${at}.task_ids`, 'invalid-feature', 'task_ids must be an array of ids');
+      });
+    }
+  }
   if (page.identityAssertions !== undefined) validateAssertions(c, page.identityAssertions, 'identityAssertions');
   return c.result({ version: version.version });
 }
@@ -318,6 +353,7 @@ function validateUserTask(task, context = {}) {
       else if (stepIds.has(step.id)) c.error(`${where}.id`, 'duplicate-id', `stepId 重复: ${step.id}`);
       else stepIds.add(step.id);
       if (!nonEmpty(step.instruction)) c.error(`${where}.instruction`, 'required', 'instruction 需要是非空字符串。');
+      validateStepTitle(c, step.title, `${where}.title`);
       const pageId = step.pageId ?? step.page;
       if (!nonEmpty(pageId)) c.error(`${where}.page`, 'required', '步骤需要所属页面。');
       validateAction(c, step.action, `${where}.action`);
@@ -621,6 +657,8 @@ module.exports = {
   validateTarget: (target, path = 'target') => { const c = collector(); validateTarget(c, target, path); return c.result(); },
   validateAction: (action, path = 'action') => { const c = collector(); validateAction(c, action, path); return c.result(); },
   validateAssertion: (assertion, path = 'assertion') => { const c = collector(); validateAssertion(c, assertion, path); return c.result(); },
+  validateStepTitle: (title, path = 'title') => { const c = collector(); validateStepTitle(c, title, path); return c.result(); },
+  STEP_TITLE_MAX,
   validatePage,
   validateUserTask,
   validateScenario,

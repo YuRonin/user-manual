@@ -14,7 +14,7 @@ const { revisionOf } = require('../util/hash');
 const DEFINITION_FIELDS = {
   page: [
     'id', 'lifecycle', 'title', 'purpose', 'route', 'dynamic', 'params', 'routeBindings',
-    'entry', 'source', 'includeInManual', 'detectedActions', 'guide', 'states', 'identityAssertions',
+    'entry', 'source', 'includeInManual', 'detectedActions', 'features', 'guide', 'states', 'identityAssertions',
   ],
   userTask: [
     'id', 'title', 'goal', 'entryPage', 'priority', 'preconditions', 'readerPreconditions', 'risk', 'environment',
@@ -26,7 +26,7 @@ const DEFINITION_FIELDS = {
 };
 
 const STEP_FIELDS = [
-  'id', 'instruction', 'page', 'pageId', 'stateBefore', 'stateAfter', 'pageAfter', 'requires', 'assertionTimeoutMs', 'action', 'risk', 'replay', 'capture', 'valueRef',
+  'id', 'feature_id', 'title', 'instruction', 'page', 'pageId', 'stateBefore', 'stateAfter', 'pageAfter', 'requires', 'assertionTimeoutMs', 'action', 'risk', 'replay', 'capture', 'valueRef',
 ];
 
 /** 规范化 JSON 值的 revision。undefined / NaN / 循环引用等抛 invalid-json-value。 */

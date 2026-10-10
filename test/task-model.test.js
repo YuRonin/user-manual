@@ -95,6 +95,24 @@ test('拒绝缺失必填字段和重复 step.id 的任务', () => {
   assert.ok(result.errors.some((e) => /step\.id.*重复|重复.*step\.id/.test(e)));
 });
 
+test('步骤标题可选；有则去空白，超长、换行、「」、注释符、句末标点、自带编号都拒绝', () => {
+  const { validateTask } = require('../src/tasks/model');
+  const withTitle = (title) => {
+    const task = validTask();
+    task.steps[0] = { ...task.steps[0], title };
+    return validateTask(task);
+  };
+  assert.strictEqual(validateTask(validTask()).ok, true, '没有标题的旧任务照常通过');
+  const ok = withTitle('  打开编辑面板 ');
+  assert.strictEqual(ok.ok, true, (ok.errors || []).join('；'));
+  assert.strictEqual(ok.task.steps[0].title, '打开编辑面板');
+  for (const bad of ['', '一二三四五六七八九十一二三四五六七', '打开\n面板', '点击「编辑资料」', '打开 --> 面板', '打开面板。', '第 1 步 打开', '1. 打开面板']) {
+    const result = withTitle(bad);
+    assert.strictEqual(result.ok, false, `应拒绝: ${JSON.stringify(bad)}`);
+    assert.ok(result.errors.some((e) => /steps\[0\]\.title/.test(e)), result.errors.join('；'));
+  }
+});
+
 test('拒绝未知风险和无法验证的完成标志', () => {
   const { validateTask } = require('../src/tasks/model');
   const result = validateTask(validTask({

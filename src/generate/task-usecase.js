@@ -23,7 +23,7 @@ const { validateTaskFinal } = require('./task-facts');
 const { renderTask } = require('./render');
 const { diffPacks } = require('./fact-pack');
 const { validateCopy, checkPolishedMarkdown, formatFindings } = require('./markdown-validate');
-const { validatePublication, validateArtifact, summarizePrivacy, formatIssues } = require('../publication/validate');
+const { validatePublication, validateCaptureCoverage, validateArtifact, summarizePrivacy, formatIssues } = require('../publication/validate');
 const { RuntimeError } = require('../runtime/errors');
 const { reconcileDocument } = require('./manual-store');
 const { manualFromPack } = require('./manual-model');
@@ -98,6 +98,8 @@ function reviewGate(findings, acceptReview) {
 /** 生成事实草稿。返回文案块（模型可填写）与受保护事实。 */
 function draftTask({ projectRoot, config, taskId }) {
   const { task, pages, tasks } = loadTask({ projectRoot, config, taskId });
+  const coverageErrors = validateCaptureCoverage({ projectRoot, config, captureIds: task.lastCapture?.captureIds || [] });
+  if (coverageErrors.length) throw failure(coverageErrors[0].code, formatIssues(coverageErrors));
   const usable = checkEvidenceUsable(task, pages);
   if (!usable.ok) throw failure(usable.code || codeOf(usable.errors, 'evidence-unusable'), usable.errors);
   const built = buildCurrent({ root: projectRoot, config, task, pages, tasks });
@@ -126,6 +128,8 @@ function draftTask({ projectRoot, config, taskId }) {
  */
 function prepareTaskFinal({ projectRoot, config, taskId, copy = null, markdown = null, acceptReview = false, force = false, runId = null }) {
   const { task, pages, tasks } = loadTask({ projectRoot, config, taskId });
+  const coverageErrors = validateCaptureCoverage({ projectRoot, config, captureIds: task.lastCapture?.captureIds || [] });
+  if (coverageErrors.length) throw failure(coverageErrors[0].code, formatIssues(coverageErrors));
   const { draftFile, factsFile } = draftPaths(projectRoot, config, taskId);
   if (!fs.existsSync(factsFile)) throw failure('draft-missing', '缺少任务事实文件，请先生成草稿。');
   let facts = JSON.parse(fs.readFileSync(factsFile, 'utf8'));

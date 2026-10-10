@@ -41,6 +41,8 @@ function taskQuality(task,evidence = {}, { entryPage } = {}) {
   if (!checks.steps) warnings.push('steps-missing: 缺少操作步骤。');
   if (!checks.exceptions) warnings.push('exceptions-unreviewed: 任务模型中尚未记录常见异常的处理方式；需根据已观察界面或可靠来源审阅，不能猜测。');
   if (!checks.completion) warnings.push('completion-unbound: 完成结果没有可验证的断言。');
+  const untitled=(task.steps||[]).filter(step=>!step.title).map(step=>step.id);
+  if (untitled.length) warnings.push(`step-title-missing: 步骤缺少 title，帮助中心目录会截取正文首句：${untitled.join(', ')}`);
   const lastStepId=task.steps?.at(-1)?.id;
   const claims=task.completion?.claims||[];
   if (lastStepId && claims.length && claims.every(claim => claim.checkpoint && claim.checkpoint!==lastStepId)) {

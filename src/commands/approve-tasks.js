@@ -139,6 +139,8 @@ function run(argv) {
   // 审批是决策：基于读取时的 revision 做 CAS，全部决策一次提交
   try {
     projectStore.commit({ base, kind: 'definition', changes: { tasks: approved, removeTasks: rejected } });
+    const current = projectStore.load().model;
+    require('../annotations/store').writeInventory(stateDir, current.pages, current.tasks);
   } catch (error) {
     return fail(`${error.code || 'model-commit-failed'}: ${error.message}`, json);
   }

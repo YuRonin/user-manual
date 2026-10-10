@@ -51,11 +51,12 @@ async function rederiveCaptures({ projectRoot, config, captureIds, runId = null 
     fs.copyFileSync(path.join(projectRoot, raw.path), stagedRaw);
     fs.copyFileSync(path.join(projectRoot, derivation.path), handle.file('derivation.json'));
     try {
-      const captured = { shot: { meta: sidecar.shotMeta || {} }, geometry: sidecar.geometry, targets: sidecar.targets || [], candidates: sidecar.candidates || [] };
+      const captured = { shot: { meta: sidecar.shotMeta || {} }, geometry: sidecar.geometry, targets: sidecar.targets || [], candidates: sidecar.candidates || [], inventory: sidecar.inventory || null, plan: sidecar.plan || null };
       const safe = await derivePublished({
         captured, rawPath: stagedRaw, sanitizedPath: handle.file('sanitized.png'), publishedPath: handle.file('published.png'),
         theme: config.annotation.themes[config.annotation.activeTheme], redactionRules: config.privacy || {},
       });
+      if (captured.inventory) fs.writeFileSync(handle.file('annotations.json'), JSON.stringify({ version: 1, inventory: captured.inventory, plan: captured.plan, rendered: safe.rendered, coverage: safe.coverage }, null, 2));
       const oldSanitized = old.artifacts.find((a) => a.kind === 'sanitized');
       const oldPublished = old.artifacts.find((a) => a.kind === 'published');
       const artifacts = [
@@ -63,6 +64,7 @@ async function rederiveCaptures({ projectRoot, config, captureIds, runId = null 
         { kind: 'derivation', file: handle.file('derivation.json'), dir: dirOf(derivation.path), prefix: prefixOf(derivation.path) },
         { kind: 'sanitized', file: handle.file('sanitized.png'), dir: oldSanitized ? dirOf(oldSanitized.path) : `${config.artifacts.stateDir}/artifacts/sanitized`, prefix: oldSanitized ? prefixOf(oldSanitized.path) : prefixOf(raw.path) },
       ];
+      if (captured.inventory) artifacts.push({ kind: 'annotations', file: handle.file('annotations.json'), dir: `${config.artifacts.stateDir}/artifacts/annotations`, prefix: prefixOf(raw.path) });
       if (safe.published) {
         artifacts.push({ kind: 'published', file: handle.file('published.png'), dir: config.artifacts.annotatedDir, prefix: oldPublished ? prefixOf(oldPublished.path) : prefixOf(raw.path) });
       }
@@ -73,6 +75,7 @@ async function rederiveCaptures({ projectRoot, config, captureIds, runId = null 
           ...rest,
           runId,
           privacy: safe.privacy,
+          ...(safe.coverage ? { annotationCoverage: safe.coverage } : {}),
           redactions: safe.redactions.map(({ kind, rect, result }) => ({ kind, rect, result })),
           provenance: {
             mode: 'rederived',

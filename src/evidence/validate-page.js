@@ -57,7 +57,9 @@ function validateNavigation({ requestedUrl, openResult, observation = null, expe
 
   // ---- 登录跳转（含 SPA 延迟跳转：finalUrl 取自等待之后）
   const requestedIsLogin = LOGIN_PATH_RE.test(requestedUrl);
-  if (!requestedIsLogin) {
+  // Scenario 显式声明了会跳到这个地址（如旧链接转到登录卡片里的找回密码），就不是“需要登录”
+  const declaredRedirect = Array.isArray(expected.allowRedirects) && expected.allowRedirects.includes(pathnameOf(finalUrl));
+  if (!requestedIsLogin && !declaredRedirect) {
     if (LOGIN_PATH_RE.test(finalUrl)) {
       throw new CaptureError(REASON.LOGIN_REQUIRED, `访问 ${requestedUrl} 被重定向到了登录页。`, details);
     }

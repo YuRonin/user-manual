@@ -19,6 +19,7 @@ const store = require('./store');
 const { createProjectStore } = require('../store/project');
 const { writeText } = require('../util/fsx');
 const { markAffectedTasks } = require('../tasks/staleness');
+const { writeInventory } = require('../annotations/store');
 
 function coded(code, message, extra = {}) {
   const error = new Error(message);
@@ -113,10 +114,11 @@ function refreshModel({ projectRoot, config, prune = false }) {
   writeText(graphFile, JSON.stringify(fingerprinted.graph, null, 2) + '\n');
   // 不可变快照：release 记录 graphRevision，update 据此取回发布时的依赖图
   const graphRevision = writeGraphSnapshot(stateDirAbs, fingerprinted.graph);
+  const featureInventory = writeInventory(stateDirAbs, indexPages, staleTasks.tasks);
 
   return {
     detected, scan, dependencyWarnings, stateDirAbs, result, fingerprinted, impact, staleTasks,
-    prunedIds, pruned, indexPages, meta, graphRevision, written, projectFile,
+    prunedIds, pruned, indexPages, meta, graphRevision, written, projectFile, featureInventory,
   };
 }
 

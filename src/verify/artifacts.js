@@ -17,6 +17,20 @@ const { fileHash } = require('../publication/publisher');
 const { checkEvidenceUsable } = require('../model/approval');
 const { validateTaskFinal } = require('../generate/task-facts');
 const { validatePublication, formatIssues } = require('../publication/validate');
+const { createCaptureStore } = require('../evidence/store');
+
+function annotationCoverageForImages(root, config, images = []) {
+  const store = createCaptureStore({ projectRoot: root, stateDirAbs: path.join(root, config.artifacts.stateDir) });
+  const captures = images.map((image) => {
+    const record = image.captureId ? store.read(image.captureId) : null;
+    const coverage = record?.annotationCoverage || null;
+    // 旧记录没有覆盖结果：明确为 unknown，不能当作通过
+    return { captureId: image.captureId || null, status: !coverage ? 'unknown' : coverage.ok ? 'passed' : 'failed', coverage };
+  });
+  return { status: !captures.length ? 'legacy-unknown' : captures.some((item) => item.coverage?.pending?.length) ? 'pending-review'
+    : captures.some((item) => item.coverage && !item.coverage.complete) ? 'incomplete'
+      : captures.some((item) => !item.coverage) ? 'legacy-unknown' : 'complete', captures };
+}
 
 /** 读取任务、正式文档与事实文件。 */
 function loadVerify(root, config, taskId) {
@@ -82,4 +96,4 @@ function checksFromErrors(errors) {
   });
 }
 
-module.exports = { loadVerify, prepareVerify, verifyPageArtifacts, checksFromErrors };
+module.exports = { loadVerify, prepareVerify, verifyPageArtifacts, checksFromErrors, annotationCoverageForImages };

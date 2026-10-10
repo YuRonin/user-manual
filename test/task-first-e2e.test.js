@@ -58,6 +58,7 @@ async function completeTask(root, stateDir, taskId) {
 
   result = runSync(['verify', taskId, '--project-root', root, '--json']);
   assert.strictEqual(result.status, 0, result.stdout + result.stderr);
+  assert.strictEqual(JSON.parse(result.stdout).annotationCoverage.status, 'complete');
   assert.strictEqual(require('../src/tasks/store').readTask(stateDir, taskId).status, 'generated');
   return evidence;
 }
@@ -241,6 +242,13 @@ async function completeTask(root, stateDir, taskId) {
       benefitsEvidence.steps[1].screenshots[0].redactions.some((item) => item.kind === 'semantic'),
       '学校字段应在进入文档前被不透明遮罩'
     );
+
+    const capture = require('../src/evidence/store').createCaptureStore({ projectRoot: root, stateDirAbs: stateDir }).read(profileEvidence.steps[0].screenshots[0].captureId);
+    const annotationFile = capture.artifacts.find((item) => item.kind === 'annotations').path;
+    fs.appendFileSync(path.join(root, annotationFile), '\n');
+    result = runSync(['verify', 'edit-profile', '--project-root', root, '--json']);
+    assert.notStrictEqual(result.status, 0);
+    assert.match(result.stdout, /annotation-metadata-invalid/);
 
     process.stdout.write(
       '\ntask-first e2e\n' +

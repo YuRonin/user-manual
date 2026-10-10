@@ -13,6 +13,7 @@ const { spawnSync } = require('child_process');
 const path = require('path');
 
 const FILES = [
+  'annotation-coverage.test.js',
   'manual-quality.test.js',
   'catalog.test.js',
   'style-lint.test.js',

@@ -64,6 +64,15 @@ async function runWith(error) {
     assert.match(result.hint, /auth login/);
   });
 
+  await test('标注排版失败保留 annotation-layout-failed（不归为导航失败），确定性失败不重试', async () => {
+    assert.ok(Object.values(REASON).includes('annotation-layout-failed'), 'capture-page 只保留 REASON 里的 code，其余改写为 navigation-failed');
+    const result = toErrorResult(new CaptureError(REASON.ANNOTATION_LAYOUT_FAILED, '排版失败'), { phase: 'capture' });
+    assert.strictEqual(result.code, 'annotation-layout-failed');
+    assert.strictEqual(result.policy, 'fail');
+    assert.strictEqual(result.retryable, false);
+    assert.match(result.hint, /不是导航问题/);
+  });
+
   await test('C08 策略：瞬时故障重试，404 / provider 缺失失败，5xx 可重试而 4xx 不可', async () => {
     assert.strictEqual(toErrorResult(new CaptureError(REASON.TIMEOUT, 't')).policy, 'retry');
     assert.strictEqual(toErrorResult(new CaptureError(REASON.HTTP_NOT_FOUND, 'n')).policy, 'fail');

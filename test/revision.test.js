@@ -77,6 +77,7 @@ test('页面定义字段变化一定改变 revision', () => {
   assert.notEqual(definitionRevision('page', page({ title: '个人中心' })), base);
   assert.notEqual(definitionRevision('page', page({ states: { default: { assertions: [{ type: 'visible', target: { role: 'heading', name: '用户中心' } }] } } })), base);
   assert.notEqual(definitionRevision('page', page({ route: '/me' })), base);
+  assert.notEqual(definitionRevision('page', page({ features: [{ feature_id: 'upload', label: '上传附件', priority: 'required' }] })), base);
 });
 
 test('任务：status/派生 execution/时间戳不影响，步骤顺序/风险/动作/断言引用变化一定影响', () => {

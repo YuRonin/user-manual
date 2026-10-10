@@ -17,7 +17,7 @@ const { DEFAULT_MOSAIC } = require('../privacy/renderer');
 const { sha256Hex, revisionOf } = require('../util/hash');
 const { writeFileAtomic } = require('../util/atomic-write');
 
-const RENDERER_VERSION = 'sharp-svg-1';
+const RENDERER_VERSION = 'sharp-svg-2';
 const MIN_MASK = { width: 24, height: 8 };
 
 /** CSS 矩形 → 图像像素矩形（取整向外扩，保证完全覆盖），裁剪到图像范围；完全落在图外返回 null。 */
@@ -69,18 +69,31 @@ function annotationSvg({ width, height, annotations, dpr, theme }) {
   const parts = [];
   for (const item of annotations) {
     const t = toImageRect(item.target, { dpr, width, height });
-    if (t) {
+    const source = toImageRect(item.sourceRect || item.target, { dpr, width, height });
+    const marker = item.marker && toImageRect({ x: item.marker.x, y: item.marker.y, width: item.marker.size, height: item.marker.size }, { dpr, width, height });
+    if (source && t && marker) {
       const r = Math.round(theme.targetRadius * dpr);
       parts.push(`<rect x="${t.x}" y="${t.y}" width="${t.width}" height="${t.height}" rx="${r}" fill="none" stroke="${halo.color}" stroke-opacity="${halo.opacity}" stroke-width="${Math.round(10 * dpr)}"/>`);
       parts.push(`<rect x="${t.x}" y="${t.y}" width="${t.width}" height="${t.height}" rx="${r}" fill="none" stroke="${primary.color}" stroke-opacity="${primary.opacity}" stroke-width="${Math.max(1, Math.round(theme.outlineWidth * dpr))}"/>`);
+      const size = item.marker.size * dpr;
+      const cx = (item.marker.x * dpr) + size / 2;
+      const cy = (item.marker.y * dpr) + size / 2;
+      parts.push(`<circle cx="${cx}" cy="${cy}" r="${size / 2 - dpr}" fill="${primary.color}" stroke="#ffffff" stroke-width="${2 * dpr}"/>`);
+      parts.push(`<text x="${cx}" y="${cy}" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="${16 * dpr}" text-anchor="middle" dominant-baseline="central">${escapeXml(item.label)}</text>`);
     }
-    const size = item.marker.size * dpr;
-    const cx = (item.marker.x * dpr) + size / 2;
-    const cy = (item.marker.y * dpr) + size / 2;
-    parts.push(`<circle cx="${cx}" cy="${cy}" r="${size / 2 - dpr}" fill="${primary.color}" stroke="#ffffff" stroke-width="${2 * dpr}"/>`);
-    parts.push(`<text x="${cx}" y="${cy}" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="${16 * dpr}" text-anchor="middle" dominant-baseline="central">${escapeXml(item.label)}</text>`);
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">${parts.join('')}</svg>`;
+}
+
+function renderAnnotationResults(annotations, { width, height, dpr }) {
+  return annotations.map((item) => {
+    const target = item.target && toImageRect(item.target, { width, height, dpr });
+    const source = item.sourceRect && toImageRect(item.sourceRect, { width, height, dpr });
+    const marker = item.marker && toImageRect({ x: item.marker.x, y: item.marker.y, width: item.marker.size, height: item.marker.size }, { width, height, dpr });
+    const intersects = !!(item.sourceRect ? source : target);
+    const drawn = intersects && !!marker;
+    return { feature_id: item.feature_id || null, located: !!item.target, outlined: intersects, intersects, drawn, target: target || null, marker: marker || null, reason: drawn ? null : !item.target ? 'target-not-located' : !intersects ? 'outside-image' : 'marker-outside-image' };
+  });
 }
 
 /**
@@ -128,4 +141,4 @@ async function deriveImages({ rawPath, geometry, redactions = [], annotations = 
   };
 }
 
-module.exports = { RENDERER_VERSION, toImageRect, maskSvg, annotationSvg, deriveImages, paint };
+module.exports = { RENDERER_VERSION, toImageRect, maskSvg, annotationSvg, renderAnnotationResults, deriveImages, paint };

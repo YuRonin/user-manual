@@ -15,7 +15,7 @@ node <skill>/bin/manual.js discover-tasks <page-id> \
 
 把候选写成 JSON 文件：
 
-若步骤直接沿用入口页 `guide` 中带目标的条目，可写 `{ "guideStep": "practice", "action": { "type": "click" } }`。写入时工具会填入该指南的步骤 ID、说明、页面和目标；动作类型必须由建模者明确给出，也可显式覆盖说明或目标。引用不存在或无目标、缺少动作类型时整批拒绝。此简写只减少候选输入字段，仍是 `candidate`，需要人工核对并批准。
+若步骤直接沿用入口页 `guide` 中带目标的条目，可写 `{ "guideStep": "practice", "action": { "type": "click" } }`。写入时工具会填入该指南的步骤 ID、说明、页面和目标，指南小标题符合步骤标题规则时也作为步骤 `title`；动作类型必须由建模者明确给出，也可显式覆盖说明或目标。引用不存在或无目标、缺少动作类型时整批拒绝。此简写只减少候选输入字段，仍是 `candidate`，需要人工核对并批准。
 
 ```json
 {
@@ -31,12 +31,14 @@ node <skill>/bin/manual.js discover-tasks <page-id> \
       "steps": [
         {
           "id": "open-editor",
+          "title": "打开编辑面板",
           "instruction": "点击「编辑资料」",
           "page": "user-center",
           "action": { "type": "click", "target": { "role": "button", "name": "编辑资料" } }
         },
         {
           "id": "save-profile",
+          "title": "保存修改",
           "instruction": "确认资料无误后，点击「保存修改」",
           "page": "user-center",
           "action": { "type": "click", "target": { "role": "button", "name": "保存修改" } },

@@ -35,6 +35,8 @@ const { RuntimeError } = require('./errors');
 const { taskQuality } = require('../generate/quality');
 
 const PLAN_VERSION = 1;
+// 采集语义版本：标注覆盖规则变化（guide/隐式标注优先级、步骤级功能归属）后旧缓存不能复用
+const CAPTURE_PIPELINE_VERSION = 'quality-3';
 // update 复用 generate 的节点（采集 → 草稿 → 文案 → 门槛 → 发布），目标集合由影响分析给出。
 const COMMANDS = ['generate', 'capture', 'update'];
 const CAPTURE_CAPABILITIES = ['capture', 'assertions', 'privacyGeometry'];
@@ -64,7 +66,7 @@ function captureKeyFields({ config, subject, scenario, sourceHash, captureMode, 
   const provider = config.browser.providers[config.browser.activeProvider] || {};
   const authProfile = scenario.authProfile || config.auth?.activeProfile;
   return {
-    capturePipelineVersion: 'quality-2',
+    capturePipelineVersion: CAPTURE_PIPELINE_VERSION,
     projectId: config.project.id || config.auth?.cacheKey || config.project.name,
     environment: `${scenario.environment || 'local'}@${new URL(config.project.baseUrl).origin}`,
     deployedBuild: config.runtime?.deployedBuild,
@@ -238,7 +240,7 @@ function collectPlanningInputs({ projectRoot, config, base, targets, mode, cache
   return {
     version: PLAN_VERSION,
     modelRevision: base.modelRevision,
-    capturePipelineVersion: 'quality-2',
+    capturePipelineVersion: CAPTURE_PIPELINE_VERSION,
     projectId: config.project.id || null,
     language: config.docs.language,
     templateVersion: TEMPLATE_VERSION,

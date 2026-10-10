@@ -79,7 +79,7 @@ function artifactsFor(root, config, target) {
   if (target.type === 'page') {
     const result = verifyPageArtifacts({ root, config, pageId: target.id });
     if (!result.ok) errors = result.errors;
-    else extra = { manual: result.manual, images: result.images };
+    else extra = { manual: result.manual, images: result.images, annotationCoverage: require('../verify/artifacts').annotationCoverageForImages(root, config, result.release.facts?.images || []) };
   } else {
     const input = loadVerify(root, config, target.id);
     if (!input.ok) errors = input.errors;
@@ -92,7 +92,7 @@ function artifactsFor(root, config, target) {
         } catch (error) {
           errors = [`${error.code || 'write-failed'}: 验证通过，但任务状态写入失败。${error.message}`];
         }
-        extra = { manual: input.manual, images: (input.facts.images || []).map((image) => image.artifactPath) };
+        extra = { manual: input.manual, images: (input.facts.images || []).map((image) => image.artifactPath), annotationCoverage: require('../verify/artifacts').annotationCoverageForImages(root, config, input.facts.images || []) };
       }
     }
   }
@@ -101,7 +101,7 @@ function artifactsFor(root, config, target) {
   const report = {
     kind: 'artifacts', manualId, releaseId: release?.id || null, target: `${target.type}:${target.id}`,
     startedAt, finishedAt: new Date().toISOString(), onlineChecked: false,
-    checks, result: errors.length ? 'failed' : 'passed',
+    checks, result: errors.length ? 'failed' : 'passed', annotationCoverage: extra.annotationCoverage || null,
   };
   let written = null;
   if (release) written = writeReport(state, report);
@@ -134,10 +134,16 @@ async function run(argv) {
       const [only] = results;
       if (only.errors.length) return fail(only.errors);
       if (json) process.stdout.write(JSON.stringify({ ok: true, status: 'artifact-verified', scope: 'artifacts', onlineChecked: false, businessVerified: false, verificationId: only.report.id || null, ...only.extra }, null, 2) + '\n');
-      else process.stdout.write(`[manual verify] ${only.report.target} 产物验证通过（离线：不代表当前网页行为未变，在线检查用 --live）。\n`);
+      else {
+        process.stdout.write(`[manual verify] ${only.report.target} 产物验证通过（离线：不代表当前网页行为未变，在线检查用 --live）。\n`);
+        const unknown = (only.extra.annotationCoverage?.captures || []).filter((item) => item.status === 'unknown').length;
+        if (unknown) process.stdout.write(`[manual verify] ${unknown} 张图没有标注覆盖记录（旧证据，覆盖度未知）；重新采集后可得到覆盖结果。
+`);
+        for (const item of only.extra.annotationCoverage?.captures || []) if (item.coverage?.pending?.length) process.stdout.write(`[manual verify] 标注待确认: ${item.coverage.pending.map((candidate) => candidate.label).join('、')}\n`);
+      }
       return 0;
     }
-    const body = { ok: results.every((r) => !r.errors.length), scope: 'artifacts', onlineChecked: false, reports: results.map((r) => ({ target: r.report.target, result: r.report.result, verificationId: r.report.id || null, errors: r.errors })) };
+    const body = { ok: results.every((r) => !r.errors.length), scope: 'artifacts', onlineChecked: false, reports: results.map((r) => ({ target: r.report.target, result: r.report.result, verificationId: r.report.id || null, annotationCoverage: r.report.annotationCoverage || null, errors: r.errors })) };
     if (json) process.stdout.write(JSON.stringify(body, null, 2) + '\n');
     else for (const r of body.reports) process.stdout.write(`[manual verify] ${r.target}: ${r.result}${r.errors.length ? `（${r.errors[0]}）` : ''}\n`);
     return body.ok ? 0 : exitCodeFor(results.flatMap((r) => r.errors));

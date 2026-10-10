@@ -60,6 +60,8 @@ function buildTaskFactPack({ task, evidence, images, claims, language, entryPage
     return {
       id: step.id,
       order: index + 1,
+      // 帮助中心目录用的步骤短名称；没有时为 null，目录退回截取步骤首句
+      title: step.title ?? null,
       pageId: step.pageId ?? step.page ?? null,
       action: { type: step.action?.type ?? null, target: step.action?.target ?? null },
       sentence: sentence.text,

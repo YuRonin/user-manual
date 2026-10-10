@@ -72,7 +72,8 @@ const TEMPLATES = {
 // render-2：正文按稳定块 ID 分段（<!-- manual:block id=… --> … <!-- /manual:block -->），供人工编辑保护的三方合并定位（P3-06）。
 // render-13：面向读者的帮助中心结构——入口并入步骤，正文不暴露采集与验证范围等维护信息。
 // render-14：页面指南标题恢复编号，与截图标注 ①②③ 对应。
-const TEMPLATE_VERSION = 'render-14';
+// render-15：任务步骤有 title 时，在 step 注释后写 <!-- step-title: … -->，供帮助中心目录使用；正文不变。
+const TEMPLATE_VERSION = 'render-15';
 
 class TemplateError extends Error {
   constructor(language) {
@@ -189,6 +190,8 @@ function renderTask(pack, copy = {}) {
     const action = location ? `在${location[1]}，${step.sentence}` : inlineLocation ? `在${inlineLocation[1]}${step.sentence}` : step.sentence;
     const remainder = location ? note.slice(location[0].length).trim() : inlineLocation ? '' : note;
     const L = [`<!-- step:${step.id} -->`];
+    // 目录短名称只放在注释里，读者正文不变；格式由 schema 的步骤标题规则保证不会提前闭合注释
+    if (step.title) L.push(`<!-- step-title: ${step.title} -->`);
     if (/^(?:选择前|点击前|提交前|操作前)/.test(remainder)) {
       const [, check, after = ''] = /^(?:选择前|点击前|提交前|操作前)[，,]?\s*([^。]+)[。.]?\s*(.*)$/.exec(remainder) || [];
       L.push(`${index + 1}. ${check}，再${action}`);

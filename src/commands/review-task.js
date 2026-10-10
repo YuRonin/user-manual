@@ -41,7 +41,7 @@ function reviewTask(task, pages, evidence = {}) {
       readerChecks: task.completion?.readerChecks || [],
     },
     steps: (task.steps || []).map((step, index) => ({
-      number: index + 1, id: step.id, instruction: step.instruction, action: step.action ? { type: step.action.type, target: step.action.target || null } : null,
+      number: index + 1, id: step.id, title: step.title || null, instruction: step.instruction, action: step.action ? { type: step.action.type, target: step.action.target || null } : null,
       screenshot: {
         timing: step.capture?.timing || null, readerCaption: step.capture?.readerCaption || null,
         readerVisible: step.capture?.readerVisible !== false,
@@ -99,7 +99,7 @@ function run(argv) {
   else {
     if (preview) process.stdout.write(`读者预览：${preview}\n`);
     process.stdout.write(`${report.title}\n目标：${report.goal}\n入口：${report.entry?.route || '未定义'}\n`);
-    report.steps.forEach(step => process.stdout.write(`${step.number}. ${step.instruction}\n   图：${step.screenshot.images.length} 张；${step.screenshot.readerCaption || '缺少读者图注'}\n${step.screenshot.reviewQuestions.map(item => `   审阅：${item}\n`).join('')}`));
+    report.steps.forEach(step => process.stdout.write(`${step.number}. ${step.instruction}\n   目录标题：${step.title || '缺少（目录会截取首句）'}\n   图：${step.screenshot.images.length} 张；${step.screenshot.readerCaption || '缺少读者图注'}\n${step.screenshot.reviewQuestions.map(item => `   审阅：${item}\n`).join('')}`));
     process.stdout.write(`完成声明：${report.completion.claims.map(c => `${c.id}=${c.status}`).join('、') || '无'}\n`);
     report.quality.goalCoverage.forEach(item => process.stdout.write(`目标核对：${item.text} (${item.status})\n`));
     report.quality.warnings.forEach(warning => process.stdout.write(`警告：${warning}\n`));

@@ -6,7 +6,8 @@ const path = require('path');
 const { parseArgs } = require('../cli/args');
 const { exitCodeFor, usageExit } = require('../cli/output');
 const { loadConfig } = require('../config/load');
-const { validateTask } = require('../tasks/model');
+const { validateTask, stepPageId } = require('../tasks/model');
+const { validateStepTitle } = require('../model/schema');
 const { createProjectStore } = require('../store/project');
 const { buildDiscoveryWorklist } = require('../tasks/discovery');
 
@@ -119,19 +120,21 @@ function run(argv) {
     if (Array.isArray(task.steps)) {
       task.steps = task.steps.map((step, stepIndex) => {
         if (!step || typeof step !== 'object' || !step.guideStep) return step;
-        const page = selectedPages.get(step.page || task.entryPage);
+        const page = selectedPages.get(stepPageId(step) || task.entryPage);
         const guide = (page?.guide || []).find(item => item.id === step.guideStep);
         if (!guide?.target) {
           errors.push(`${where}.steps[${stepIndex}].guideStep 找不到带目标的页面指南步骤: ${step.guideStep}`);
           return step;
         }
         const { guideStep: _guideStep, ...explicit } = step;
-        return { id: guide.id, instruction: guide.instruction, page: page.id,
+        // 指南小标题符合步骤标题规则时作为默认目录名；不符合就不带，由建模者显式填写
+        const title = guide.title && validateStepTitle(guide.title).ok ? { title: guide.title.trim() } : {};
+        return { id: guide.id, ...title, instruction: guide.instruction, page: page.id,
           ...explicit, action: { ...explicit.action, target: explicit.action?.target || guide.target } };
       });
       task.steps.forEach((step, stepIndex) => {
-        if (step?.page && !knownPageIds.has(step.page)) {
-          errors.push(`${where}.steps[${stepIndex}].page 不存在: ${step.page}`);
+        if (stepPageId(step) && !knownPageIds.has(stepPageId(step))) {
+          errors.push(`${where}.steps[${stepIndex}].page 不存在: ${stepPageId(step)}`);
         }
       });
     }
@@ -143,6 +146,8 @@ function run(argv) {
   if (errors.length > 0) return fail(errors, json);
   try {
     projectStore.commit({ base, kind: 'definition', changes: { tasks: candidates } });
+    const current = projectStore.load().model;
+    require('../annotations/store').writeInventory(stateDir, current.pages, current.tasks);
   } catch (error) {
     return fail(`${error.code || 'model-commit-failed'}: ${error.message}`, json);
   }
