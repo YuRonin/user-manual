@@ -59,6 +59,11 @@ async function completeTask(root, stateDir, taskId) {
 
   result = runSync(['verify', taskId, '--project-root', root, '--json']);
   assert.strictEqual(result.status, 0, result.stdout + result.stderr);
+  // Demo 结果与标注覆盖率分开报告：全部截图通过演示数据门禁，采集期间没有写请求被中止
+  const demo = JSON.parse(result.stdout).demo;
+  assert.strictEqual(demo.demo_privacy.status, 'passed', JSON.stringify(demo));
+  assert.strictEqual(demo.write_safety.status, 'passed');
+  assert.strictEqual(demo.write_safety.blockedWrites, 0);
   // 任务没有显式确认的必标功能：覆盖率 N/A，不显示 100%（B2）
   assert.strictEqual(JSON.parse(result.stdout).annotationCoverage.status, 'not-applicable');
   assert.strictEqual(require('../src/tasks/store').readTask(stateDir, taskId).status, 'generated');

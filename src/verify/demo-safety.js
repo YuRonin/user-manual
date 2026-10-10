@@ -38,4 +38,21 @@ function summarizeDemoSafety(records = []) {
   };
 }
 
-module.exports = { summarizeDemoSafety };
+/** 手册引用图片（facts.images：{ captureId }）对应 Capture 记录的 Demo 结果。没有 captureId 的图片按 legacy 计。 */
+function demoSafetyForImages(root, config, images = []) {
+  const path = require('path');
+  const { createCaptureStore } = require('../evidence/store');
+  const store = createCaptureStore({ projectRoot: root, stateDirAbs: path.join(root, config.artifacts.stateDir) });
+  const records = images.map((image) => (image.captureId ? store.read(image.captureId) : null) || { privacy: null });
+  return summarizeDemoSafety(records);
+}
+
+/** 只有记录本身显示门禁失败或写请求被中止才算错误；legacy 只提示。 */
+function demoSafetyErrors(result) {
+  const errors = [];
+  if (result?.demo_privacy?.status === 'failed') errors.push(`demo-privacy-failed: ${result.demo_privacy.failed} 张图的 Demo 门禁结论不是 passed，不能作为正式手册图片。`);
+  if (result?.write_safety?.status === 'failed') errors.push(`write-safety-failed: 采集期间有 ${result.write_safety.blockedWrites} 个写请求被中止，截图状态不可信。`);
+  return errors;
+}
+
+module.exports = { summarizeDemoSafety, demoSafetyForImages, demoSafetyErrors };

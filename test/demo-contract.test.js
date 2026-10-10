@@ -197,3 +197,13 @@ test('没写键名的 data-redact：用 * 配置演示值', () => {
   assert.deepEqual(r.demo.text['*'], ['示例内容']);
   assert.equal(demo.resolveDemoConfig({ demo: { text: { '**': 'x' } } }).ok, false);
 });
+
+test('verify 判错：只有记录显示门禁失败或写请求被中止才失败，legacy 只提示', () => {
+  const { summarizeDemoSafety, demoSafetyErrors } = require('../src/verify/demo-safety');
+  const legacy = summarizeDemoSafety([{ privacy: { status: 'passed' } }]);
+  assert.deepEqual(demoSafetyErrors(legacy), []);
+  const failed = summarizeDemoSafety([{ privacy: { demo: { status: 'blocked' } } }]);
+  assert.match(demoSafetyErrors(failed).join('\n'), /demo-privacy-failed: 1 张图/);
+  const writes = summarizeDemoSafety([{ privacy: { demo: { status: 'passed', network: { blocked: 2 } } } }]);
+  assert.match(demoSafetyErrors(writes).join('\n'), /write-safety-failed: 采集期间有 2 个写请求/);
+});

@@ -20,6 +20,7 @@ const { createBrowserSession } = require('../browser/session');
 const { publishedManualIds } = require('../update/baseline');
 const { loadVerify, prepareVerify, verifyPageArtifacts, checksFromErrors } = require('../verify/artifacts');
 const { verifyLive } = require('../verify/live');
+const { demoSafetyForImages, demoSafetyErrors } = require('../verify/demo-safety');
 const { writeReport, exitCodeForReports } = require('../verify/report');
 const releases = require('../publication/release-store');
 
@@ -79,7 +80,7 @@ function artifactsFor(root, config, target) {
   if (target.type === 'page') {
     const result = verifyPageArtifacts({ root, config, pageId: target.id });
     if (!result.ok) errors = result.errors;
-    else extra = { manual: result.manual, images: result.images, warnings: result.warnings || [], annotationCoverage: require('../verify/artifacts').annotationCoverageForImages(root, config, result.release.facts?.images || []) };
+    else extra = { manual: result.manual, images: result.images, warnings: result.warnings || [], annotationCoverage: require('../verify/artifacts').annotationCoverageForImages(root, config, result.release.facts?.images || []), demo: demoSafetyForImages(root, config, result.release.facts?.images || []) };
   } else {
     const input = loadVerify(root, config, target.id);
     if (!input.ok) errors = input.errors;
@@ -92,16 +93,18 @@ function artifactsFor(root, config, target) {
         } catch (error) {
           errors = [`${error.code || 'write-failed'}: 验证通过，但任务状态写入失败。${error.message}`];
         }
-        extra = { manual: input.manual, images: (input.facts.images || []).map((image) => image.artifactPath), warnings: prepared.warnings || [], annotationCoverage: require('../verify/artifacts').annotationCoverageForImages(root, config, input.facts.images || []) };
+        extra = { manual: input.manual, images: (input.facts.images || []).map((image) => image.artifactPath), warnings: prepared.warnings || [], annotationCoverage: require('../verify/artifacts').annotationCoverageForImages(root, config, input.facts.images || []), demo: demoSafetyForImages(root, config, input.facts.images || []) };
       }
     }
   }
+  // Demo 结果与标注覆盖率分开报告：demo_privacy（截图是否都过了 Demo 门禁）、write_safety（采集期间写请求）
+  if (!errors.length && extra.demo) errors = demoSafetyErrors(extra.demo);
   const release = releases.readCurrentRelease(state, manualId);
   const checks = checksFromErrors(errors);
   const report = {
     kind: 'artifacts', manualId, releaseId: release?.id || null, target: `${target.type}:${target.id}`,
     startedAt, finishedAt: new Date().toISOString(), onlineChecked: false,
-    checks, result: errors.length ? 'failed' : 'passed', annotationCoverage: extra.annotationCoverage || null,
+    checks, result: errors.length ? 'failed' : 'passed', annotationCoverage: extra.annotationCoverage || null, demo: extra.demo || null,
   };
   let written = null;
   if (release) written = writeReport(state, report);
@@ -141,11 +144,16 @@ async function run(argv) {
         const unknown = (only.extra.annotationCoverage?.captures || []).filter((item) => item.status === 'unknown').length;
         if (unknown) process.stdout.write(`[manual verify] ${unknown} 张图没有标注覆盖记录（旧证据，覆盖度未知）；重新采集后可得到覆盖结果。
 `);
+        const demo = only.extra.demo;
+        if (demo?.demo_privacy?.legacy) process.stdout.write(`[manual verify] ${demo.demo_privacy.legacy} 张图采集于 Demo 模式之前（沿用旧遮罩规则）；需要清晰演示截图时重新采集。
+`);
+        if (demo && demo.demo_privacy.passed) process.stdout.write(`[manual verify] Demo：${demo.demo_privacy.passed}/${demo.demo_privacy.total} 张图通过演示数据门禁；采集期间写请求中止 ${demo.write_safety.blockedWrites} 次。
+`);
         for (const item of only.extra.annotationCoverage?.captures || []) if (item.coverage?.pending?.length) process.stdout.write(`[manual verify] 标注待确认: ${item.coverage.pending.map((candidate) => candidate.label).join('、')}\n`);
       }
       return 0;
     }
-    const body = { ok: results.every((r) => !r.errors.length), scope: 'artifacts', onlineChecked: false, reports: results.map((r) => ({ target: r.report.target, result: r.report.result, verificationId: r.report.id || null, annotationCoverage: r.report.annotationCoverage || null, errors: r.errors })) };
+    const body = { ok: results.every((r) => !r.errors.length), scope: 'artifacts', onlineChecked: false, reports: results.map((r) => ({ target: r.report.target, result: r.report.result, verificationId: r.report.id || null, annotationCoverage: r.report.annotationCoverage || null, demo: r.report.demo || null, errors: r.errors })) };
     if (json) process.stdout.write(JSON.stringify(body, null, 2) + '\n');
     else for (const r of body.reports) process.stdout.write(`[manual verify] ${r.target}: ${r.result}${r.errors.length ? `（${r.errors[0]}）` : ''}\n`);
     return body.ok ? 0 : exitCodeFor(results.flatMap((r) => r.errors));

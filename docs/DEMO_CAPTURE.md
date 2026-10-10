@@ -104,6 +104,15 @@ capture:
 - **"删除""支付""提交"类步骤**：要么经 `writeAuthorization` 在登记的测试环境里真实执行；要么用 Fixture 拦截写请求，**同时**拦截之后的读取请求，在浏览器内完整模拟；两者都做不到时，保持 `risk: write` / `destructive`，让流程停在动作之前。
 - **`verify --live`**：回放时同样安装守卫（不装 Fixture 路由），只读步骤触发写请求也会被中止并记为失败。
 
+## verify 中的 Demo 结果
+
+`manual verify`（离线产物验证）在输出与报告中给出独立于标注覆盖率的 `demo` 字段：
+
+- `demo_privacy`：手册引用的截图有多少通过了 Demo 门禁（`passed`）；采集于 Demo 模式之前的旧证据记为 `legacy`（沿用旧遮罩规则，只提示、不判失败）；并汇总数据来源（`api_mock` / `dom_replace`）与无法审计区域数量。
+- `write_safety`：这些截图采集期间的网络计数（Mock / 放行 / 授权 / 信标），被中止的写请求必须为 0。
+
+记录显示门禁未通过或有写请求被中止时，`verify` 以 `demo-privacy-failed` / `write-safety-failed` 失败。
+
 ## 排查 needs_fixture / blocked
 
 采集失败的输出会带上原因码和建议：
