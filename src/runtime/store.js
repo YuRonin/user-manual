@@ -210,9 +210,9 @@ function createRunStore({ projectRoot, stateDirAbs, now = () => Date.now(), leas
 
   /**
    * 推进任务状态。
-   * @param {{ lease, outputRefs?, error?, reason?, warnings? }} options  error 为 ErrorResult 或其摘要；warnings 为成功但需要提示的情况
+   * @param {{ lease, outputRefs?, error?, reason?, warnings?, quality? }} options  error 为 ErrorResult 或其摘要；warnings 为成功但需要提示的情况
    */
-  function transition(runId, taskId, to, { lease, outputRefs, error, reason, warnings } = {}) {
+  function transition(runId, taskId, to, { lease, outputRefs, error, reason, warnings, quality } = {}) {
     assertLease(lease, runId);
     const f = files(runId);
     const file = f.task(taskId);
@@ -240,6 +240,8 @@ function createRunStore({ projectRoot, stateDirAbs, now = () => Date.now(), leas
       task.outputRefs = outputRefs.map((ref) => ({ ...ref }));
       task.error = null;
       // 成功但带提示（缓存执行前失效、标注覆盖失败、未生成发布图等）：随任务持久化，供 --json / status 展示
+      // 统一质量结果（B3-08）：结构化摘要，只含计数、代码与 id，不含正文
+      if (quality && typeof quality === 'object') task.quality = JSON.parse(JSON.stringify(quality));
       task.warnings = (Array.isArray(warnings) ? warnings : []).filter((w) => typeof w === 'string' && w).slice(0, 50).map((w) => sanitizeMessage(w));
     } else if (to === 'failed' || to === 'interrupted') {
       if (!error || typeof error.code !== 'string') throw new RuntimeError('invalid-transition', `任务 ${taskId} 转为 ${to} 需要错误信息。`);

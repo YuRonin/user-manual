@@ -33,10 +33,15 @@ function collectValidations(evidence) {
 }
 
 /**
- * @returns {Array<{ id, text, status, assertionRefs, checkpoint, evidence: Array<{assertionId, stepId, scope, checkedAt}> }>}
+ * @returns {Array<{ id, text, status, assertionRefs, checkpoint, evidence: Array<{assertionId, stepId, scope, checkedAt, captureId?}> }>}
  */
 function computeClaims(task, evidence) {
   const validations = collectValidations(evidence);
+  // 断言所在步骤的截图（优先"操作后"）：完成声明能追溯到看得见的证据（B3-07）
+  const captureOf = (stepId) => {
+    const shots = (evidence?.steps || []).find((step) => step.id === stepId)?.screenshots || [];
+    return (shots.find((shot) => shot.timing === 'after') || shots[shots.length - 1])?.captureId || null;
+  };
   return claimsOf(task).map((claim) => {
     const refs = Array.isArray(claim.assertionRefs) ? claim.assertionRefs : [];
     const base = { id: claim.id, text: claim.text, assertionRefs: refs, checkpoint: claim.checkpoint || null };
@@ -48,7 +53,7 @@ function computeClaims(task, evidence) {
       const candidates = validations.filter((v) => v.assertionId === ref && (!claim.checkpoint || v.stepId === claim.checkpoint));
       if (candidates.some((v) => v.outcome === 'failed')) failed = true;
       const hit = candidates.find((v) => v.outcome === 'passed');
-      if (hit) matched.push({ assertionId: ref, stepId: hit.stepId, scope: hit.scope, checkedAt: hit.checkedAt });
+      if (hit) matched.push({ assertionId: ref, stepId: hit.stepId, scope: hit.scope, checkedAt: hit.checkedAt, ...(captureOf(hit.stepId) ? { captureId: captureOf(hit.stepId) } : {}) });
       else missing = true;
     }
     let status = failed ? 'failed' : (missing ? 'not_run' : 'verified');

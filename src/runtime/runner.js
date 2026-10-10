@@ -52,6 +52,8 @@ function summarize(state) {
     interrupted: by('interrupted').map((t) => t.id),
     // 执行期提示（与规划期 plan.summary.warnings 区分）
     warnings: state.tasks.flatMap((t) => (t.warnings || []).map((warning) => `${t.id}：${warning}`)),
+    // 各节点的质量结果；validate 节点的最完整（含门禁提示）
+    quality: Object.fromEntries(state.tasks.filter((t) => t.quality).map((t) => [t.id, t.quality])),
   };
 }
 
@@ -177,7 +179,7 @@ async function runRun({ runStore, runId, handlers, context = {}, signal = null, 
         continue;
       }
       try {
-        runStore.transition(runId, ready.id, 'succeeded', { lease, outputRefs: result?.outputs, reason: result?.reused ? `reused:${result.reused.from}` : undefined, warnings: result?.warnings });
+        runStore.transition(runId, ready.id, 'succeeded', { lease, outputRefs: result?.outputs, reason: result?.reused ? `reused:${result.reused.from}` : undefined, warnings: result?.warnings, quality: result?.quality });
         emit({ type: 'task-succeeded', taskId: ready.id, reused: !!result?.reused });
       } catch (error) {
         runStore.transition(runId, ready.id, 'failed', { lease, error: toErrorResult(error, { phase: ready.kind, scope: { taskId: ready.id } }) });

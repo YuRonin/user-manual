@@ -33,6 +33,7 @@ const { RuntimeError } = require('../runtime/errors');
 const { reconcileDocument } = require('./manual-store');
 const { checkedSections } = require('../model/links');
 const { pageInventory } = require('../annotations/coverage');
+const { qualityGate, qualitySummary } = require('./quality-summary');
 
 function failure(code, errors, extra = {}) {
   const list = Array.isArray(errors) ? errors : [errors];
@@ -151,6 +152,7 @@ function draftPage({ projectRoot, config, pageId, noScreenshot = false }) {
       indexContext,
       image,
       language: config.docs.language,
+      observedTerms: pageObservedTerms(projectRoot, stateDirAbs, page.id, image?.captureId || page.browser?.latestCaptureId),
     });
   } catch (error) {
     throw failure('draft-failed', [error.message]);
@@ -161,6 +163,20 @@ function draftPage({ projectRoot, config, pageId, noScreenshot = false }) {
   // 发布事实与草稿一起落盘：finalize 用它核对图片 hash 与隐私记录，而不是信任润色稿。
   writeText(factsFile, JSON.stringify({ pageId: page.id, images: image ? [image] : [], factPack: pack, factsHash: pack.factsHash }, null, 2) + '\n');
   return { page, draftPath, factsFile, finalPath, markdown, facts, pack, image, indexContext };
+}
+
+/**
+ * 页面上真实观察到的可访问名称：默认截图 + 本页各 Scenario 变体的最新截图（弹窗、空态等动态状态的控件在变体里）。
+ * 只用于判断文案里的控件名是否被观察到（B3-04 / AC-12）。
+ */
+function pageObservedTerms(projectRoot, stateDirAbs, pageId, captureId) {
+  const store = createCaptureStore({ projectRoot, stateDirAbs });
+  let refs = {};
+  try { refs = store.readLatest(); } catch (_) { refs = {}; }
+  const ids = [captureId, ...Object.entries(refs).filter(([key]) => key.startsWith('scenario:')).map(([, id]) => id)].filter(Boolean);
+  const records = [...new Set(ids)].map((id) => { try { return store.read(id); } catch (_) { return null; } })
+    .filter((record) => record?.kind === 'page' && record.subject?.pageId === pageId);
+  return require('./grounding').observedNamesOf(records);
 }
 
 /** 草稿之后页面定义、源码指纹、截图记录或模板变了：旧草稿不能再发布。 */
@@ -234,7 +250,11 @@ function preparePageFinal({ projectRoot, config, pageId, copy = null, markdown =
   if (!gate.ok) throw failure(gate.errors[0]?.code || 'publication-gate', formatIssues(gate.errors));
   // internal 受众的待确认功能、旧证据覆盖度未知等：放行但必须说出来
   for (const warning of formatIssues(gate.warnings || [])) process.stderr.write(`[manual gate] ${warning}\n`);
-  return { page, body, generated, merge, finalPath, draftPath, draftFacts, factCheck: result.ok ? 'passed' : 'failed-used-draft', violations: result.violations };
+  const qualityErrors = qualityGate(draftFacts.factPack, config);
+  if (qualityErrors.length) throw failure(qualityErrors[0].code, formatIssues(qualityErrors));
+  const gateWarnings = formatIssues(gate.warnings || []);
+  return { page, body, generated, merge, finalPath, draftPath, draftFacts, factCheck: result.ok ? 'passed' : 'failed-used-draft', violations: result.violations,
+    gateWarnings, quality: qualitySummary(draftFacts.factPack, { gateWarnings }) };
 }
 
 /** 发布事务；原子替换失败（如文件被占用）时旧文档保持不变。 */

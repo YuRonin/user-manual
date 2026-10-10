@@ -119,7 +119,7 @@ function submitInChild(root, runId, requestId, response) {
       assert.strictEqual(requests(chat.runStore, chat.runId).length, 1, 'resume 不产生新请求');
     });
 
-    const good = () => ({ requestId: request.requestId, inputHash: request.inputHash, output: { copy: { [request.output.allowedBlocks[0]]: '在这里和 AI 助手对话，所有会话都会保存在左侧列表。' } } });
+    const good = () => ({ requestId: request.requestId, inputHash: request.inputHash, output: { copy: { [request.output.allowedBlocks[0]]: '在这里和 AI 助手对话，可以随时开始新的会话。' } } });
 
     await test('拒绝：错 requestId / 旧 inputHash / 未授权文案块 / 改写受保护 UI 名称 / 跨 Run 请求；拒绝时任务仍在等待', async () => {
       const { config } = context(root);
@@ -144,7 +144,7 @@ function submitInChild(root, runId, requestId, response) {
       assert.strictEqual(different.code, 'invalid-model-response');
       const summary = await chat.execute();
       assert.strictEqual(summary.status, 'succeeded', JSON.stringify(summary));
-      assert.match(fs.readFileSync(path.join(root, 'docs', 'manual', 'chat.md'), 'utf8'), /所有会话都会保存在左侧列表/);
+      assert.match(fs.readFileSync(path.join(root, 'docs', 'manual', 'chat.md'), 'utf8'), /可以随时开始新的会话/);
     });
 
     await test('等待期间事实变化：提交时 CAS 发现请求依据的文件已变，返回 run-input-changed 且不推进任务', async () => {

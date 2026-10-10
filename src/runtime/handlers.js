@@ -22,6 +22,7 @@ const { ANALYSIS } = require('../inspect/model');
 const { createCaptureStore } = require('../evidence/store');
 const { annotationSummary } = require('../evidence/integrity');
 const { currentScope, staleness } = require('../annotations/proof');
+const { packWarnings, qualitySummary } = require('../generate/quality-summary');
 const { capturePage, pageProjection } = require('../evidence/capture-page');
 const { rederiveCaptures } = require('../evidence/rederive');
 const { captureTask, taskProjection } = require('../tasks/capture-usecase');
@@ -162,6 +163,8 @@ function publicationGate(ctx, task) {
   const subject = task.input.subject;
   const body = subject.type === 'task' ? prepared.final : prepared.body;
   return {
+    warnings: prepared.gateWarnings || [],
+    quality: prepared.quality || null,
     outputs: [
       writeRunFile(ctx, `staged/${subject.type}-${subject.id}.md`, body),
       writeRunFile(ctx, `staged/${subject.type}-${subject.id}.copy.json`, JSON.stringify(copy || {}, null, 2) + '\n'),
@@ -391,12 +394,12 @@ function draft(ctx, task) {
   const subject = task.input.subject;
   if (subject.type === 'task') {
     const built = draftTask({ projectRoot: ctx.projectRoot, config: ctx.config, taskId: subject.id });
-    for (const warning of built.pack.quality?.warnings || []) process.stderr.write(`[manual quality] ${warning}\n`);
-    return { outputs: [fileRef(ctx, built.draftFile), fileRef(ctx, built.factsFile)], copyBlocks: built.copyBlocks };
+    // 质量提示随任务保存，进入 generate --json 与 status（B3-08），不再只写 stderr
+    return { outputs: [fileRef(ctx, built.draftFile), fileRef(ctx, built.factsFile)], copyBlocks: built.copyBlocks,
+      warnings: packWarnings(built.pack), quality: qualitySummary(built.pack) };
   }
   const built = draftPage({ projectRoot: ctx.projectRoot, config: ctx.config, pageId: subject.id });
-  for (const warning of built.pack.quality?.warnings || []) process.stderr.write(`[manual quality] ${warning}\n`);
-  return { outputs: [fileRef(ctx, built.draftPath), fileRef(ctx, built.factsFile)] };
+  return { outputs: [fileRef(ctx, built.draftPath), fileRef(ctx, built.factsFile)], warnings: packWarnings(built.pack), quality: qualitySummary(built.pack) };
 }
 
 function rewrite(ctx, task) {

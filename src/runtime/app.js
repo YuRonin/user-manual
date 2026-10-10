@@ -235,6 +235,7 @@ function runStatus({ projectRoot, runId = null }) {
       next: t.effectiveStatus === 'waiting_input' && t.error ? waitingHint(runId, { id: t.id, code: t.error.code }, state.plan) : null,
       outputs: t.outputRefs.map((r) => ({ kind: r.kind, ref: r.ref || null })),
       warnings: t.warnings || [],
+      quality: t.quality || null,
     })),
     cache: state.plan.summary?.cache || [],
     riskBoundaries: state.plan.summary?.riskBoundaries || [],

@@ -136,7 +136,7 @@ const captureCount = (root) => fs.readdirSync(path.join(root, '.manual', 'eviden
   await test('handler 的执行期提示随任务持久化并进入 Run 摘要（不再丢失）', async (root) => {
     const { runStore, runId } = setup(root, [node('capture', 'capture'), node('draft', 'draft', ['capture'])]);
     const { summary } = await fakeRun({ runStore, runId, handlers: {
-      capture: async () => ({ ...value('c'), warnings: ['缓存在执行前失效（annotation-incomplete），重新采集。'] }),
+      capture: async () => ({ ...value('c'), warnings: ['缓存在执行前失效（annotation-incomplete），重新采集。'], quality: { kind: 'page', warnings: ['image-unannotated'] } }),
       draft: async () => value('d'),
     } });
     assert.strictEqual(summary.status, 'succeeded');
@@ -144,6 +144,7 @@ const captureCount = (root) => fs.readdirSync(path.join(root, '.manual', 'eviden
     const state = runStore.read(runId);
     assert.deepStrictEqual(state.tasks.find((t) => t.id === 'capture').warnings, ['缓存在执行前失效（annotation-incomplete），重新采集。']);
     assert.deepStrictEqual(state.tasks.find((t) => t.id === 'draft').warnings, []);
+    assert.deepStrictEqual(summary.quality, { capture: { kind: 'page', warnings: ['image-unannotated'] } }, '结构化质量结果进入 Run 摘要（B3-08）');
   });
 
   await test('不可重试失败阻止依赖任务，互不依赖的目标照常推进；无效产物不记成功', async (root) => {

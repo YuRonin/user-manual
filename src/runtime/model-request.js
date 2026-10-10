@@ -63,9 +63,21 @@ function rewriteContent(ctx, task) {
   return {
     inputHash: revisionOf({ task: task.inputHash, factsHash: pack.factsHash }),
     files,
-    facts: { factsHash: pack.factsHash, language: pack.language || null, copyBlocks: blocks, protected: { uiTerms: facts.uiTexts || [], images: (facts.images || []).map((i) => i.artifactPath) } },
+    facts: {
+      factsHash: pack.factsHash, language: pack.language || null, copyBlocks: blocks,
+      protected: { uiTerms: facts.uiTexts || [], images: (facts.images || []).map((i) => i.artifactPath) },
+      // 能写进文案的依据（B3-01）：页面上观察到的控件名，以及已验证的结果（完成声明、读者检查）
+      evidence: {
+        observedUiTerms: pack.uiEvidence?.observed || [],
+        declaredOnlyUiTerms: pack.uiEvidence?.declared || [],
+        results: [...(pack.claims || []).map((claim) => ({ text: claim.text, status: claim.status })), ...(pack.readerChecks || []).map((text) => ({ text, status: 'reader-check' }))],
+      },
+    },
     output: { type: 'copy', allowedBlocks: Object.keys(blocks), shape: '{ "copy": { "<blockId>": "文案" } }' },
-    instructions: `只填写 allowedBlocks 中的文案块；按 ${STYLE_GUIDE} 改写：用读者能懂的话补全用途、要填什么、点了之后会看到什么（只用事实里有的信息），「」只给要操作的控件。不改 UI 名称、操作顺序、数字与完成条件。`,
+    instructions: `只填写 allowedBlocks 中的文案块；按 ${STYLE_GUIDE} 改写：用读者能懂的话补全用途和要填什么，「」只给要操作的控件。`
+      + '操作后的结果只能复述 evidence.results 里的内容（status 不是 verified 的写成预期），不得凭常识推断"自动导出""发送到邮箱""生成报告"等事实里没有的动作或后果；'
+      + '控件名只用 evidence.observedUiTerms 或默认文案里已有的名称，declaredOnlyUiTerms 未在页面上观察到，尽量不新增引用。'
+      + '不确定就不写。不改 UI 名称、操作顺序、数字与完成条件。没有依据的控件或结果会被标为 ui-term-not-observed / unsupported-result，需要人工确认才能发布。',
   };
 }
 

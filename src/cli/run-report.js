@@ -61,6 +61,7 @@ function printRun({ json, result, label = 'generate', projectRoot = null, docsOu
       riskBoundaries: plan?.summary?.riskBoundaries || [],
       documents,
       warnings,
+      quality: summary.quality || {},
       ...extra,
     }, null, 2) + '\n');
     return code;

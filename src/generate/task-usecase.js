@@ -27,6 +27,7 @@ const { validatePublication, validateCaptureCoverage, validateArtifact, summariz
 const { RuntimeError } = require('../runtime/errors');
 const { reconcileDocument } = require('./manual-store');
 const { checkedSections, validateTaskFeatureCoverage } = require('../model/links');
+const { qualityGate, qualitySummary } = require('./quality-summary');
 
 function failure(code, errors, extra = {}) {
   const list = Array.isArray(errors) ? errors : [errors];
@@ -173,8 +174,13 @@ function prepareTaskFinal({ projectRoot, config, taskId, copy = null, markdown =
   if (!gate.ok) throw failure(gate.errors[0]?.code || 'publication-gate', formatIssues(gate.errors));
   // internal 受众的待确认功能、旧证据覆盖度未知等：放行但必须说出来
   for (const warning of formatIssues(gate.warnings || [])) process.stderr.write(`[manual gate] ${warning}\n`);
+  // 质量门禁（B3-09）：断言失败的完成声明始终阻断；quality.blockOn 指定的提示升级为阻断
+  const qualityErrors = qualityGate(facts.factPack, config);
+  if (qualityErrors.length) throw failure(qualityErrors[0].code, formatIssues(qualityErrors));
+  const gateWarnings = formatIssues(gate.warnings || []);
   // 定稿可以重复执行（重新生成已发布文档）；status 只记录最近完成的操作。
-  return { final, generated, facts, manualFile, accepted: review.accepted || [], merge: reconciled };
+  return { final, generated, facts, manualFile, accepted: review.accepted || [], merge: reconciled, gateWarnings,
+    quality: qualitySummary(facts.factPack, { gateWarnings, review: review.accepted || [] }) };
 }
 
 /**

@@ -28,6 +28,12 @@ function uiTerms(text) {
   return [...String(text || '').matchAll(/「([^」]+)」/g)].map((m) => m[1]);
 }
 
+/** 去重排序后的名称来源；observed 优先，declared 只保留未被观察到的部分。 */
+function uiEvidence({ observed = [], declared = [] }) {
+  const seen = [...new Set(observed.filter((name) => typeof name === 'string' && name.trim()).map((name) => name.trim()))].sort();
+  return { observed: seen, declared: [...new Set(declared.filter((name) => name && !seen.includes(name)))].sort() };
+}
+
 function seal(pack) {
   const { factsHash: _ignored, ...body } = pack;
   return { ...body, factsHash: revision(JSON.parse(JSON.stringify(body))) };
@@ -41,7 +47,7 @@ function seal(pack) {
  * @param {Array}  p.claims         computeClaims 的结果
  * @param {string} p.language
  */
-function buildTaskFactPack({ task, evidence, images, claims, language, entryPage = null, taskTitles = null }) {
+function buildTaskFactPack({ task, evidence, images, claims, language, entryPage = null, taskTitles = null, observedTerms = [] }) {
   const template = templateFor(language);
   const seen = new Set();
   for (const step of task.steps || []) {
@@ -102,6 +108,11 @@ function buildTaskFactPack({ task, evidence, images, claims, language, entryPage
     blocks,
     // 文案块里允许出现的界面名称：只能是事实中已有的
     allowedUiTerms: [...new Set([...steps.flatMap((s) => s.uiTerms), ...task.steps.flatMap((s) => uiTerms(s.instruction)), ...uiTerms(task.goal)])],
+    // 名称的来源等级（B3-04）：observed = 执行过的动作目标 + 截图时页面上的可访问名称；declared = 只出现在作者 / 模型写的文字里
+    uiEvidence: uiEvidence({
+      observed: [...steps.filter((s) => s.executed).map((s) => s.action.target?.name), ...observedTerms],
+      declared: [...task.steps.flatMap((s) => uiTerms(s.instruction)), ...uiTerms(task.goal)],
+    }),
   });
 }
 
@@ -109,7 +120,7 @@ function buildTaskFactPack({ task, evidence, images, claims, language, entryPage
  * 页面事实包。detectedActions 来自源码分析：没有逐项的浏览器交互证据，一律标为 inferred。
  * @param {{ page, image, language, headerComments, captureId }} p
  */
-function buildPageFactPack({ page, image = null, language, headerComments = [] }) {
+function buildPageFactPack({ page, image = null, language, headerComments = [], observedTerms = [] }) {
   templateFor(language);
   const artifacts = image ? [{ id: 'img-1', ...image }] : [];
   const actions = (Array.isArray(page.detectedActions) ? page.detectedActions : []).filter(Boolean)
@@ -130,6 +141,10 @@ function buildPageFactPack({ page, image = null, language, headerComments = [] }
     headerComments,
     blocks: { intro: { kind: 'intro', default: page.purpose || '' } },
     allowedUiTerms: [...new Set([...actions.flatMap((a) => uiTerms(a.text)), ...uiTerms(page.purpose), ...(page.guide || []).flatMap(g => uiTerms(g.instruction))])],
+    uiEvidence: uiEvidence({
+      observed: observedTerms,
+      declared: [...actions.flatMap((a) => uiTerms(a.text)), ...uiTerms(page.purpose), ...(page.guide || []).flatMap((g) => uiTerms(g.instruction))],
+    }),
   });
 }
 

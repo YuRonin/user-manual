@@ -28,6 +28,8 @@ const TEMPLATES = {
     verified: '完成标志：',
     expected: '预期结果：',
     simulated: '> 说明：截图中的数据为示例数据，实际内容以你的页面为准。',
+    // 风险边界之后没有实际执行的步骤（B3-06）：与已验证步骤区分开
+    notExecuted: '   > 未验证：生成手册时没有实际执行这一步，结果仅供操作参考。',
     stepAlt: (n, timing) => `第 ${n} 步${timing === 'before' ? '操作前' : timing === 'after' ? '操作后' : ''}的界面`,
     quote: (text) => `「${text}」`,
     action: {
@@ -55,6 +57,7 @@ const TEMPLATES = {
     verified: 'You will see: ',
     expected: 'Expected result: ',
     simulated: '> Note: the data in the screenshots is sample data. Your page shows your own content.',
+    notExecuted: '   > Not verified: this step was not performed when the guide was generated; treat the result as reference only.',
     stepAlt: (n, timing) => `Step ${n} ${timing === 'before' ? 'before the action' : timing === 'after' ? 'after the action' : 'interface'}`,
     quote: (text) => `「${text}」`,
     action: {
@@ -102,12 +105,19 @@ function visibleTargetName(target) {
   return target.name || target.label || target.text || null;
 }
 
-/** 步骤的动作句：由动作类型 + 可见目标确定性生成；没有可见名称时回退到已批准的步骤说明。 */
+// 超过这个长度的可访问名称（题目卡、产物按钮的整段 aria-label）不适合写进"点击「……」"
+const MAX_ACTION_NAME = 16;
+
+/**
+ * 步骤的动作句：由动作类型 + 可见目标确定性生成；没有可见名称时回退到已批准的步骤说明。
+ * 名称过长或含换行时也用步骤说明（B3-10）：定位仍用原目标，正文给读者能读懂的话。
+ */
 function actionSentence(step, template) {
   const action = step.action || {};
   const name = visibleTargetName(action.target);
   const fn = template.action[action.type];
-  if (!fn || (!name && action.type !== 'inspect')) return { text: step.instruction, source: 'instruction' };
+  const unreadable = name && (String(name).length > MAX_ACTION_NAME || /\n/.test(name));
+  if (!fn || (!name && action.type !== 'inspect') || (unreadable && step.instruction)) return { text: step.instruction, source: 'instruction' };
   return { text: fn(name ? template.quote(name) : null), source: 'action' };
 }
 
@@ -198,6 +208,7 @@ function renderTask(pack, copy = {}) {
       if (after) L.push('', `   ${after}`);
     }
     else { L.push(`${index + 1}. ${action}`); if (remainder) L.push('', `   ${remainder}`); }
+    if (step.executed === false) L.push('', t.notExecuted);
     for (const ref of step.artifactRefs) {
       const artifact = pack.artifacts.find((a) => a.id === ref);
       L.push(...figure(artifact, artifact?.readerCaption || t.stepAlt(index + 1, artifact?.timing), hrefOf.get(ref), '   '));

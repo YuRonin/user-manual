@@ -36,7 +36,7 @@ manual generate page:chat --copy-default --json  # 跳过模型文案出粗稿�
 
 Run 的节点：`(fixture-setup) → capture | derive-image → (analyze) → draft → (rewrite) → validate → publish → (fixture-cleanup)`。
 缓存命中的采集报告 `cache-hit` 与当时的 `observedAt`（历史观察，未在线确认）。
-成功的 `publish` 节点会在结果的 `documents` 中列出正式文档绝对路径；规划提醒和执行期提示（缓存在执行前失效、标注覆盖失败、未生成发布图、截图时网络未空闲等，形如 `<节点>：<提示>`）都随 `warnings` 返回，`manual status` 同样展示。发布成功仍需审阅手册内容与截图。
+成功的 `publish` 节点会在结果的 `documents` 中列出正式文档绝对路径；规划提醒和执行期提示（缓存在执行前失效、标注覆盖失败、未生成发布图、截图时网络未空闲等，形如 `<节点>：<提示>`）都随 `warnings` 返回，`manual status` 同样展示。结构化的 `quality`（按节点：步骤执行数、完成声明验证状态、界面名称来源、质量提示、文案待确认项、门禁提示）也一并返回。正文里未实际执行的步骤带“未验证”标识。发布成功仍需审阅手册内容与截图。
 
 ### 等待输入（Run 状态 waiting_input）
 
@@ -152,6 +152,9 @@ manual gc --apply --expect <planHash>          # 项目锁内重新核对后删�
 | 现象 | 先看 |
 |---|---|
 | 一直 `cache-hit` 但页面已变 | 缓存只证明输入没变；用 `verify --live` 检查线上，或 `generate --refresh` 重新采集。`generate` 执行前会重扫源码指纹，源码改动会显示为 `capture-required:input-changed(sourceHash)` |
+| `review-required`（`ui-term-not-observed` / `unsupported-result`） | 文案写了页面上没观察到的控件，或事实里没有依据的结果（“会生成 PDF”“发送到邮箱”）；改成事实里有的内容，确认属实才加 `--accept-review` |
+| `claim-failed` | 完成声明引用的断言在采集时实际失败：先查界面是否真的达成目标，修正任务定义或页面状态后重新采集，不能配置放行 |
+| `quality-blocked` | 质量提示命中了 `quality.blockOn`；按 `quality.warnings` 里的代码补齐任务定义或截图 |
 | `capture-required:annotation-incomplete` | 上次采集标注覆盖失败、没有发布图，或是没有覆盖记录的旧证据：不会复用，按提示修正 guide / 功能目标后重新采集 |
 | `source-freshness-unknown`（warnings） | 生成前重扫源码失败，按上次 inspect 的指纹规划；先 `manual inspect` 确认扫描正常 |
 | `geometry-unstable` | 截图前页面一直在变（回复仍在输出、轮询刷新）；确认步骤断言等到了真正的完成状态，必要时放宽 `capture.waits.stabilityMs` |

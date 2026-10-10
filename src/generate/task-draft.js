@@ -31,6 +31,15 @@ function publishedFromCapture(projectRoot, stateDir, captureId, artifactPath, ex
   return { ok: true, sha256: artifact.sha256, privacy: captureRecord.privacy };
 }
 
+/** 任务每张截图记录里观察到的可访问名称（弹窗、菜单等动态状态都在对应步骤的截图里）。 */
+function observedTermsFor(projectRoot, stateDir, evidence) {
+  if (!stateDir) return [];
+  const store = createCaptureStore({ projectRoot, stateDirAbs: stateDir });
+  const records = (evidence?.steps || []).flatMap((step) => (step.screenshots || []).map((shot) => shot.captureId)).filter(Boolean)
+    .map((id) => { try { return store.read(id); } catch (_) { return null; } });
+  return require('./grounding').observedNamesOf(records);
+}
+
 function uiTexts(text) { return [...String(text || '').matchAll(/「([^」]+)」/g)].map((m) => m[1]); }
 
 /**
@@ -85,7 +94,8 @@ function buildTaskDraft(task, evidence, context = {}) {
   const claims = computeClaims(task, evidence);
   let pack;
   try {
-    pack = buildTaskFactPack({ task, evidence, images, claims, language: context.language || 'zh-CN', entryPage: context.entryPage, taskTitles: context.taskTitles });
+    pack = buildTaskFactPack({ task, evidence, images, claims, language: context.language || 'zh-CN', entryPage: context.entryPage, taskTitles: context.taskTitles,
+      observedTerms: observedTermsFor(projectRoot, context.stateDir, evidence) });
   } catch (error) {
     return { ok: false, errors: [`${error.code}: ${error.message}`] };
   }

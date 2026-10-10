@@ -15,6 +15,7 @@
 
 const MarkdownIt = require('markdown-it');
 const { lintProse } = require('./style-lint');
+const { groundingFindings } = require('./grounding');
 
 const parser = new MarkdownIt({ html: true });
 
@@ -91,6 +92,8 @@ function validateCopy(pack, copy) {
     if (numbers.length) review.push({ blockId, code: 'number-unit', detail: numbers });
     const promised = promises(value).filter((p) => !promises(pack.blocks[blockId].default).includes(p));
     if (promised.length) review.push({ blockId, code: 'business-claim', detail: promised });
+    // 不靠「」的真实性检查：动作表达里的控件、操作后果都要有依据（B3-02 / B3-05）
+    for (const finding of groundingFindings(pack, blockId, value)) review.push({ blockId, ...finding });
   }
   return { ok: blocked.length === 0 && review.length === 0, blocked, review };
 }
@@ -113,6 +116,11 @@ function checkPolishedMarkdown(draftMarkdown, finalMarkdown, pack = null) {
   const draftPromises = new Set(promises(draft));
   const promised = promises(final).filter((p) => !draftPromises.has(p));
   if (promised.length) review.push({ code: 'business-claim', detail: promised });
+  // 润色稿新增的控件 / 后果表达同样要有依据：以草稿正文为默认文案对照
+  if (pack) {
+    const groundingPack = { ...pack, blocks: { ...(pack.blocks || {}), __final: { default: draft } } };
+    for (const finding of groundingFindings(groundingPack, '__final', final)) review.push(finding);
+  }
   return { blocked, review };
 }
 

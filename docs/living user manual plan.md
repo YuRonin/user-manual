@@ -5,7 +5,7 @@
 > **适用仓库**：`E:\NeoStar\user-manual`（审计时 `living-manual` 0.1.0）  
 > **依据**：《Living User Manual Skill 七阶段优化进度审计报告》（2026-10-10；基线 `main@6da5bf7` + 审计时工作区未提交改动）  
 > **补充依据**：NeoAgent `demo/website/docs/manual-full-rerun-plan.md` 的“已知问题与对策”（2026-10-10）。该记录是一次测试环境运行快照；实施前仍须复核现状。  
-> **实施状态**：B0、B1、B2 已完成（见第 15 节）；B3 起待实施。未勾选的项目不代表已修改或验证通过。  
+> **实施状态**：B0–B3 已完成（见第 15 节）；B4 起待实施。未勾选的项目不代表已修改或验证通过。  
 > **维护方式**：每批次开始前重新核对最新仓库；完成后勾选任务、登记测试和变更证据。
 
 ---
@@ -309,26 +309,26 @@ Page.features [Feature ID + scope + source]
 
 ### B3 工作项
 
-- [ ] **B3-01｜限制模型“补结果”自由度（P0-1）**：修改模型改写请求；操作后的结果只能根据已执行断言、`claims` 或 `readerChecks` 表述，不得凭常识推断“自动导出/发送到邮箱”等动作。
-- [ ] **B3-02｜不依赖「」识别操作断言**：解析“点击、选择、输入、打开、上传、保存、发送”等动作表达，以及“将生成、会自动、发送到”等结果表达；抽取声称的 UI/能力对象并校验来源。
-- [ ] **B3-03｜DOM / ARIA 证据清单**：按具体 Scene/Step 采集交互元素 role、accessible name、文本和关联 locator；避免记录敏感输入值，尊重隐私打码政策。
-- [ ] **B3-04｜可信术语来源**：`allowedUiTerms` 改为可区分 `observed / declared / model-inferred`；只有已观察或经过有效人工确认的条目可以支持“已验证 UI”的断言。动态状态下应查对应 Scenario 的证据，不用单个默认截图的文本白名单误杀真实操作。
-- [ ] **B3-05｜未知语义处理**：确切虚构的功能/结果 `blocked`；证据不足但可能正确的表述 `review-required`；不把关键词正则检查误判为事实证明。
-- [ ] **B3-06｜未执行步骤可见**：风险边界后未执行步骤必须有“未验证/仅供操作参考”的可辨识说明，不得与已完成步骤同一证据等级。
-- [ ] **B3-07｜补全结果与引用**：修复 completion Section 的 `captureRefs`；必要时引入步骤级 `result` 引用 after assertions，不把模型描述当作真实执行结果。
-- [ ] **B3-08｜质量结果汇总**：`taskQuality/imageQuality`、标注覆盖、步骤执行率、事实可信度、warnings 必须进入统一 `quality` 结构、Run events、CLI `--json` 与 `status`。
-- [ ] **B3-09｜可配置门禁**：增加或扩展 `quality.blockOn`、按项目模式区分严格/观察策略；有高风险虚构、隐私、伪证据时不允许用户随意通过“降低分数线”静默放行。
-- [ ] **B3-10｜定位名称与读者动作句分离**：定位可使用 selector/ARIA 等稳定证据，正文动作句优先使用已审核的 `instruction`；不得把冗长的题目卡、产物按钮 `aria-label` 原样写成“点击「……」”。仍须验证 instruction 声称的操作对象确实存在。
+- [x] **B3-01｜限制模型“补结果”自由度（P0-1）**：修改模型改写请求；操作后的结果只能根据已执行断言、`claims` 或 `readerChecks` 表述，不得凭常识推断“自动导出/发送到邮箱”等动作。
+- [x] **B3-02｜不依赖「」识别操作断言**：解析“点击、选择、输入、打开、上传、保存、发送”等动作表达，以及“将生成、会自动、发送到”等结果表达；抽取声称的 UI/能力对象并校验来源。
+- [x] **B3-03｜DOM / ARIA 证据清单**：按具体 Scene/Step 采集交互元素 role、accessible name、文本和关联 locator；避免记录敏感输入值，尊重隐私打码政策。（任务每步、页面及其 Scenario 变体截图都记录无障碍树摘要（角色 + 可访问名称，不含控件值）；名称与 locator 的逐项关联未做）
+- [x] **B3-04｜可信术语来源**：`allowedUiTerms` 改为可区分 `observed / declared / model-inferred`；只有已观察或经过有效人工确认的条目可以支持“已验证 UI”的断言。动态状态下应查对应 Scenario 的证据，不用单个默认截图的文本白名单误杀真实操作。
+- [x] **B3-05｜未知语义处理**：确切虚构的功能/结果 `blocked`；证据不足但可能正确的表述 `review-required`；不把关键词正则检查误判为事实证明。
+- [x] **B3-06｜未执行步骤可见**：风险边界后未执行步骤必须有“未验证/仅供操作参考”的可辨识说明，不得与已完成步骤同一证据等级。
+- [x] **B3-07｜补全结果与引用**：修复 completion Section 的 `captureRefs`；必要时引入步骤级 `result` 引用 after assertions，不把模型描述当作真实执行结果。（完成声明证据带断言所在步骤的截图 captureId，completion 章节 captureRefs 不再为空；步骤级 result 引用未单独引入）
+- [x] **B3-08｜质量结果汇总**：`taskQuality/imageQuality`、标注覆盖、步骤执行率、事实可信度、warnings 必须进入统一 `quality` 结构、Run events、CLI `--json` 与 `status`。
+- [x] **B3-09｜可配置门禁**：增加或扩展 `quality.blockOn`、按项目模式区分严格/观察策略；有高风险虚构、隐私、伪证据时不允许用户随意通过“降低分数线”静默放行。（claim-failed 始终阻断；quality.blockOn 可把指定提示升级为阻断；未区分严格 / 观察两种模式，默认即观察 + 必阻断项）
+- [x] **B3-10｜定位名称与读者动作句分离**：定位可使用 selector/ARIA 等稳定证据，正文动作句优先使用已审核的 `instruction`；不得把冗长的题目卡、产物按钮 `aria-label` 原样写成“点击「……」”。仍须验证 instruction 声称的操作对象确实存在。
 
 ### B3 验收
 
-- [ ] **AC-10**：原审计实测句子——“然后点击右上角的导出按钮，系统会生成 PDF 报告并发送到邮箱。”——在无支持证据时返回 `blocked` 或 `review-required`，不能 `ok:true` 且无警告。
-- [ ] **AC-11**：在 instruction 中写不存在的 UI 名称，不得自动进入已验证白名单；输出 `ui-term-not-observed` 或审核提示。
-- [ ] **AC-12**：动态弹窗中确实出现的菜单项，在对应 Scenario 有 DOM 证据时不会被默认场景误判为虚构。
-- [ ] **AC-13**：`generate --json` 和 `status` 能查看统一 `quality` 指标及 warnings，不只存在 stderr。
-- [ ] **AC-14**：人工未执行步骤带明确状态标识；无法伪装成已验证成功。
-- [ ] **AC-15**：完成声明的截图引用可被追溯；无证据的“执行成功”不予放行。
-- [ ] **AC-15a**：题目卡或产物按钮带长 `aria-label` 时，生成的动作句可供读者理解，定位仍命中真实控件；虚构的 `instruction` 仍被真实性检查发现。
+- [x] **AC-10**：原审计实测句子——“然后点击右上角的导出按钮，系统会生成 PDF 报告并发送到邮箱。”——在无支持证据时返回 `blocked` 或 `review-required`，不能 `ok:true` 且无警告。
+- [x] **AC-11**：在 instruction 中写不存在的 UI 名称，不得自动进入已验证白名单；输出 `ui-term-not-observed` 或审核提示。
+- [x] **AC-12**：动态弹窗中确实出现的菜单项，在对应 Scenario 有 DOM 证据时不会被默认场景误判为虚构。
+- [x] **AC-13**：`generate --json` 和 `status` 能查看统一 `quality` 指标及 warnings，不只存在 stderr。
+- [x] **AC-14**：人工未执行步骤带明确状态标识；无法伪装成已验证成功。
+- [x] **AC-15**：完成声明的截图引用可被追溯；无证据的“执行成功”不予放行。
+- [x] **AC-15a**：题目卡或产物按钮带长 `aria-label` 时，生成的动作句可供读者理解，定位仍命中真实控件；虚构的 `instruction` 仍被真实性检查发现。
 
 ---
 
@@ -592,7 +592,7 @@ Page.features [Feature ID + scope + source]
 | B0 | 完成 | `main@6da5bf7` + 工作区未提交的标注覆盖改动 | 待提交 | unit 全部通过；browser 全部通过（基线 1 个失败 `generate.test.js` 已修复）；`annotation-coverage.test.js` 20 项 | 旧证据 `unknown` 仅提示不阻断（B2-14）；B0-01 发现页面/任务草稿错误顺序与 overflow 已在并发改动中修复 |
 | B1 | 完成 | `fa9b500` | 待提交 | unit / browser 全部通过；新增 task-scenario-variant、capture-stability、target-obscured 测试，import-graph / runtime-planner / runtime-runner / auth-cache / scenario-fixtures 增补正反例 | 侧栏等 UI 状态需项目在 `auth.ephemeralStorageKeys` 声明并用 `requires` 断言；网络未空闲只提示不阻断（长轮询页面）；`reply-ready` 语义仍由目标项目的状态断言定义 |
 | B2 | 完成 | `8cc2fd1` | 待提交 | unit / browser 全部通过（与并行的 Demo Capture 改动一起跑）；新增 model-links 测试，annotation-coverage 29 项，target-obscured 增加遮挡用例 | Required 只认显式 features，NeoAgent 现有页面需在 describe 中确认候选后才能 public 发布；单图超上限拆图在 B4-02 |
-| B3 | 未开始 | 待填 | 待填 | 待填 | 待填 |
+| B3 | 完成 | `c842c38` | 待提交 | unit / browser 全部通过；新增 grounding、quality-summary 测试，model-handoff 文案改为有依据的内容，runtime-runner 增补 quality 断言 | 真实性检查是规则级（控件 / 结果表达），只给 review-required 不自动证明语义；名称与 locator 逐项关联、步骤级 result 引用、严格 / 观察模式区分未做 |
 | B4 | 未开始 | 待填 | 待填 | 待填 | 待填 |
 | B5 | 未开始 | 待填 | 待填 | 待填 | 待填 |
 | B6 | 未开始 | 待填 | 待填 | 待填 | 待填 |

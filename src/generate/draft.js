@@ -48,7 +48,7 @@ function buildDraft(page, context) {
   const published = includeScreenshot && image
     ? { ...image, markdownHref: image.markdownHref || screenshotRelativeToDocs(docsOutputDir, image.artifactPath) }
     : null;
-  const pack = buildPageFactPack({ page, image: published, language, headerComments });
+  const pack = buildPageFactPack({ page, image: published, language, headerComments, observedTerms: context.observedTerms || [] });
   return {
     markdown: renderPage(pack, {}, { draft: true }),
     pack,

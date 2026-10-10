@@ -71,6 +71,7 @@ function loadConfig(projectRoot) {
 
   validateProjectBlock(raw.project, errors, warnings);
   validateCaptureBlock(raw.capture, errors);
+  require('../generate/quality-summary').validateQualityConfig(raw.quality, errors);
 
   const activeProvider = raw.browser?.activeProvider;
   if (!activeProvider) {

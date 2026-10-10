@@ -148,6 +148,15 @@ auth:
 
 依赖某个 UI 状态的任务步骤，用 `requires` 断言它（例如侧栏的「全部」入口可见），不要依赖上一次采集留下的状态。
 
+**质量门禁**（`quality.blockOn`）：完成声明的断言实际失败（`claim-failed`）始终阻断发布，不能配置放行。其余质量提示默认只出现在 `generate --json` / `manual status` 的 `quality` 与 `warnings` 里；需要强制的项目把提示代码列进 `blockOn`，命中时报 `quality-blocked`：
+
+```yaml
+quality:
+  blockOn: [completion-unbound, ui-term-not-observed, steps-not-executed]
+```
+
+可用代码见 `src/generate/quality-summary.js` 的 `BLOCKABLE`；写错代码时 `config.yaml` 校验失败。
+
 **慢环境的等待预算**（`capture.waits`，每项都有上限，超时会明确报告当前状态）：
 
 ```yaml

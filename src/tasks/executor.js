@@ -102,6 +102,8 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
     const captured = await captureStable(provider, { rawPath, stabilityMs: options.waits?.stabilityMs, resolveTargets: publish ? annotationResolver(provider, step, annotationPlan) : async () => [] });
     captured.inventory = inventory;
     captured.plan = annotationPlan;
+    // 这一步截图时页面上的可访问名称（不含控件值，已去掉个人信息）：文案里的控件名据此判断是否被观察到（B3-03）
+    const semantic = provider.semanticSnapshot ? await provider.semanticSnapshot() : null;
     const stateRelative = path.relative(projectRoot, stateDir).replace(/\\/g, '/') || '.';
     const artifacts = [{ kind: 'raw', file: rawPath, dir: `${stateRelative}/artifacts/raw`, prefix }];
     let safe = null;
@@ -145,6 +147,7 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
         // 未做隐私检测的截图明确记为 not-run，发布时按 unknown 处理
         ...(safe ? { quality: safe.quality } : {}),
         ...(safe ? { annotationCoverage: safe.coverage, annotationProof: safe.proof } : {}),
+        ...(semantic ? { semantic } : {}),
         privacy: safe ? safe.privacy : { status: 'not-run' },
         redactions: safe ? safe.redactions.map(({ kind, rect, result }) => ({ kind, rect, result })) : [],
         ...(options.fixture ? { fixture: options.fixture } : {}),

@@ -67,6 +67,8 @@ const FILES = [
   'capture.test.js',
   'fact-pack.test.js',
   'markdown-validation.test.js',
+  'grounding.test.js',
+  'quality-summary.test.js',
   'generate.test.js',
   'gate0.test.js',
   'gate1.test.js',
