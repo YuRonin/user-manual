@@ -22,6 +22,18 @@ manual migrate --rollback <迁移 id>             # 用完整备份恢复
 | `update` 从"计划中"变为正式命令 | — | 无 |
 | `manual gc` | 默认只列出 | 审阅后 `--apply --expect <planHash>` |
 
+## 统一 Demo 截图模式
+
+| 变化 | 影响 | 需要做什么 |
+|---|---|---|
+| 新增 `capture.mode`，唯一取值 `demo` | 旧配置没有这一行时按 demo 读取；写成其他值会被拒绝并提示 | 无（`init` 新生成的配置会带上这一行） |
+| `data-redact` 区域不再打马赛克，改为替换成演示值 | 没有配置演示值的键会让截图停在 `needs_fixture`，不再"打码后照常发布" | 按报错列出的键补 `capture.demo.text` / `images`，或用 Fixture 提供数据 |
+| 正文里未声明的手机号 / 邮箱不再打码 | 门禁判为 `needs_fixture` | 用 Fixture 提供虚构数据，或在被采集项目中声明为 `data-redact` |
+| 浏览器内非只读请求默认中止 | 打开即写的页面判为 `blocked`；只读步骤触发写请求时以 `demo-write-blocked` 失败 | 确认无副作用的请求登记到 `capture.demo.network.allow`；写操作用 `writeAuthorization` 或 Fixture 完整模拟 |
+| Service Worker 被屏蔽、未登记的 WebSocket 被关闭 | 依赖它们的页面可能表现不同 | 只读的 WebSocket 登记到 `capture.demo.network.websockets` |
+| 门禁失败不再写入 Capture 记录与原图 | 失败只出现在运行结果与原因码中 | 无 |
+| 旧 Capture（没有 `privacy.demo`）继续可用，重新派生时沿用旧遮罩规则 | — | 需要清晰演示截图时重新采集 |
+
 ## 历史产物只留当前版本
 
 早期版本把每次模型提交的完整快照、每次发布的记录和每次验证的报告都留在 `.manual/` 并入库，

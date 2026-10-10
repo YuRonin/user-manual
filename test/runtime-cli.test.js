@@ -42,6 +42,7 @@ async function setup(baseUrl) {
   const root = fx.captureFixture();
   fx.writeFile(root, 'app/task-profile/page.tsx');
   await expectExit(root, ['init', '--base-url', baseUrl, '--audience', 'public'], 0);
+  fx.useDemoValues(root);
   await expectExit(root, ['inspect'], 0);
   await expectExit(root, ['describe', '--input', writeJson(path.join(root, 'describe.json'), { pages: [
     { id: 'chat', title: '工作台', purpose: '与 AI 助手对话。' },

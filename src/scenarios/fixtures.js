@@ -24,6 +24,9 @@
  *     routes:
  *       - { path: /api/stats, method: GET, status: 200, json: { users: 0 } }
  *       - { path: /api/report, status: 500, bodyFile: data/error.html, contentType: text/html }
+ *       - { path: /api/orders, method: GET, query: { page: '2' }, json: { items: [] } }   # query：这些参数必须完全相等
+ *   demo:                               # 可选：本 Fixture 的演示值，覆盖 / 补充 config 的 capture.demo
+ *     text: { account-name: 演示教师 }
  *   # 或 kind: hook
  *   hook: { module: hooks/seed-orders.js, secrets: { token: env:FIXTURE_API_TOKEN } }
  */
@@ -68,7 +71,14 @@ function validateFixture(def, dir) {
       if (typeof route?.path !== 'string' || !route.path.startsWith('/')) errors.push(`mock.routes[${i}].path 需要是以 / 开头的路径（可含 *）。`);
       if (route?.status !== undefined && !(Number.isInteger(route.status) && route.status >= 100 && route.status < 600)) errors.push(`mock.routes[${i}].status 非法。`);
       if (route?.bodyFile !== undefined && (typeof route.bodyFile !== 'string' || !inside(dir, path.resolve(dir, route.bodyFile)))) errors.push(`mock.routes[${i}].bodyFile 必须位于 .manual/fixtures/ 内。`);
+      if (route?.query !== undefined && (!route.query || typeof route.query !== 'object' || Array.isArray(route.query) || Object.values(route.query).some((v) => typeof v !== 'string' && typeof v !== 'number'))) errors.push(`mock.routes[${i}].query 需要是 { 参数名: 值 } 对象。`);
     });
+  }
+  if (def.demo !== undefined) {
+    const { resolveDemoConfig } = require('../privacy/demo');
+    const checked = resolveDemoConfig({ demo: { text: def.demo?.text, images: def.demo?.images } });
+    if (!checked.ok) errors.push(...checked.errors.map((e) => e.replace('capture.demo', 'demo')));
+    if (def.demo?.network !== undefined) errors.push('demo.network 只能在 config.yaml 的 capture.demo.network 中声明（网络放行属于项目级安全策略）。');
   }
   if (def.kind === 'hook') {
     const mod = def.hook?.module;
@@ -123,7 +133,8 @@ function mockRoutes(fixture) {
     if (route.json !== undefined) { body = JSON.stringify(route.json); contentType = contentType || 'application/json'; }
     else if (route.bodyFile) body = fs.readFileSync(path.resolve(fixture.dir, route.bodyFile));
     else if (route.body !== undefined) body = String(route.body);
-    return { path: route.path, matcher: globToRegex(route.path), method: route.method ? String(route.method).toUpperCase() : null, status: route.status || 200, contentType: contentType || 'text/plain; charset=utf-8', body };
+    const query = route.query ? Object.fromEntries(Object.entries(route.query).map(([k, v]) => [k, String(v)])) : null;
+    return { path: route.path, matcher: globToRegex(route.path), method: route.method ? String(route.method).toUpperCase() : null, query, status: route.status || 200, contentType: contentType || 'text/plain; charset=utf-8', body };
   });
 }
 
@@ -191,17 +202,18 @@ module.exports = {
  * @returns {{ mode: 'live'|'simulated'|'fixture', routes, fixture: { id, revision, kind, namespace? } | null }}
  */
 function prepareScenarioData({ stateDirAbs, config, scenario, runId = null }) {
-  if (scenario?.data?.mode !== 'fixture') return { mode: 'live', routes: [], fixture: null };
+  if (scenario?.data?.mode !== 'fixture') return { mode: 'live', routes: [], fixture: null, demo: null };
   const { checkFixtureAllowed } = require('./policy');
   const fixture = readFixture(stateDirAbs, scenario.data.fixture);
   checkFixtureAllowed({ fixture, scenario, config });
   const ref = { id: fixture.id, version: fixture.version, revision: fixtureRevision(fixture), kind: fixture.kind, dataset: fixture.dataset || null };
-  if (fixture.kind === 'mock') return { mode: 'simulated', routes: mockRoutes(fixture), fixture: ref };
+  const demo = fixture.demo ? { text: fixture.demo.text || {}, images: fixture.demo.images || {} } : null;
+  if (fixture.kind === 'mock') return { mode: 'simulated', routes: mockRoutes(fixture), fixture: ref, demo };
   const state = runId ? readFixtureState(stateDirAbs, runId, fixture.id) : null;
   if (!state || state.status !== 'active') {
     throw new RuntimeError('fixture-setup-required', `Scenario ${scenario.id} 使用 hook Fixture ${fixture.id}：需要在 Run 中先执行 fixture-setup（用 manual capture / generate 规划执行，而不是直接采集）。`);
   }
-  return { mode: 'fixture', routes: [], fixture: { ...ref, namespace: state.namespace } };
+  return { mode: 'fixture', routes: [], fixture: { ...ref, namespace: state.namespace }, demo };
 }
 
 module.exports.prepareScenarioData = prepareScenarioData;

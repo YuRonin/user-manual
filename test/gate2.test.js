@@ -68,6 +68,7 @@ const count = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir).length : 0);
     await step('准备：扫描、描述页面、任务候选与审批；认证缓存含 Cookie 秘密值', async () => {
       fx.writeFile(root, 'app/task-profile/page.tsx');
       await expectExit(root, ['init', '--base-url', server.baseUrl, '--audience', 'public'], 0, env);
+      fx.useDemoValues(root);
       await expectExit(root, ['inspect'], 0, env);
       await expectExit(root, ['describe', '--input', writeJson(path.join(root, 'describe.json'), { pages: [
         { id: 'chat', title: '工作台', purpose: '与 AI 助手对话。' },

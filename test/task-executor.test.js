@@ -25,6 +25,9 @@ class FakeProvider {
   async assertCondition(assertion) { this.calls.push(['assert', assertion.type]); if (this.failAssertion) throw new Error('not visible'); return { ok: true }; }
   async screenshot({ path: file }) { this.calls.push(['shot', file]); fs.mkdirSync(path.dirname(file), { recursive: true }); await sharp({ create: { width: 200, height: 200, channels: 3, background: '#ffffff' } }).png().toFile(file); return { path: file, bytes: fs.statSync(file).size, meta: { viewport: { width: 100, height: 100 }, deviceScaleFactor: 2 } }; }
   async collectSensitiveElements() { return []; }
+  // Demo 替身：没有 data-redact 区域，门禁通过
+  async applyDemo() { return {}; }
+  async auditDemo() { return { replaced: {}, images: {}, unconfigured: [], imageUnconfigured: [], unreplaceable: [], reverted: 0, leaks: [], contacts: [], hidden: 0, surfaces: { iframe: 0, canvas: 0 } }; }
   async close() { this.calls.push(['close']); }
 }
 

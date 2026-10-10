@@ -82,6 +82,7 @@ const snapshot = (file) => ({ bytes: fs.readFileSync(file, 'utf8'), mtime: fs.st
       fx.writeFile(root, 'app/task-profile/page.tsx', "import Shared from '../../components/Shared'\nexport default function Page() { return <Shared /> }\n");
       fx.writeFile(root, 'app/dashboard/page.tsx');
       await expectExit(root, ['init', '--base-url', server.baseUrl, '--audience', 'public'], 0, env);
+      fx.useDemoValues(root);
       await expectExit(root, ['inspect'], 0, env);
       await describe(Object.values(PAGES));
       const file = path.join(state, 'pages', 'task-profile.yaml');

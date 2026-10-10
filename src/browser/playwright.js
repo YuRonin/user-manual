@@ -251,7 +251,7 @@ class PlaywrightBrowserProvider extends BrowserProvider {
   }
 
   static get capabilities() {
-    return { capture: true, semanticActions: true, assertions: true, storageExport: true, privacyGeometry: true, popups: true, routeMocking: true };
+    return { capture: true, semanticActions: true, assertions: true, storageExport: true, privacyGeometry: true, popups: true, routeMocking: true, demoGuard: true };
   }
 
   get headless() {
@@ -266,23 +266,95 @@ class PlaywrightBrowserProvider extends BrowserProvider {
     await this.newContext();
   }
 
-  /**
-   * Fixture 静态响应（P3-05）：只作用于本 Scenario 的 Context，在打开页面之前安装。
-   * routes: [{ matcher: RegExp(pathname), method?, status, contentType, body }]；只匹配同源请求。
-   */
+  /** 兼容入口：只安装 Fixture 路由时也走 Demo 网络守卫（写请求一律受控）。 */
   async installRoutes(routes, { baseUrl }) {
+    return this.installDemoGuard({ routes, baseUrl });
+  }
+
+  /**
+   * Demo 网络守卫（见 privacy/demo.js）：只作用于本 Scenario 的 Context，必须在打开页面之前安装。
+   * - Fixture 路由 routes: [{ matcher: RegExp(pathname), method?, query?, status, contentType, body }]，只匹配同源请求；
+   * - 其余请求按 classifyRequest 判定放行 / 中止；WebSocket 未登记即关闭。
+   * 只记录方法、路径与判定，不记录查询串、请求体与响应。
+   */
+  async installDemoGuard({ routes = [], baseUrl, demo = null }) {
     await this.launch();
+    const { classifyRequest, websocketAllowed, mergeDemo, fixtureStrings } = require('../privacy/demo');
     const origin = new URL(baseUrl).origin;
+    this.demo = { ...mergeDemo(demo || {}, null), known: fixtureStrings(routes) };
+    this.writeOrigin = null;
     this.mockedRequests = [];
+    this.guard = { mocked: [], blocked: [], suppressed: 0, allowed: 0, authorized: 0, websockets: [] };
+    this.pendingBlocked = [];
+    const network = this.demo.network;
     await this.context.route(() => true, async (route) => {
       const request = route.request();
       let url;
       try { url = new URL(request.url()); } catch (_) { return route.continue(); }
-      const hit = url.origin === origin && routes.find((r) => r.matcher.test(url.pathname) && (!r.method || r.method === request.method()));
-      if (!hit) return route.continue();
-      this.mockedRequests.push(`${request.method()} ${url.pathname}`);
-      return route.fulfill({ status: hit.status, contentType: hit.contentType, body: hit.body });
+      if (!/^https?:$/.test(url.protocol)) return route.continue();
+      const method = request.method();
+      const hit = url.origin === origin && routes.find((r) => r.matcher.test(url.pathname) && (!r.method || r.method === method) &&
+        (!r.query || Object.entries(r.query).every(([k, v]) => url.searchParams.get(k) === v)));
+      const verdict = classifyRequest({ method, url, resourceType: request.resourceType(), mocked: !!hit, network, writeOrigin: this.writeOrigin });
+      if (verdict === 'mock') {
+        this.mockedRequests.push(`${method} ${url.pathname}`);
+        this.guard.mocked.push(`${method} ${url.pathname}`);
+        return route.fulfill({ status: hit.status, contentType: hit.contentType, body: hit.body });
+      }
+      if (verdict === 'block') {
+        const event = { method, path: url.origin === origin ? url.pathname : `${url.origin}${url.pathname}` };
+        this.guard.blocked.push(event);
+        this.pendingBlocked.push(event);
+        return route.abort('blockedbyclient');
+      }
+      if (verdict === 'suppress') { this.guard.suppressed++; return route.fulfill({ status: 204, body: '' }); }
+      if (verdict === 'allow') this.guard.allowed++;
+      if (verdict === 'authorized') this.guard.authorized++;
+      return route.continue();
     });
+    // WebSocket 的消息无法逐条证明只读：未登记的连接直接关闭，登记的原样转发
+    if (typeof this.context.routeWebSocket === 'function') {
+      await this.context.routeWebSocket(() => true, (ws) => {
+        let url;
+        try { url = new URL(ws.url()); } catch (_) { url = null; }
+        const allowed = !!url && websocketAllowed(url, network);
+        this.guard.websockets.push({ path: url ? url.pathname : '(invalid)', allowed });
+        if (allowed) ws.connectToServer();
+        else ws.close({ code: 1008, reason: 'manual demo capture: websocket not registered' }).catch(() => {});
+      });
+    }
+  }
+
+  /** 已授权的写步骤执行期间放行发往该站点的写请求；传 null 结束。 */
+  setWriteWindow(origin) {
+    this.writeOrigin = origin || null;
+  }
+
+  /** 自上次读取以来被中止的写请求（任务步骤在动作后检查）。 */
+  drainBlockedWrites() {
+    const out = this.pendingBlocked || [];
+    this.pendingBlocked = [];
+    return out;
+  }
+
+  /** 网络守卫的累计记录副本；未安装守卫时返回 null。 */
+  demoGuardState() {
+    if (!this.guard) return null;
+    return { ...this.guard, mocked: [...this.guard.mocked], blocked: [...this.guard.blocked], websockets: [...this.guard.websockets] };
+  }
+
+  /** 截图前把 data-redact 区域替换为演示值（幂等）。 */
+  async applyDemo() {
+    if (!this.page) return null;
+    const { applyDemoInPage } = require('../privacy/demo-page');
+    return this.page.evaluate(applyDemoInPage, { text: this.demo?.text || {}, images: this.demo?.images || {}, known: this.demo?.known || [] });
+  }
+
+  /** 截图后的只读审计；与截图前后几何的 DOM 计数一起确认属于同一时刻。 */
+  async auditDemo() {
+    if (!this.page) return null;
+    const { auditDemoInPage } = require('../privacy/demo-page');
+    return this.page.evaluate(auditDemoInPage, { text: this.demo?.text || {}, images: this.demo?.images || {}, known: this.demo?.known || [] });
   }
 
   /** 为本 Scenario 新建隔离的 Context：认证快照、视口、DPR、语言、时区、配色都在这里注入。 */
@@ -301,6 +373,8 @@ class PlaywrightBrowserProvider extends BrowserProvider {
       ...(timezoneId ? { timezoneId } : {}),
       // 动画对截图是噪音：同一页面两次截图不该因为动画相位不同而不一样
       reducedMotion: 'reduce',
+      // Service Worker 的请求不经过 context.route，会绕开 Demo 网络守卫与 Fixture
+      serviceWorkers: 'block',
       ...(this.storageState ? { storageState: this.storageState } : {}),
     });
     // 服务器下发 Set-Cookie（例如 refresh token 轮换）时通知上层立即持久化，不等 Scenario 结束：

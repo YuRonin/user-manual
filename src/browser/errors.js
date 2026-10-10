@@ -32,6 +32,9 @@ const REASON = {
   GEOMETRY_UNSTABLE: 'geometry-unstable',
   PRIVACY_UNCERTAIN: 'privacy-uncertain',
   ANNOTATION_LAYOUT_FAILED: 'annotation-layout-failed',
+  DEMO_NEEDS_FIXTURE: 'demo-needs-fixture',
+  DEMO_BLOCKED: 'demo-blocked',
+  DEMO_WRITE_BLOCKED: 'demo-write-blocked',
 };
 
 /** 每类失败给一条「接下来做什么」。 */
@@ -58,6 +61,9 @@ const HINTS = {
   [REASON.GEOMETRY_UNSTABLE]: '截图前后页面仍在变化（动画、轮询或延迟渲染）。用 --wait-for 等待真正稳定的元素后重试。',
   [REASON.PRIVACY_UNCERTAIN]: '隐私规则存在冲突（redact 与 preserve 同时命中）。修正 config.yaml 的 privacy.rules 后重试。',
   [REASON.ANNOTATION_LAYOUT_FAILED]: '标注无法排版（目标几何或画布尺寸异常）。这不是导航问题，重试同一张图结果不变：检查 guide / capture.annotations 的目标，或调整 annotation 主题后重新派生。',
+  [REASON.DEMO_NEEDS_FIXTURE]: '演示截图缺少可证明安全的数据来源（未配置演示值的 data-redact 区域、未声明的联系方式、未登记的 WebSocket）。按报错中的原因码补 capture.demo 或 Fixture 后重新采集；未通过前不会产出截图。',
+  [REASON.DEMO_BLOCKED]: '演示截图门禁发现风险（原始值残留、替换被重渲染覆盖或写请求被中止），已丢弃本次截图与原图。按原因码修复后重新采集。',
+  [REASON.DEMO_WRITE_BLOCKED]: '动作发出了未授权的写请求，已在浏览器内中止，真实服务未收到。确认无副作用后登记到 capture.demo.network.allow，或用 Fixture 完整模拟写操作及其后续读取。',
   [REASON.PAGE_IDENTITY_FAILED]: '页面身份断言未通过：打开的不是预期页面。检查页面模型 states.default 的断言与当前账号权限。',
 };
 

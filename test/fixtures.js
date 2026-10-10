@@ -158,6 +158,20 @@ function gitCommit(root, message = 'change') {
   return git(root, ['rev-parse', 'HEAD']);
 }
 
+/**
+ * 测试站（test/server.js）声明的 data-redact 区域的演示值。截图只有 Demo 模式：
+ * 声明了敏感区域的项目必须配置演示值，否则门禁停在 needs_fixture（与真实项目的迁移要求一致）。
+ */
+const TEST_SITE_DEMO = { text: { 'session-title': '示例会话：单元复习讨论' } };
+
+function useDemoValues(root, demo = TEST_SITE_DEMO) {
+  const yaml = require('js-yaml');
+  const file = path.join(root, '.manual', 'config.yaml');
+  const config = yaml.load(fs.readFileSync(file, 'utf8'));
+  config.capture.demo = { ...(config.capture.demo || {}), ...demo };
+  fs.writeFileSync(file, yaml.dump(config, { lineWidth: 200 }));
+}
+
 function cleanup(root) {
   fs.rmSync(root, { recursive: true, force: true });
 }
@@ -173,6 +187,8 @@ module.exports = {
   vueFixture,
   nextNoRoutesFixture,
   cleanup,
+  useDemoValues,
+  TEST_SITE_DEMO,
   git,
   hasGit,
   gitInit,

@@ -208,6 +208,10 @@ DOM 连续静止 → 冻结 CSS 动画与过渡 → 静置回流。
 
 原图仅保存在 `.manual/artifacts/raw/`。手册只引用 `docs/manual/images/annotated/` 中经隐私处理并带完整性记录的发布图。
 
+截图使用 Demo Capture（唯一模式）：`data-redact` 区域替换为演示值、非只读请求在浏览器内中止。
+采集失败且原因为 `demo-needs-fixture` / `demo-blocked` / `demo-write-blocked` 时，本次截图与原图都已丢弃；
+按输出中的原因码补 `capture.demo` 或 Fixture 后重新采集，见 [Demo Capture](../docs/DEMO_CAPTURE.md)。
+
 ---
 
 ## 文案与事实校验

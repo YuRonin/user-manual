@@ -35,7 +35,7 @@ function policyRevision(config) {
  * 由一次实际执行的检测结果构造 PrivacyResult。
  * 强制遮罩但没有可用几何的高风险项进入 unresolved——不能被静默过滤后当作安全。
  */
-function buildPrivacyRecord({ redactions = [], config }) {
+function buildPrivacyRecord({ redactions = [], config, demo = null }) {
   const unresolved = [];
   const applied = [];
   for (const item of redactions) {
@@ -49,9 +49,11 @@ function buildPrivacyRecord({ redactions = [], config }) {
     status: unresolved.length === 0 && unsafe.length === 0 ? 'passed' : 'failed',
     policyRevision: policyRevision(config),
     detectorVersion: DETECTOR_VERSION,
-    coverage: 'declared-dom',
+    coverage: demo ? 'demo-gate' : 'declared-dom',
     unresolved,
     maskStyles,
+    // Demo 门禁结论（只有通过的截图才会走到这里）：数据来源、无法审计的区域数量；不含任何页面文本
+    ...(demo ? { demo: { status: demo.status, sources: demo.sources, network: demo.network || null, surfaces: demo.surfaces || null, hiddenMatches: demo.hiddenMatches || 0 } } : {}),
   };
 }
 

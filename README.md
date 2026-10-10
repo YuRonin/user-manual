@@ -170,11 +170,16 @@ DOM 连续静止 → 冻结 CSS 动画与过渡 → 静置回流。每步有独�
 `%LOCALAPPDATA%/living-user-manual/auth/`。`status` 只展示档案元数据，绝不输出 cookie 或 token；
 `clear` 可清除指定档案。
 
-### 公开截图怎样脱敏
+### 截图里的数据：Demo Capture
 
-`privacy.audience: public` 会保护完整手机号、邮箱、账号 ID、认证字段和姓名/昵称/学校等个人信息。
-已经显示为 `134****1255` 的内容不会重复处理。浏览器按文字内容计算矩形，不再遮住整个输入框；
-最终使用完全不透明、与原像素无关的浅色合成马赛克。普通 blur 不能作为公开手册的最终遮罩。
+截图只有一种数据模式 `capture.mode: demo`：真实界面 + 公开内容或可证明为虚构的演示数据。
+页面用 `data-redact="<键>"` 声明的敏感区域在截图前替换为 `capture.demo.text` 配置的演示值，
+或由 Fixture 接口数据提供；截图后审计原始值是否仍出现在页面其他可见位置。浏览器内的非只读请求默认中止，
+只放行登记过的请求。门禁结论为 `passed / needs_fixture / blocked`，未通过的截图连同原图一起丢弃。
+配置、Fixture 写法与原因码排查见 [Demo Capture](docs/DEMO_CAPTURE.md)。
+
+表单控件里的手机号、邮箱、认证字段仍按文字内容计算矩形做精确遮罩（完全不透明的浅色合成马赛克，
+不使用 blur）；已经显示为 `134****1255` 的内容不会重复处理。
 
 任务产物分为本地 raw、sanitized 中间图和可发布 annotated 图。正式任务文档只能引用
 `docs/manual/images/annotated/`，发布校验会阻止 raw、诊断图或不安全遮罩进入外部手册。

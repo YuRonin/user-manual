@@ -43,6 +43,7 @@ const FILES = [
   'page-validation.test.js',
   'completion-claims.test.js',
   'scenario-model.test.js',
+  'demo-contract.test.js',
   'capture-store.test.js',
   'capture-task.test.js',
   'task-scenario-variant.test.js',
@@ -89,6 +90,7 @@ const FILES = [
   'live-verify.test.js',
   'drift-report.test.js',
   'scenario-fixtures.test.js',
+  'demo-capture.test.js',
   'ci-workflow.test.js',
   'install-smoke.test.js',
   'performance.test.js',
@@ -105,7 +107,7 @@ const BROWSER = new Set([
   'incremental-update.test.js', 'install-smoke.test.js', 'live-verify.test.js', 'model-handoff.test.js', 'page-validation.test.js',
   'performance.test.js', 'run-store.test.js', 'runtime-cli.test.js', 'runtime-planner.test.js', 'runtime-recovery.test.js',
   'runtime-runner.test.js', 'runtime-failure-matrix.test.js', 'scenario-fixtures.test.js', 'task-executor.test.js',
-  'task-first-e2e.test.js', 'task-rerun.test.js', 'retention.test.js', 'target-obscured.test.js',
+  'task-first-e2e.test.js', 'task-rerun.test.js', 'retention.test.js', 'target-obscured.test.js', 'demo-capture.test.js',
 ]);
 
 function groupOf(file) {

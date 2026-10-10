@@ -27,7 +27,28 @@ function joinUrl(baseUrl, route) {
   return `${String(baseUrl).replace(/\/$/, '')}/${String(route || '/').replace(/^\//, '')}`;
 }
 
-async function diagnosticScreenshot(provider, stateDir, plan, step) {
+/** Demo 网络守卫、Fixture 路由与演示值：每次打开页面之前安装（见 privacy/demo.js）。 */
+async function installGuard(provider, options, baseUrl) {
+  if (provider.installDemoGuard) {
+    await provider.installDemoGuard({ routes: options.routes || [], baseUrl, demo: options.demo || null });
+  } else if (options.routes?.length) {
+    throw Object.assign(new Error('当前 Browser Provider 不支持请求拦截（routeMocking），不能使用 mock Fixture。'), { code: 'capability-missing' });
+  }
+}
+
+/**
+ * 失败现场图（私有 diagnostics 目录）。它不经过发布门禁，所以同样只保存可证明安全的画面：
+ * 先替换演示值并审计，审计不通过（缺演示值、原始值残留、未声明的联系方式）就不保存；
+ * Demo 门禁本身失败时画面必然不可证明，直接跳过。返回 null 表示没有保存。
+ */
+async function diagnosticScreenshot(provider, stateDir, plan, step, cause) {
+  if (/^demo-/.test(String(errorCode(cause) || ''))) return null;
+  if (provider.applyDemo) {
+    await provider.applyDemo();
+    const audit = provider.auditDemo ? await provider.auditDemo() : null;
+    // 只看画面内容；网络事件与截图内容无关
+    if (!audit || require('../privacy/demo').decide({ audit, guard: {}, demo: provider.demo || {} }).status !== 'passed') return null;
+  }
   const file = path.join(stateDir, 'artifacts', 'diagnostics', `${plan.taskId}--${step.id}--failure.png`);
   await provider.screenshot({ path: file, format: 'png' });
   return file;
@@ -225,6 +246,7 @@ async function reconcileCapturePlan(plan, provider, options) {
     throw new TaskExecutionError('invalid-reconcile-plan', '只支持核对最后一步为写操作且有结果断言的任务。');
   }
   try {
+    await installGuard(provider, options, options.baseUrl);
     const opened = await provider.open(sessionUrl);
     await provider.waitUntilReady({ networkIdleTimeout: 1500 });
     const observation = await provider.currentObservation();
@@ -312,6 +334,7 @@ async function continueReadOnlyCapturePlan(plan, provider, options) {
       }
       return screenshotFromRecord(record, projectRoot);
     }) }));
+    await installGuard(provider, options, options.baseUrl);
     const opened = await provider.open(sessionUrl);
     await provider.waitUntilReady({ networkIdleTimeout: 1500 });
     const observation = await provider.currentObservation();
@@ -370,10 +393,7 @@ async function executeCapturePlan(plan, provider, options) {
   let writeStarted = false;
   try {
     // 入口：HTTP / 最终 URL / 页面状态 → 页面身份断言。全部基于等待之后重新读取的页面事实。
-    if (options.routes?.length) {
-      if (!provider.installRoutes) throw Object.assign(new Error('当前 Browser Provider 不支持请求拦截（routeMocking），不能使用 mock Fixture。'), { code: 'capability-missing' });
-      await provider.installRoutes(options.routes, { baseUrl });
-    }
+    await installGuard(provider, options, baseUrl);
     // 查询串只用于打开入口；result.url 与证据只记录路径
     const waits = { ...DEFAULT_WAITS, ...(options.waits || {}) };
     const openResult = await provider.open(result.url + (plan.entry.search || ''), { timeout: waits.readinessMs });
@@ -436,8 +456,21 @@ async function executeCapturePlan(plan, provider, options) {
         record.screenshots.push(await takeScreenshot(provider, stateDir, plan, step, 'before', options, [...result.validations, ...record.validations]));
       }
       if (step.risk === 'write') writeStarted = true;
-      record.target = await provider.performAction(step.action);
-      await provider.waitUntilReady({ networkIdleTimeout: 1500 });
+      // 只有获得授权的写步骤在执行期间放行发往授权站点的写请求；其余步骤发出的写请求在浏览器内中止
+      if (step.writeOrigin && provider.setWriteWindow) provider.setWriteWindow(step.writeOrigin);
+      try {
+        record.target = await provider.performAction(step.action);
+        await provider.waitUntilReady({ networkIdleTimeout: 1500 });
+      } finally {
+        if (provider.setWriteWindow) provider.setWriteWindow(null);
+      }
+      const blockedWrites = provider.drainBlockedWrites ? provider.drainBlockedWrites() : [];
+      if (blockedWrites.length) {
+        // 未授权步骤的写请求没有到达服务端（结果已知），不是 outcome-unknown；也不能把界面上的失败当作步骤完成。
+        // 已授权的写步骤可能有部分请求已发出，仍按 outcome-unknown 处理。
+        if (!step.writeOrigin) writeStarted = false;
+        throw Object.assign(new Error(`步骤 ${step.id} 的动作发出了未授权的写请求（${[...new Set(blockedWrites.map((w) => `${w.method} ${w.path}`))].join('、')}），已在浏览器内中止；不会伪造执行结果。确认无副作用的请求登记到 capture.demo.network.allow，或用 Fixture 完整模拟。`), { code: 'demo-write-blocked' });
+      }
       const afterAssertions = step.expectedState?.assertions || [];
       record.validations.push(...await runAssertions(provider, afterAssertions, {
         scope: 'scenario-state', phase: 'after', stepId: step.id, idPrefix: `${step.pageAfter || step.page}:${step.expectedState?.id || step.stateBefore}`, timeoutMs: step.assertionTimeoutMs || timeoutMs,
@@ -472,7 +505,7 @@ async function executeCapturePlan(plan, provider, options) {
   } catch (cause) {
     let diagnostic = null;
     if (activeStep && !options.preflight) {
-      try { diagnostic = await diagnosticScreenshot(provider, stateDir, plan, activeStep); } catch (_) { /* best effort */ }
+      try { diagnostic = await diagnosticScreenshot(provider, stateDir, plan, activeStep, cause); } catch (_) { /* best effort */ }
     }
     throw new TaskExecutionError(
       // 保留原始分类（CaptureError.reason / 定位与断言 code / Playwright 超时）；没有分类的才记 step-failed。

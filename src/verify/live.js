@@ -32,6 +32,7 @@ const { RuntimeError } = require('../runtime/errors');
 const { classify, overall } = require('./report');
 const { createCaptureStore } = require('../evidence/store');
 const { captureStable, derivePublished } = require('../evidence/capture-safe');
+const { mergeDemo } = require('../privacy/demo');
 const { RENDERER_VERSION } = require('../evidence/image-pipeline');
 const { policyRevision } = require('../publication/validate');
 const { compareSemantic } = require('./semantic-diff');
@@ -245,6 +246,8 @@ async function verifyLive({ projectRoot, config, target, session, timeoutMs = DE
 
   const auth = prepareAuth(config, { profile: scenario.authProfile });
   const work = async (provider) => {
+    // Demo 网络守卫：在线回放同样不允许写请求到达服务端（不装 Fixture 路由：这里验证的是线上真实行为）
+    if (provider.installDemoGuard) await provider.installDemoGuard({ baseUrl: config.project.baseUrl, demo: mergeDemo(config.capture?.demo, null) });
     const navigation = await openEntry(provider, url, expected, checks, auth);
     if (!navigation) return { stepRecords: [] };
     checks.push(...await collectAssertions(provider, identityAssertions, { scope: 'page-identity', idPrefix: `${target.id}:default`, timeoutMs }));
@@ -282,6 +285,10 @@ async function verifyLive({ projectRoot, config, target, session, timeoutMs = DE
         const actionResult = await provider.performAction(step.action);
         if (actionResult?.resolution?.fallback) checks.push(check(`locator:${step.id}`, 'interaction', 'inconclusive', { stepId: step.id, reason: 'locator-fallback-used' }));
         await provider.waitUntilReady({ networkIdleTimeout: 1500 });
+        const blockedWrites = provider.drainBlockedWrites ? provider.drainBlockedWrites() : [];
+        if (blockedWrites.length) {
+          throw Object.assign(new Error(`动作发出了未授权的写请求（${[...new Set(blockedWrites.map((w) => `${w.method} ${w.path}`))].join('、')}），已在浏览器内中止。`), { code: 'demo-write-blocked' });
+        }
         checks.push(check(`action:${step.id}`, 'interaction', 'passed', { stepId: step.id, action: step.action?.type || null }));
       } catch (error) {
         checks.push(failedCheck(`action:${step.id}`, 'interaction', error, { stepId: step.id, action: step.action?.type || null, target: step.action?.target?.name || null }));

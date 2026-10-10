@@ -32,6 +32,7 @@ const { revisionOf } = require('../util/hash');
 const { RuntimeError } = require('../runtime/errors');
 const { resolveScenario } = require('../scenarios/store');
 const { prepareScenarioData } = require('../scenarios/fixtures');
+const { mergeDemo } = require('../privacy/demo');
 
 const REASON_CODES = new Set(Object.values(REASON));
 
@@ -182,9 +183,11 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
   const stagedAnnotations = staging.file('annotations.json');
 
   const work = async (provider) => {
-    if (data.routes.length) {
-      if (!provider.installRoutes) throw new RuntimeError('capability-missing', '当前 Browser Provider 不支持请求拦截（routeMocking），不能使用 mock Fixture。');
-      await provider.installRoutes(data.routes, { baseUrl: config.project.baseUrl });
+    // Demo：网络守卫、Fixture 路由与演示值必须在打开页面之前安装；没有 Fixture 也要安装（写请求一律受控）
+    if (provider.installDemoGuard) {
+      await provider.installDemoGuard({ routes: data.routes, baseUrl: config.project.baseUrl, demo: mergeDemo(config.capture?.demo, data.demo) });
+    } else if (data.routes.length) {
+      throw new RuntimeError('capability-missing', '当前 Browser Provider 不支持请求拦截（routeMocking），不能使用 mock Fixture。');
     }
     const openResult = await provider.open(url, { timeout: readyOptions.timeout });
     // 等待结束后重新读取 URL 与页面事实：SPA 延迟跳转以截图时的地址为准。

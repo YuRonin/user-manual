@@ -110,6 +110,9 @@ process.stdout.write('\nimage pipeline\n');
     }
     async collectGeometry() { if (this.unstable) this.generation++; return { viewport: { width: 100, height: 100 }, scroll: { x: 0, y: 0 }, dpr: 1, documentSize: { width: 100, height: 100 }, mutationGeneration: this.generation }; }
     async collectSensitiveElements() { return [{ text: '13812345678', label: '手机号', source: 'form-control', rect: { x: 5, y: 80, width: 40, height: 10 } }]; }
+    // Demo 替身：没有 data-redact 区域，门禁通过
+    async applyDemo() { return {}; }
+    async auditDemo() { return { replaced: {}, images: {}, unconfigured: [], imageUnconfigured: [], unreplaceable: [], reverted: 0, leaks: [], contacts: [], hidden: 0, surfaces: { iframe: 0, canvas: 0 } }; }
     async screenshot({ path: file }) { this.shots++; fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, PNG); return { path: file, bytes: PNG.length, meta: { viewport: { width: 100, height: 100 }, deviceScaleFactor: 1 } }; }
     async close() {}
   }
@@ -223,14 +226,14 @@ process.stdout.write('\nimage pipeline\n');
   const isRed = (rgb) => rgb[0] > 200 && rgb[1] < 60 && rgb[2] < 60;
   try {
     for (const [dpr, fullPage] of [[1, false], [2, false], [1, true]]) {
-      await test(`真浏览器页面采集 DPR=${dpr}${fullPage ? ' 整页' : ''}：发布图遮住手机号${fullPage ? '与视口外邮箱' : ''}，原图保留在私有目录`, async () => {
+      await test(`真浏览器页面采集 DPR=${dpr}${fullPage ? ' 整页' : ''}：发布图遮住输入框中的手机号${fullPage ? '与视口外邮箱' : ''}，原图保留在私有目录`, async () => {
         const project = fx.captureFixture();
         try {
           let r = await runCli(['init', '--project-root', project, '--base-url', server.baseUrl, '--profile', 'custom', '--viewport', '800x600', '--dpr', String(dpr)]);
           assert.strictEqual(r.status, 0, r.stderr);
           r = await runCli(['inspect', '--project-root', project]);
           assert.strictEqual(r.status, 0, r.stderr);
-          r = await runCli(['capture', 'chat', '--project-root', project, '--url', `${server.baseUrl}/privacy-page`, '--json', ...(fullPage ? ['--full-page'] : [])]);
+          r = await runCli(['capture', 'chat', '--project-root', project, '--url', `${server.baseUrl}/privacy-form`, '--json', ...(fullPage ? ['--full-page'] : [])]);
           assert.strictEqual(r.status, 0, r.stdout + r.stderr);
           const out = JSON.parse(r.stdout);
           assert.match(out.published.artifactPath, /^docs\/manual\/images\/annotated\/page--chat--[0-9a-f]{16}\.png$/);
@@ -261,6 +264,28 @@ process.stdout.write('\nimage pipeline\n');
         }
       });
     }
+    await test('真浏览器：正文里未声明的手机号 → demo-needs-fixture，不产出截图、不留原图', async () => {
+      const project = fx.captureFixture();
+      try {
+        let r = await runCli(['init', '--project-root', project, '--base-url', server.baseUrl, '--profile', 'custom', '--viewport', '800x600', '--dpr', '1']);
+        assert.strictEqual(r.status, 0, r.stderr);
+        r = await runCli(['inspect', '--project-root', project]);
+        assert.strictEqual(r.status, 0, r.stderr);
+        r = await runCli(['capture', 'chat', '--project-root', project, '--url', `${server.baseUrl}/privacy-page`, '--json']);
+        assert.notStrictEqual(r.status, 0);
+        const out = JSON.parse(r.stdout);
+        assert.strictEqual(out.reason, 'demo-needs-fixture');
+        assert.match(out.message, /undeclared-sensitive-text（1 处（phone））/);
+        assert.ok(!r.stdout.includes('13812345678'), '输出不能含敏感原文');
+        for (const dir of ['.manual/artifacts/raw', '.manual/artifacts/sanitized', 'docs/manual/images']) {
+          const full = path.join(project, dir);
+          const files = fs.existsSync(full) ? fs.readdirSync(full, { recursive: true }).filter((f) => /\.png$/.test(f)) : [];
+          assert.deepStrictEqual(files, [], `${dir} 不应留下截图`);
+        }
+      } finally {
+        fx.cleanup(project);
+      }
+    });
   } finally {
     await server.close();
   }

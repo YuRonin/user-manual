@@ -58,7 +58,7 @@ ${state.canEdit ? `<button aria-label="${state.editLabel}" onclick="document.get
   <label for="nickname">昵称</label><input id="nickname" value="星河老师">
   <label for="phone">手机号</label><input id="phone" value="13812345678">
   <label for="profile-school">学校</label><input id="profile-school" value="星海中学">
-  <p data-redact aria-label="会话标题">七年级数学备课讨论</p>
+  <p data-redact="session-title" aria-label="会话标题">七年级数学备课讨论</p>
   <button aria-label="保存修改">保存修改</button>
 </section>
 <section id="benefits" role="dialog" aria-label="学校权益" hidden>
@@ -122,6 +122,76 @@ const PAGES = {
 <div style="height:1600px"></div>
 <p id="email" style="background:#ff0000;color:#ff0000;display:inline-block">teacher@example.com</p>`),
 
+  // 表单控件里的手机号 / 邮箱：仍按原规则精确遮罩（Demo 门禁只接管 data-redact 区域与可见正文）
+  '/privacy-form': html(`
+<h1>通讯录</h1>
+<input id="phone" value="13812345678" style="background:#ff0000;color:#ff0000;border:0;font-size:16px;width:200px">
+<div style="height:1600px"></div>
+<input id="email" value="teacher@example.com" style="background:#ff0000;color:#ff0000;border:0;font-size:16px;width:240px">`),
+
+  // ---- Demo Capture（见 test/demo-capture.test.js）：真实数据经接口渲染，data-redact 声明敏感区域
+  '/demo-history': html(`
+<aside style="width:260px;float:left;background:#eef2f7;padding:12px">
+  <p data-redact="account-name" id="account-name">王小明</p>
+  <p data-redact="account-phone">13912345678</p>
+  <ul id="history"></ul>
+</aside>
+<main style="margin-left:300px">
+  <h1>历史会话</h1>
+  <p id="notice">公开公告：本周六系统维护。</p>
+  <button id="del">删除会话</button>
+  <p id="status"></p>
+</main>
+<script>
+  fetch('/api/demo/conversations').then((r) => r.json()).then((data) => {
+    document.getElementById('history').innerHTML = data.items.map((item) => '<li><span data-redact="session-title">' + item.title + '</span></li>').join('');
+  });
+  document.getElementById('del').onclick = async () => {
+    try { const r = await fetch('/api/demo/conversations/1', { method: 'DELETE' }); document.getElementById('status').textContent = r.ok ? '已删除' : '删除失败'; }
+    catch (_) { document.getElementById('status').textContent = '删除失败'; }
+  };
+</script>`),
+  // 原始值出现在 data-redact 之外（问候语）：替换了声明区域也不能发布
+  '/demo-leak': html(`
+<p data-redact="account-name">王小明</p>
+<h1>欢迎回来，王小明</h1>`),
+  // 不规则的私人文本：不像手机号 / 邮箱，正则识别不了；只能靠声明 + 原始值残留检查
+  '/demo-note': html(`
+<h1>学生档案</h1>
+<p data-redact="student-note">该生数学基础薄弱，父母离异由祖母照顾，需要关注情绪变化</p>
+<input id="note-copy" value="该生数学基础薄弱，父母离异由祖母照顾，需要关注情绪变化" style="width:600px">`),
+  // 页面每次被改写都立刻恢复真实值：替换无法稳定
+  '/demo-revert': html(`
+<h1>个人中心</h1>
+<p data-redact="account-name" id="name">王小明</p>
+<script>
+  const el = document.getElementById('name');
+  new MutationObserver(() => { if (el.textContent !== '王小明') el.textContent = '王小明'; }).observe(el, { childList: true, characterData: true, subtree: true });
+</script>`),
+  '/demo-ws': html(`
+<h1>实时课堂</h1>
+<script>try { new WebSocket('ws://' + location.host + '/ws'); } catch (_) {}</script>`),
+  '/demo-avatar': html(`
+<h1>个人中心</h1>
+<img data-redact="account-avatar" src="/img/fast.png" width="48" height="48" alt="头像">`),
+  // 打开页面就发出写请求（自动保存 / 心跳）：默认被中止，登记放行后才到达服务端
+  '/demo-autosave': html(`
+<h1>草稿箱</h1>
+<script>fetch('/api/demo/autosave', { method: 'POST', body: 'draft' }).catch(() => {});</script>`),
+  '/demo-beacon': html(`
+<h1>统计页</h1>
+<script>navigator.sendBeacon('/api/demo/track', 'view');</script>`),
+  // 正常 UI 遮罩（抽屉背景蒙层）与抽屉内的敏感字段
+  '/demo-drawer': html(`
+<h1>会员中心</h1>
+<p>付款记录在右侧抽屉中查看。</p>
+<div id="backdrop" style="position:fixed;inset:0;background:rgba(15,23,42,0.45)"></div>
+<div role="dialog" aria-label="付款记录" style="position:fixed;top:0;right:0;bottom:0;width:360px;background:#ffffff;padding:24px">
+  <h2>付款记录</h2>
+  <p>订单号 <span data-redact="order-no">WX20240501883921</span></p>
+  <p>付款人 <span data-redact="account-name">王小明</span></p>
+</div>`),
+
   // 状态码 200，但内容是「页面不存在」：软 404
   '/soft-404': html('<h1>页面不存在</h1><p>你访问的页面已被移除。</p><a href="/">返回首页</a>'),
 
@@ -150,6 +220,7 @@ ${'<p>设置项说明文字，用来把正文长度撑过登录页判据的阈�
  */
 function startServer() {
   const state = { ...DEFAULT_STATE };
+  const writes = [];
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
     const pathname = url.pathname;
@@ -158,6 +229,20 @@ function startServer() {
       res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(html('<h1>404 Not Found</h1>'));
       return;
+    }
+    // Demo 测试接口：读接口返回"真实"数据；任何写请求都记账，测试据此证明写请求没有到达服务端
+    if (pathname.startsWith('/api/demo/')) {
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        writes.push(`${req.method} ${pathname}`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end('{"ok":true}');
+        return;
+      }
+      if (pathname === '/api/demo/conversations') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ items: [{ title: '王小明的期中成绩分析' }, { title: '家长沟通记录：李华' }] }));
+        return;
+      }
     }
     if (pathname === '/api/permissions') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -241,6 +326,8 @@ function startServer() {
         set: (patch) => Object.assign(state, patch),
         reset: () => Object.assign(state, DEFAULT_STATE, { missing: [] }),
         state,
+        /** 到达服务端的写请求（/api/demo/*）。 */
+        writes,
         close: () => new Promise((done) => { server.closeAllConnections?.(); server.close(done); }),
       });
     });

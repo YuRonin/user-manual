@@ -72,6 +72,7 @@ const writeJson = (file, value) => { fs.writeFileSync(file, JSON.stringify(value
       fx.writeFile(root, 'components/Profile.tsx', 'export default function Profile() { return "编辑资料" }\n');
       fx.writeFile(root, 'app/task-profile/page.tsx', "import Profile from '../../components/Profile'\nexport default Profile\n");
       await ok(root, ['init', '--base-url', server.baseUrl, '--audience', 'public']);
+      fx.useDemoValues(root);
       await ok(root, ['inspect']);
       const input = writeJson(path.join(root, 'describe.json'), { pages: [
         { id: 'chat', title: '工作台', purpose: '与 AI 助手对话。', detectedActions: ['点击「新对话」创建会话'], features: [{ id: 'new-chat', label: '新对话', priority: 'optional' }] },

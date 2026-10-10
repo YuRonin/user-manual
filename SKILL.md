@@ -101,7 +101,7 @@ Skill 只负责：解析意图 → 调用命令 → 处理等待 → 报告结�
 | 0 | 完成（或 `--plan` 预览） | 报告 `documents` 路径并处理 `warnings` |
 | 3 | 等待输入 | 按 `waiting[].code`：`model-input-required` → 上面第 3 步写文案；`approval-required` / `scope-changed` → 把任务展示给用户，确认后 `approve-tasks` 再 `resume`；`auth-missing` / `auth-expired` / `login-required` → `manual auth login --resume <runId>`；`review-required` → 展示需确认的数字与承诺，用户确认后加 `--accept-review` 重跑；`fixture-cleanup-required` → 告诉用户测试数据残留在哪个命名空间，环境恢复后 `resume` |
 | 4 | 漂移或冲突 | `run-input-changed` → `resume <runId> --replan`；`merge-conflict` → 把 `proposed.md` 与逐块对照给用户，由用户选择采用提案或把块头改为 `owner=human` 后 `resume`，只有用户明确要求才 `--force`；`document-missing` → 问用户重新生成还是下线；`verify` 的 failed / drift → 报告差异，不要自动重新生成或接受新基线 |
-| 1 | 失败 | `manual status <runId>` 报告失败任务的 code 与提示。`network-access-denied` 是客户端沙箱禁止联网：在沙箱外重新执行同一条命令。`outcome-unknown`（写操作结果不明）不能重新提交，按[质量工作流](references/quality-workflow.md)“异常恢复”核对 |
+| 1 | 失败 | `manual status <runId>` 报告失败任务的 code 与提示。`network-access-denied` 是客户端沙箱禁止联网：在沙箱外重新执行同一条命令。`outcome-unknown`（写操作结果不明）不能重新提交，按[质量工作流](references/quality-workflow.md)“异常恢复”核对。`demo-needs-fixture` / `demo-blocked` / `demo-write-blocked` 是演示截图门禁：把原因码与缺少的演示值或被中止的请求报告给用户，按 [Demo Capture](docs/DEMO_CAPTURE.md) 补 `capture.demo` 或 Fixture 后再跑；不要关闭门禁、不要改被采集项目的源码 |
 | 2 | 参数错误或目标歧义 | 把 `candidates` 给用户选，用 `task:` / `page:` 前缀重跑 |
 
 ## 按需阅读
@@ -109,5 +109,6 @@ Skill 只负责：解析意图 → 调用命令 → 处理等待 → 报告结�
 - [写作规范](references/manual-writing-style.md)：写文案块和任务模型的读者字段之前必读。
 - [质量工作流](references/quality-workflow.md)：交付前审阅、已授权的测试写操作、异常恢复（`outcome-unknown`、身份变化、会话核对与续采）。
 - [任务工作流](references/task-workflow.md)：候选发现、审批与截图质量。
+- [Demo Capture](docs/DEMO_CAPTURE.md)：截图的演示数据（`capture.demo`、Fixture）、网络写入守卫与 `needs_fixture` / `blocked` 排查。
 - [命令细节](references/command-workflows.md)：`init` / `inspect` / `describe` 输入格式，单独采集（`capture`）、预演（`plan-capture --live`）、写操作恢复（`capture-task`）、发布事务（`publication`）、回收（`gc`）与迁移（`migrate`）。
 - `docs/RUNTIME.md`：Run、缓存与故障排查；`docs/MIGRATION.md`：旧项目与兼容命令。

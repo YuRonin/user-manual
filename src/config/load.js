@@ -174,6 +174,11 @@ function loadConfig(projectRoot) {
     );
   }
 
+  // 截图数据模式（capture.mode）只有 demo；capture.demo 声明演示值与网络放行规则
+  const demo = require('../privacy/demo').resolveDemoConfig(raw.capture);
+  if (!demo.ok) return { ok: false, errors: demo.errors };
+  config.capture = { ...config.capture, mode: demo.mode, demo: demo.demo };
+
   const annotation = resolveAnnotationConfig(raw.annotation);
   if (!annotation.ok) return { ok: false, errors: annotation.errors };
   config.annotation = annotation.config;

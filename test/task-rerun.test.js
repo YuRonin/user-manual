@@ -57,6 +57,7 @@ async function step(name, fn) {
   try {
     await step('准备：页面 → 候选 → 审批（写入 approval.scopeHash）', async () => {
       await ok(root, ['init', '--base-url', server.baseUrl, '--audience', 'public', '--json']);
+      fx.useDemoValues(root);
       await ok(root, ['inspect', '--json']);
       const { writeModel, readExistingPages } = require('../src/inspect/store');
       const pages = readExistingPages(state).pages;

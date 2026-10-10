@@ -87,6 +87,22 @@ function renderConfigYaml(config, meta = {}) {
   L.push('    #   hasTouch: true');
   L.push("    #   userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) ...'");
   L.push('');
+  L.push('  # 截图数据模式只有 demo：真实界面 + 虚构演示数据，证明不了安全的截图不进入手册。');
+  L.push('  # 页面用 data-redact="<键>" 声明的敏感区域在截图前替换为下面的演示值；没有配置的键会让截图停在 needs_fixture。');
+  L.push(`  mode: ${scalar(config.capture.mode || 'demo')}`);
+  L.push('  # demo:');
+  L.push('  #   text:                          # 字符串可含 {n}（同键第 n 个）；数组按出现顺序循环取值');
+  L.push('  #     account-name: 演示教师');
+  L.push("  #     session-title: ['七年级数学：一元一次方程复习', '八年级物理：浮力实验设计']");
+  L.push('  #   images:                        # 图片类 data-redact（头像等）：initials 或 blank');
+  L.push('  #     account-avatar: initials');
+  L.push('  #   network:                       # 非只读请求默认在浏览器内中止；只登记确认无副作用的请求');
+  L.push('  #     allow:');
+  L.push('  #       - { method: POST, path: /api/auth/refresh }');
+  L.push('  #     block:                       # 有副作用的 GET（退出登录、一次性链接等）');
+  L.push('  #       - { method: GET, path: /api/logout }');
+  L.push('  #     websockets: []               # 确认只读的 WebSocket 路径');
+  L.push('');
 
   // ---- browser
   L.push('# ---------------------------------------------------------------- Browser Provider');

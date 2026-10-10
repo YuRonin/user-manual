@@ -51,6 +51,7 @@ async function prepare(root, server, env) {
   const yaml = require('js-yaml');
   fx.writeFile(root, 'app/task-profile/page.tsx');
   await expectExit(root, ['init', '--base-url', server.baseUrl, '--audience', 'public'], 0, env);
+  fx.useDemoValues(root);
   await expectExit(root, ['inspect'], 0, env);
   await expectExit(root, ['describe', '--input', writeJson(path.join(root, 'describe.json'), { pages: [
     { id: 'chat', title: '工作台', purpose: '与 AI 助手对话。' },

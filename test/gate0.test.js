@@ -62,6 +62,7 @@ async function step(name, fn) {
   try {
     await step('public 项目：init → inspect → describe → capture → generate → finalize（页面）', async () => {
       await ok(root, ['init', '--base-url', server.baseUrl, '--audience', 'public']);
+      fx.useDemoValues(root);
       await ok(root, ['inspect']);
       const input = path.join(root, 'describe.json');
       fs.writeFileSync(input, JSON.stringify({ pages: [{ id: 'chat', title: '工作台', purpose: '与 AI 助手对话。', detectedActions: ['点击「新对话」创建会话'], features: [{ id: 'new-chat', label: '新对话', priority: 'optional' }] }] }));

@@ -31,6 +31,9 @@ class FakeProvider {
   async assertCondition() { return { ok: true }; }
   async screenshot({ path: file }) { fs.mkdirSync(path.dirname(file), { recursive: true }); await sharp({ create: { width: 100, height: 100, channels: 3, background: '#ffffff' } }).png().toFile(file); return { path: file, bytes: fs.statSync(file).size, meta: { viewport: { width: 100, height: 100 }, deviceScaleFactor: 1 } }; }
   async collectSensitiveElements() { return []; }
+  // Demo 替身：没有 data-redact 区域，门禁通过
+  async applyDemo() { return {}; }
+  async auditDemo() { return { replaced: {}, images: {}, unconfigured: [], imageUnconfigured: [], unreplaceable: [], reverted: 0, leaks: [], contacts: [], hidden: 0, surfaces: { iframe: 0, canvas: 0 } }; }
   async close() {}
 }
 

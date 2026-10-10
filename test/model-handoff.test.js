@@ -38,6 +38,7 @@ function project(baseUrl) {
   const root = fx.captureFixture();
   fx.writeFile(root, 'app/task-profile/page.tsx', 'export default function Profile() { return "个人中心" }\n');
   cli(root, ['init', '--base-url', baseUrl, '--audience', 'public']);
+  fx.useDemoValues(root);
   cli(root, ['inspect']);
   cli(root, ['describe', '--input', writeJson(path.join(root, 'describe.json'), { pages: [
     { id: 'chat', title: '工作台', purpose: '与 AI 助手对话。', detectedActions: ['点击「新对话」创建会话'], features: [{ id: 'new-chat', label: '新对话', priority: 'optional' }] },

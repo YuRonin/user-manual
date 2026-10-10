@@ -51,6 +51,7 @@ async function project(baseUrl) {
   const root = fx.captureFixture();
   fx.writeFile(root, 'app/task-profile/page.tsx');
   await cli(root, ['init', '--base-url', baseUrl, '--audience', 'public']);
+  fx.useDemoValues(root);
   await cli(root, ['inspect']);
   await cli(root, ['describe', '--input', writeJson(path.join(root, 'describe.json'), { pages: [{ id: 'task-profile', title: '个人中心', purpose: '管理个人资料。' }] })]);
   const file = path.join(root, '.manual', 'pages', 'task-profile.yaml');

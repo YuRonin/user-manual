@@ -257,7 +257,7 @@ function buildConfig(input) {
     version: CONFIG_VERSION,
     // projectId 与 auth.cacheKey 无关：cacheKey 仍由 name+origin 派生，已有登录缓存不会因新增身份失效。
     project: { id: input.projectId || newUuid(), name, baseUrl },
-    capture: { activeProfile: resolvedProfile.id, profiles: profileMap },
+    capture: { activeProfile: resolvedProfile.id, profiles: profileMap, mode: 'demo' },
     browser: { activeProvider: resolvedProvider.id, providers: providerMap },
     docs: { language, outputDir: docsDir, imagesDir: `${docsDir}/images` },
     // 页面原图是未经隐私处理的本地证据，放在 .manual 下，不进入文档目录；

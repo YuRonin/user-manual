@@ -21,6 +21,7 @@ const { executeCapturePlan, reconcileCapturePlan, continueReadOnlyCapturePlan } 
 const { prepareAuth, authRuntimeFor } = require('../auth/runtime');
 const { RuntimeError } = require('../runtime/errors');
 const { prepareScenarioData } = require('../scenarios/fixtures');
+const { mergeDemo } = require('../privacy/demo');
 const { resolveWaits } = require('../config/waits');
 
 function inputError(code, errors) {
@@ -102,6 +103,7 @@ async function captureTask({ projectRoot, config, taskId, session = null, runId 
     preflight,
     onProgress: (step) => process.stderr.write(`[manual capture] ${taskId}: ${step}\n`),
     routes: data.routes,
+    demo: mergeDemo(config.capture?.demo, data.demo),
     provenanceMode: data.mode,
     fixture: data.fixture,
     baseUrl: config.project.baseUrl,

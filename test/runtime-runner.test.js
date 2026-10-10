@@ -70,6 +70,7 @@ function realProject(baseUrl) {
   const root = fx.captureFixture();
   fx.writeFile(root, 'app/task-profile/page.tsx');
   cli(root, ['init', '--base-url', baseUrl, '--audience', 'public']);
+  fx.useDemoValues(root);
   cli(root, ['inspect']);
   cli(root, ['describe', '--input', writeJson(path.join(root, 'describe.json'), { pages: [
     { id: 'chat', title: '工作台', purpose: '与 AI 助手对话。' },

@@ -53,6 +53,12 @@ manifest 和正式手册都不得包含认证值。
 
 ## 隐私处理
 
+截图数据统一走 Demo Capture（`privacy/demo` + `privacy/demo-page`，详见 [Demo Capture](DEMO_CAPTURE.md)）：
+打开页面前在 BrowserContext 上安装网络守卫（非只读请求默认中止）、Fixture 路由与演示值并屏蔽 Service Worker；
+`captureStable` 截图前把 `data-redact` 区域替换为演示值，截图后只读审计（DOM 计数与截图时刻一致才有效）；
+`derivePublished` 在派生任何图片之前判定 `passed / needs_fixture / blocked`，未通过即抛出，调用方丢弃 staging。
+`data-redact` 区域与正文联系方式由门禁负责，不再整块打码；以下遮罩管线只处理表单控件与凭据。
+
 隐私管线分为三层：`privacy/detector` 根据发布范围和证据分类，`privacy/geometry` 负责文字级矩形、
 裁剪和去重，`privacy/renderer` 绘制不可逆的 `neutral-mosaic`。普通文本使用 DOM Range；输入控件根据
 字体和 padding 估算值文本区域，只有显式元素级规则才遮住整个控件。
@@ -249,7 +255,7 @@ Runtime 路径下，正文由事实包确定性渲染（`src/generate/render.js`
 | `verify --live` | 在线：真实导航回放页面身份、安全步骤与完成声明；写 / 破坏性步骤不执行；页面手册另做语义与视觉漂移比较 |
 | Scenario 变体与 Fixture | 显式 Scenario（空状态 / 错误态 / 其他角色）；mock（请求拦截，simulated）与 hook（测试环境 setup / cleanup）两类登记 Fixture；生产与未登记环境拒绝 |
 | 认证 | 命名档案、CAS 刷新、cookie / localStorage；匿名必须显式声明 |
-| 隐私检测 | 声明的 DOM 候选（输入框、`data-redact`、文本中的手机号 / 邮箱 / 证件号等）；无法定位的敏感内容阻止公开发布 |
+| 隐私检测 | Demo 门禁：`data-redact` 区域演示值替换 + 原始值残留审计 + 网络写入守卫；表单控件 / 凭据精确遮罩；无法证明的截图不产出 |
 | 模板语言 | zh-CN、en-US |
 | 保留策略 | `manual gc`：dry-run / apply，引用图保护发布记录与被引用证据 |
 

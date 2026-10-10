@@ -5,6 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const yaml = require('js-yaml');
+const fx = require('./fixtures');
 const { spawn, spawnSync } = require('child_process');
 const { startServer } = require('./server');
 const { listMarkdownImages } = require('../src/publication/paths');
@@ -71,6 +72,7 @@ async function completeTask(root, stateDir, taskId) {
     let result = runSync(['init', '--project-root', root, '--base-url', server.baseUrl]);
     assert.strictEqual(result.status, 0, result.stderr);
     const stateDir = path.join(root, '.manual');
+    fx.useDemoValues(root);
 
     // “学校”属于语义不确定字段：验收配置必须显式选择脱敏，不能靠工具猜测。
     const configFile = path.join(stateDir, 'config.yaml');

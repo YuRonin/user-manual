@@ -46,6 +46,10 @@ const POLICIES = {
   'target-obscured': FAIL,
   // 截图后定义变了：重试同一计划无意义，需要重新规划 / 重采
   'annotation-plan-changed': FAIL,
+  // Demo 门禁：缺演示数据 / 发现风险 / 写请求被中止都是确定性的，重拍结果不变，需要补 Fixture 或配置
+  'demo-needs-fixture': FAIL,
+  'demo-blocked': FAIL,
+  'demo-write-blocked': FAIL,
   'lock-timeout': RETRY,
   'file-busy': RETRY,
   // 模型：只重试模型任务本身（由 runner 按 task kind 限定）。
