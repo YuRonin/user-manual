@@ -73,7 +73,9 @@ function lookup({ store, keyInfo, subject = null, mode, projectRoot, stateDirAbs
   }
 
   if (requireAnnotation && entry.annotation?.status !== 'passed') {
-    return miss('annotation-incomplete', { detail: entry.annotation?.status || 'unknown', failures: entry.annotation?.failures || [] });
+    return miss('annotation-incomplete', { detail: entry.annotation?.status || 'unknown', failures: entry.annotation?.failures || [],
+      // 定向修复规划需要：已连续修复次数、失败那次的图像输入与产物（B5-15）
+      repairAttempts: Number(entry.meta?.repairAttempts || 0), imageInputs: entry.meta?.imageInputs || null, outputRefs: entry.outputRefs, observedAt: entry.observedAt });
   }
 
   const freshness = freshnessPolicy(kind, keyInfo, cachePolicy);

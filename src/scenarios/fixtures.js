@@ -26,6 +26,7 @@
  *       - { path: /api/report, status: 500, bodyFile: data/error.html, contentType: text/html }
  *       - { path: /api/orders, method: GET, query: { page: '2' }, json: { items: [] } }   # query：这些参数必须完全相等
  *       - { origin: 'https://api.example.com', path: /v1/me, json: { name: 演示教师 } }   # origin：拦截跨域接口（可含 *）
+ *       - { path: /api/report, json: { rows: [] }, delayMs: 8000 }   # delayMs：延迟响应，稳定复现 Loading 状态
  *       - path: /api/sessions                # shape：声明响应结构，登记时校验，结构不符拒绝使用（不返回残缺数据）
  *         json: { items: [{ id: s1, title: 示例会话 }], total: 1 }
  *         shape: { required: [items, total], items: { field: items, required: [id, title] } }
@@ -128,6 +129,8 @@ function validateFixture(def, dir) {
       if (typeof route?.path !== 'string' || !route.path.startsWith('/')) errors.push(`mock.routes[${i}].path 需要是以 / 开头的路径（可含 *）。`);
       if (route?.status !== undefined && !(Number.isInteger(route.status) && route.status >= 100 && route.status < 600)) errors.push(`mock.routes[${i}].status 非法。`);
       if (route?.bodyFile !== undefined && (typeof route.bodyFile !== 'string' || !inside(dir, path.resolve(dir, route.bodyFile)))) errors.push(`mock.routes[${i}].bodyFile 必须位于 .manual/fixtures/ 内。`);
+      // delayMs：可控的响应延迟，用来稳定复现 Loading 状态（B5-03），不靠碰巧截到
+      if (route?.delayMs !== undefined && !(Number.isInteger(route.delayMs) && route.delayMs >= 0 && route.delayMs <= 30000)) errors.push(`mock.routes[${i}].delayMs 需要是 0-30000 的整数（毫秒）。`);
       if (route?.origin !== undefined && (typeof route.origin !== 'string' || !/^https?:\/\/[^/]+$/.test(route.origin.replace(/\*/g, 'x')))) errors.push(`mock.routes[${i}].origin 需要是 http(s)://主机[:端口]（可含 *），不含路径。`);
       if (route && typeof route === 'object' && (route.bodyFile === undefined || (typeof route.bodyFile === 'string' && inside(dir, path.resolve(dir, route.bodyFile))))) validateShape(route, i, dir, errors);
       if (route?.query !== undefined && (!route.query || typeof route.query !== 'object' || Array.isArray(route.query) || Object.values(route.query).some((v) => typeof v !== 'string' && typeof v !== 'number'))) errors.push(`mock.routes[${i}].query 需要是 { 参数名: 值 } 对象。`);
@@ -193,7 +196,7 @@ function mockRoutes(fixture) {
     else if (route.bodyFile) body = fs.readFileSync(path.resolve(fixture.dir, route.bodyFile));
     else if (route.body !== undefined) body = String(route.body);
     const query = route.query ? Object.fromEntries(Object.entries(route.query).map(([k, v]) => [k, String(v)])) : null;
-    return { path: route.path, matcher: globToRegex(route.path), origin: route.origin ? globToRegex(route.origin) : null, originPattern: route.origin || null, method: route.method ? String(route.method).toUpperCase() : null, query, status: route.status || 200, contentType: contentType || 'text/plain; charset=utf-8', body };
+    return { path: route.path, matcher: globToRegex(route.path), origin: route.origin ? globToRegex(route.origin) : null, originPattern: route.origin || null, delayMs: route.delayMs || 0, method: route.method ? String(route.method).toUpperCase() : null, query, status: route.status || 200, contentType: contentType || 'text/plain; charset=utf-8', body };
   });
 }
 

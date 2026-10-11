@@ -160,7 +160,7 @@ const snapshot = (file) => ({ bytes: fs.readFileSync(file, 'utf8'), mtime: fs.st
       const plan = await expectExit(root, ['update', '--plan'], 0, env);
       assert.strictEqual(plan.confidence, 'conservative');
       assert.deepStrictEqual(plan.targets.map((t) => t.target), ['page:chat', 'page:home', 'task:edit-profile']);
-      assert.ok(plan.baselines.some((b) => b.broadImpact.includes('global-changed:package.json')));
+      assert.ok(plan.baselines.some((b) => b.broadImpact.some((item) => item.startsWith('global-changed:package.json#dependencies'))), JSON.stringify(plan.baselines.map((b) => b.broadImpact)));
       fx.git(root, ['checkout', '--', 'package.json']);
     });
 
@@ -170,7 +170,10 @@ const snapshot = (file) => ({ bytes: fs.readFileSync(file, 'utf8'), mtime: fs.st
       const live = await expectExit(root, ['verify', 'task:edit-profile', '--live'], 4, env);
       assert.strictEqual(live.reports[0].result, 'failed');
       assert.ok(live.reports[0].failures.some((f) => f.stepId === 'open-editor'));
-      assert.deepStrictEqual((await expectExit(root, ['update', '--plan'], 0, env)).targets, []);
+      // 没有源码影响，但在线验证的失败回流到更新计划（B5-11）：只列出这份任务手册，原因可定位
+      const updatePlan = await expectExit(root, ['update', '--plan'], 0, env);
+      assert.deepStrictEqual(updatePlan.targets.map((t) => t.target), ['task:edit-profile']);
+      assert.ok(updatePlan.targets[0].reasonPaths.some((p) => /^live-drift:/.test(p[1])), JSON.stringify(updatePlan.targets[0].reasonPaths));
       await expectExit(root, ['verify', 'task:edit-profile'], 0, env);
       server.reset();
     });

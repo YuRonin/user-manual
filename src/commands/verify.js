@@ -60,6 +60,15 @@ function resolveTargets(root, config, raw, all) {
     }).filter(Boolean);
   }
   const text = String(raw);
+  // scenario:<id>：在线验证页面的 Scenario 变体（B5-06）；主体取自 Scenario 的 entry.pageId
+  const scenarioTarget = /^scenario:(.+)$/.exec(text);
+  if (scenarioTarget) {
+    const file = path.join(state, 'scenarios', `${scenarioTarget[1]}.yaml`);
+    let parsed = null;
+    try { parsed = require('js-yaml').load(fs.readFileSync(file, 'utf8')); } catch (_) { parsed = null; }
+    if (parsed?.entry?.pageId && !parsed.userTaskId) return [{ type: 'page', id: parsed.entry.pageId, scenarioId: scenarioTarget[1] }];
+    return [{ type: 'scenario', id: scenarioTarget[1] }];
+  }
   const prefixed = /^(page|task):(.+)$/.exec(text);
   if (prefixed) return [{ type: prefixed[1], id: prefixed[2] }];
   const manual = /^manual:(page|task)-(.+)$/.exec(text);

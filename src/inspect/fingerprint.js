@@ -15,7 +15,8 @@ const { sha256Hex } = require('../util/hash');
 const { revision } = require('../model/revision');
 
 // 解析策略版本：import-graph / framework-dependencies 的规则变化时递增，旧指纹随之失效。
-const PARSER_VERSION = 'regex-import-graph-2';
+// 3：package.json / package-lock.json 只按运行相关内容计入指纹（B5-09）
+const PARSER_VERSION = 'regex-import-graph-3';
 
 // 影响所有页面的全局文件：变化时每个页面的指纹都会变（broad impact）。
 const GLOBAL_FILES = [
@@ -41,12 +42,28 @@ function hashFile(projectRoot, relative) {
   }
 }
 
+/**
+ * 全局文件的指纹（B5-09）：package.json 只取影响运行的字段，package-lock.json 只取运行关键依赖的解析版本；
+ * 只改 scripts、描述或无关依赖时指纹不变，不会让所有页面重新采集。其余全局文件按全文 hash。
+ */
 function globalFileHashes(projectRoot) {
   const out = {};
   for (const file of GLOBAL_FILES) {
-    if (fs.existsSync(path.join(projectRoot, file))) out[file] = hashFile(projectRoot, file);
+    if (fs.existsSync(path.join(projectRoot, file))) out[file] = contentHash(projectRoot, file);
   }
   return out;
+}
+
+/** 与源码图登记一致的文件 hash：全局的 package.json / package-lock.json 按运行相关内容，其余按全文。 */
+function contentHash(projectRoot, file) {
+  if (file !== 'package.json' && file !== 'package-lock.json') return hashFile(projectRoot, file);
+  const full = path.join(projectRoot, file);
+  if (!fs.existsSync(full)) return 'missing';
+  let json = null;
+  try { json = JSON.parse(fs.readFileSync(full, 'utf8')); } catch (_) { return hashFile(projectRoot, file); }
+  const { PACKAGE_RUNTIME_FIELDS, RUNTIME_PACKAGES } = require('../update/global-files');
+  if (file === 'package.json') return revision(Object.fromEntries(PACKAGE_RUNTIME_FIELDS.map((key) => [key, json[key] ?? null])));
+  return revision(Object.fromEntries(RUNTIME_PACKAGES.map((name) => [name, json.packages?.[`node_modules/${name}`]?.version ?? json.dependencies?.[name]?.version ?? null])));
 }
 
 /** 列出项目文件（跳过依赖包与产物目录），一次 inspect 只遍历一次。 */
@@ -224,6 +241,6 @@ function sourceHashOf(page) {
 
 module.exports = {
   sourceHashOf,
-  PARSER_VERSION, GLOBAL_FILES, hashFile, globalFileHashes, createFileLister, globToRegex, expandSourcePatterns, pageFingerprint,
+  PARSER_VERSION, GLOBAL_FILES, hashFile, contentHash, globalFileHashes, createFileLister, globToRegex, expandSourcePatterns, pageFingerprint,
   applyFingerprints, changeReasons, impactReport,
 };

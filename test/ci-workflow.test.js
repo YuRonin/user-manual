@@ -92,6 +92,9 @@ test('测试分组：启动浏览器 / 测试服务器的文件都在 browser �
     if (usesBrowser) assert.strictEqual(groupOf(file), 'browser', `${file} 启动浏览器，应在 browser 组`);
   }
   for (const file of BROWSER) assert.ok(!FILES.includes(file) || fs.existsSync(path.join(__dirname, file)));
+  // e2e / golden 是 browser 组的子集（B6-05）：CI 跑 browser 组即覆盖它们
+  const { E2E, GOLDEN } = require('./run');
+  for (const file of [...E2E, ...GOLDEN]) assert.ok(FILES.includes(file) && BROWSER.has(file), `${file} 需要在 FILES 且属于 browser 组`);
 });
 
 process.stdout.write(`\n${passed} passed, ${failures.length} failed\n`);

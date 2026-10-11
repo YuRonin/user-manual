@@ -13,7 +13,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { derivePublished } = require('./capture-safe');
-const { createCaptureStore } = require('./store');
+const { createCaptureStore, publishedEntries } = require('./store');
 const { verifyCaptureRecord } = require('./integrity');
 const { RuntimeError } = require('../runtime/errors');
 const { annotationArtifacts } = require('../annotations/proof');
@@ -68,9 +68,7 @@ async function rederiveCaptures({ projectRoot, config, captureIds, runId = null 
         { kind: 'sanitized', file: handle.file('sanitized.png'), dir: oldSanitized ? dirOf(oldSanitized.path) : `${config.artifacts.stateDir}/artifacts/sanitized`, prefix: oldSanitized ? prefixOf(oldSanitized.path) : prefixOf(raw.path) },
       ];
       if (captured.inventory) artifacts.push({ kind: 'annotations', file: handle.file('annotations.json'), dir: `${config.artifacts.stateDir}/artifacts/annotations`, prefix: prefixOf(raw.path) });
-      if (safe.published) {
-        artifacts.push({ kind: 'published', file: handle.file('published.png'), dir: config.artifacts.annotatedDir, prefix: oldPublished ? prefixOf(oldPublished.path) : prefixOf(raw.path) });
-      }
+      artifacts.push(...publishedEntries(safe, { file: handle.file('published.png'), dir: config.artifacts.annotatedDir, prefix: oldPublished ? prefixOf(oldPublished.path).replace(/--part-\d+$/, '') : prefixOf(raw.path) }));
       const { id: _id, schemaVersion: _v, artifacts: _a, ...rest } = old;
       const record = store.commit(handle, {
         artifacts,
@@ -89,6 +87,7 @@ async function rederiveCaptures({ projectRoot, config, captureIds, runId = null 
             derivedFromRawHash: safe.derived.rawHash,
             geometryHash: safe.derived.geometryHash,
             rendererVersion: safe.derived.rendererVersion,
+            themeRevision: safe.derived.themeRevision,
           },
         },
       });

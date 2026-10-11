@@ -27,7 +27,7 @@ const { validateCopy, checkPolishedMarkdown, formatFindings } = require('./markd
 const { writeText, displayPath } = require('../util/fsx');
 const { toMarkdownHref } = require('../publication/paths');
 const { validateArtifact, validatePublication, validateCaptureCoverage, formatIssues } = require('../publication/validate');
-const { createCaptureStore } = require('../evidence/store');
+const { createCaptureStore, publishedParts } = require('../evidence/store');
 const { verifyCaptureRecord, describeProblems } = require('../evidence/integrity');
 const { RuntimeError } = require('../runtime/errors');
 const { reconcileDocument } = require('./manual-store');
@@ -35,6 +35,7 @@ const { checkedSections } = require('../model/links');
 const { pageInventory } = require('../annotations/coverage');
 const { qualityGate, qualitySummary } = require('./quality-summary');
 const { subjectKey, recaptureBlocked } = require('../evidence/demo-gate-log');
+const { definitionViews } = require('../update/model-changes');
 
 function failure(code, errors, extra = {}) {
   const list = Array.isArray(errors) ? errors : [errors];
@@ -68,7 +69,8 @@ function publishedFromRecord({ projectRoot, stateDirAbs, captureId, sourceRevisi
     return { ok: false, errors: [`${error.code || 'invalid-capture-record'}: ${error.message}`] };
   }
   if (!record) return { ok: false, errors: [`capture-record-missing: 页面引用的 Capture ${captureId} 不存在。`] };
-  const artifact = (record.artifacts || []).find((a) => a.kind === 'published');
+  const parts = publishedParts(record);
+  const artifact = parts[0];
   if (!artifact) return { ok: false, errors: [record.annotationCoverage && !record.annotationCoverage.ok
     ? `annotation-coverage-failed: ${record.annotationCoverage.failures.map((item) => `${item.feature_id}:${item.reason}`).join('、')}`
     : `unsafe-page-artifact: Capture ${captureId} 没有通过隐私检测的发布图。`] };
@@ -78,7 +80,9 @@ function publishedFromRecord({ projectRoot, stateDirAbs, captureId, sourceRevisi
   }
   const integrity = verifyCaptureRecord(projectRoot, record, { kinds: ['published'] });
   if (!integrity.ok) return { ok: false, errors: describeProblems(integrity.problems) };
-  return { ok: true, artifactPath: artifact.path, sha256: artifact.sha256, privacy: record.privacy, captureId: record.id, observedAt: record.observedAt || null, scenarioId: record.scenarioId || null };
+  return { ok: true, artifactPath: artifact.path, sha256: artifact.sha256, privacy: record.privacy, captureId: record.id, observedAt: record.observedAt || null, scenarioId: record.scenarioId || null,
+    // 拆图（B4-02）：第 2 张起的发布图
+    extraParts: parts.slice(1).map((a) => ({ artifactPath: a.path, sha256: a.sha256, part: a.part })) };
 }
 
 /**
@@ -115,6 +119,7 @@ function draftPage({ projectRoot, config, pageId, noScreenshot = false }) {
   const finalPath = path.join(projectRoot, config.docs.outputDir, `${page.id}.md`);
   // 手册只能引用经过发布门槛的页面发布图（page.browser.published）；原图不能直接进文档。
   let image = null;
+  let images = [];
   if (!noScreenshot) {
     const published = page.browser?.published;
     if (!published) {
@@ -137,6 +142,7 @@ function draftPage({ projectRoot, config, pageId, noScreenshot = false }) {
       sha256: source.sha256,
       privacy: source.privacy,
       ...(source.captureId ? { captureId: source.captureId } : {}),
+      ...(source.extraParts?.length ? { part: 1 } : {}),
     };
     // 这张图之后页面的重新采集被 Demo 门禁阻断：手册仍在用旧图，必须提示
     const demoRecapture = source.captureId ? recaptureBlocked(stateDirAbs, subjectKey(['page', page.id, source.scenarioId || `page-${page.id}`]), source.observedAt) : null;
@@ -145,6 +151,15 @@ function draftPage({ projectRoot, config, pageId, noScreenshot = false }) {
     const issues = validateArtifact(image, { projectRoot, config, stage: 'draft', warnings: draftWarnings });
     for (const warning of formatIssues(draftWarnings)) process.stderr.write(`[manual gate] ${warning}\n`);
     if (issues.length > 0) throw failure(issues[0].code || 'publication-gate', formatIssues(issues));
+    images = [image];
+    for (const extra of source.extraParts || []) {
+      const file = path.resolve(projectRoot, extra.artifactPath);
+      if (!fs.existsSync(file)) throw failure('artifact-missing', [`页面拆分图不存在: ${extra.artifactPath}`, `重新截一张: \`manual capture ${page.id}\``]);
+      const part = { artifactPath: extra.artifactPath, markdownHref: toMarkdownHref({ manualFile: finalPath, artifactFile: file }), sha256: extra.sha256, privacy: source.privacy, captureId: source.captureId, part: extra.part };
+      const partIssues = validateArtifact(part, { projectRoot, config, stage: 'draft', warnings: [] });
+      if (partIssues.length > 0) throw failure(partIssues[0].code || 'publication-gate', formatIssues(partIssues));
+      images.push(part);
+    }
   }
 
   let built;
@@ -155,6 +170,7 @@ function draftPage({ projectRoot, config, pageId, noScreenshot = false }) {
       includeScreenshot: !noScreenshot,
       indexContext,
       image,
+      images,
       language: config.docs.language,
       observedTerms: pageObservedTerms(projectRoot, stateDirAbs, page.id, image?.captureId || page.browser?.latestCaptureId),
     });
@@ -165,7 +181,7 @@ function draftPage({ projectRoot, config, pageId, noScreenshot = false }) {
   const { draftPath, factsFile } = draftPathsFor(stateDirAbs, page.id);
   writeText(draftPath, markdown);
   // 发布事实与草稿一起落盘：finalize 用它核对图片 hash 与隐私记录，而不是信任润色稿。
-  writeText(factsFile, JSON.stringify({ pageId: page.id, images: image ? [image] : [], factPack: pack, factsHash: pack.factsHash }, null, 2) + '\n');
+  writeText(factsFile, JSON.stringify({ pageId: page.id, images, factPack: pack, factsHash: pack.factsHash }, null, 2) + '\n');
   return { page, draftPath, factsFile, finalPath, markdown, facts, pack, image, indexContext };
 }
 
@@ -186,7 +202,8 @@ function pageObservedTerms(projectRoot, stateDirAbs, pageId, captureId) {
 /** 草稿之后页面定义、源码指纹、截图记录或模板变了：旧草稿不能再发布。 */
 function pageDraftStale(page, pack, language) {
   if (!pack) return null;
-  const current = buildPageFactPack({ page, image: pack.artifacts[0] ? { ...pack.artifacts[0], captureId: page.browser?.latestCaptureId ?? pack.artifacts[0].captureId ?? null } : null, language, headerComments: pack.headerComments });
+  const latest = page.browser?.latestCaptureId;
+  const current = buildPageFactPack({ page, images: pack.artifacts.map(({ id: _id, ...artifact }) => ({ ...artifact, captureId: latest ?? artifact.captureId ?? null })), language, headerComments: pack.headerComments });
   const changed = ['inputRevision', 'templateRevision', 'language'].filter((key) => current[key] !== pack[key]);
   return changed.length ? `draft-stale: 草稿之后事实发生变化（${changed.join(', ')}），重新运行 \`manual generate ${page.id}\` 生成草稿。` : null;
 }
@@ -275,8 +292,10 @@ function publishPageFinal({ projectRoot, config, prepared, force = false, runId 
       documentFile: finalPath,
       markdown: body,
       facts: draftFacts,
-      captureIds: (draftFacts.images || []).map((image) => image.captureId).filter(Boolean),
+      // 拆图时多张图同属一条 Capture，只记一次
+      captureIds: [...new Set((draftFacts.images || []).map((image) => image.captureId).filter(Boolean))],
       definitionRevisions: { [page.id]: definitionRevision('page', page) },
+      definitionViews: { [page.id]: definitionViews('page', page) },
       force,
       runId,
       hooks,

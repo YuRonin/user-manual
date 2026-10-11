@@ -19,10 +19,10 @@ const path = require('path');
 const { createProjectStore } = require('../store/project');
 const { normalizePage, isActivePage } = require('../inspect/model');
 const { derivePageScenario, deriveTaskScenario, resolveEntryLocation } = require('../scenarios/model');
-const { resolveScenario } = require('../scenarios/store');
+const { resolveScenario, readScenario } = require('../scenarios/store');
 const { buildCapturePlan, implicitDefaultState } = require('../tasks/capture-plan');
 const { joinUrl } = require('../evidence/capture-page');
-const { validateNavigation, assertWithin, DEFAULT_ASSERTION_TIMEOUT_MS } = require('../evidence/validate-page');
+const { validateNavigation, assertWithin, runSetup, DEFAULT_ASSERTION_TIMEOUT_MS } = require('../evidence/validate-page');
 const { computeClaims } = require('../evidence/claims');
 const { prepareAuth, classifyAuthFailure } = require('../auth/runtime');
 const { definitionRevision } = require('../model/revision');
@@ -30,10 +30,12 @@ const releases = require('../publication/release-store');
 const { sectionsOf } = require('../generate/manual-model');
 const { RuntimeError } = require('../runtime/errors');
 const { classify, overall } = require('./report');
-const { createCaptureStore } = require('../evidence/store');
+const { createCaptureStore, publishedParts } = require('../evidence/store');
 const { captureStable, derivePublished } = require('../evidence/capture-safe');
 const { mergeDemo } = require('../privacy/demo');
 const { RENDERER_VERSION } = require('../evidence/image-pipeline');
+const { toCanvasRect } = require('../browser/playwright');
+const { revisionOf } = require('../util/hash');
 const { policyRevision } = require('../publication/validate');
 const { compareSemantic } = require('./semantic-diff');
 const { environmentCompatible, applicableMasks, compareImages } = require('./visual-diff');
@@ -43,6 +45,30 @@ const DRIFT_ORDER = ['behavior-breaking', 'content-changed', 'visual-only', 'env
 
 function scaleRect(rect, dpr) {
   return { x: Math.floor(rect.x * dpr), y: Math.floor(rect.y * dpr), width: Math.ceil(rect.width * dpr), height: Math.ceil(rect.height * dpr) };
+}
+
+/** 基线的派生输入（冻结的标注计划与清单）；缺失或不可读返回 null。 */
+function readSidecar(projectRoot, record) {
+  const artifact = (record.artifacts || []).find((a) => a.kind === 'derivation');
+  if (!artifact) return null;
+  try { return JSON.parse(fs.readFileSync(path.join(projectRoot, artifact.path), 'utf8')); } catch (_) { return null; }
+}
+
+/** 按冻结计划在当前页面重新定位标注目标（坐标换算与采集时相同）；找不到的目标记原因，由覆盖率判定。 */
+async function frozenTargets(provider, plan, fullPage) {
+  const targets = [];
+  for (const [i, item] of plan.entries()) {
+    const label = item.label || String(i + 1);
+    if (item.rect) { targets.push({ feature_id: item.feature_id, label, rect: item.rect }); continue; }
+    if (!item.target) { targets.push({ feature_id: item.feature_id, label, reason: 'target-not-declared' }); continue; }
+    try {
+      const found = await provider.performAction({ type: 'inspect', target: item.target });
+      if (!found?.rect) { targets.push({ feature_id: item.feature_id, label, reason: 'target-not-located' }); continue; }
+      const geometry = fullPage ? await provider.collectGeometry({ fullPage: true }) : null;
+      targets.push({ feature_id: item.feature_id, label, rect: toCanvasRect(found.rect, { fullPage, geometry, pinned: found.pinned || null }) });
+    } catch (error) { targets.push({ feature_id: item.feature_id, label, reason: error.code || 'target-not-located' }); }
+  }
+  return targets;
 }
 
 /**
@@ -57,14 +83,25 @@ async function pageDrift({ provider, projectRoot, config, stateDirAbs, release, 
   const current = provider.semanticSnapshot ? await provider.semanticSnapshot() : null;
   out.semantic = compareSemantic(baseline?.semantic || null, current);
   if (!baseline) { out.visual.reasons.push('baseline-capture-missing'); return out; }
-  const published = (baseline.artifacts || []).find((a) => a.kind === 'published');
-  if (!published || !fs.existsSync(path.join(projectRoot, published.path))) { out.visual.reasons.push('baseline-image-missing'); return out; }
+  // 公平比较（B4-06）：优先用基线冻结的标注计划在当前页面重新定位、重新绘制，带标注图对带标注图；
+  // 没有冻结计划时退回到未标注的 sanitized 对 sanitized。绝不拿"历史带标注图"去比"新的无标注图"。
+  const baselineParts = publishedParts(baseline);
+  const sidecar = readSidecar(projectRoot, baseline);
+  const sanitizedArtifact = (baseline.artifacts || []).find((a) => a.kind === 'sanitized');
+  const exists = (artifact) => artifact && fs.existsSync(path.join(projectRoot, artifact.path));
+  const layer = sidecar?.plan?.length && baselineParts.length && baselineParts.every(exists) ? 'annotated'
+    : exists(sanitizedArtifact) ? 'sanitized'
+      : baselineParts.length && baselineParts.every(exists) && !(sidecar?.plan?.length) ? 'annotated' : null;
+  if (!layer) { out.visual.reasons.push('baseline-image-missing'); return out; }
   const env = provider.environmentInfo ? provider.environmentInfo({ fullPage: !!baseline.spec?.fullPage }) : null;
   const compat = environmentCompatible(baseline.environment || null, env);
   if (!compat.ok) { out.visual = { status: 'environment-incompatible', reasons: compat.mismatches }; return out; }
   const versions = [];
   if (baseline.provenance?.rendererVersion && baseline.provenance.rendererVersion !== RENDERER_VERSION) versions.push(`rendererVersion: ${baseline.provenance.rendererVersion} → ${RENDERER_VERSION}`);
   if (baseline.privacy?.policyRevision && baseline.privacy.policyRevision !== policyRevision(config)) versions.push('privacy-policy-changed');
+  // 主题变化只影响标注层：比较带标注图时视为不可比（重新派生即可，不是页面漂移）
+  const theme = config.annotation.themes[config.annotation.activeTheme];
+  if (layer === 'annotated' && baseline.provenance?.themeRevision && baseline.provenance.themeRevision !== revisionOf({ theme })) versions.push('annotation-theme-changed');
   if (versions.length) { out.visual = { status: 'baseline-incompatible', reasons: versions }; return out; }
 
   const work = path.join(stateDirAbs, 'verifications', `.work-${reportId}`);
@@ -72,15 +109,19 @@ async function pageDrift({ provider, projectRoot, config, stateDirAbs, release, 
   try {
     const format = config.artifacts.format || 'png';
     const rawPath = path.join(work, `raw.${format}`);
-    const captured = await captureStable(provider, { rawPath, fullPage: !!baseline.spec?.fullPage, format });
+    const plan = layer === 'annotated' ? (sidecar?.plan || []) : [];
+    const captured = await captureStable(provider, { rawPath, fullPage: !!baseline.spec?.fullPage, format,
+      resolveTargets: async () => frozenTargets(provider, plan, !!baseline.spec?.fullPage) });
+    if (layer === 'annotated' && sidecar?.inventory) { captured.inventory = sidecar.inventory; captured.plan = plan; }
     const safe = await derivePublished({
       captured, rawPath,
       sanitizedPath: path.join(work, 'sanitized.png'),
       publishedPath: path.join(work, 'published.png'),
-      theme: config.annotation.themes[config.annotation.activeTheme],
+      theme,
       redactionRules: config.privacy || {},
     });
-    if (!safe.published) { out.visual = { status: 'not-compared', reasons: ['privacy-not-passed'] }; return out; }
+    if (layer === 'annotated' && !safe.published) { out.visual = { status: 'not-compared', reasons: [safe.privacy.status !== 'passed' ? 'privacy-not-passed' : 'annotation-not-rendered'] }; return out; }
+    if (layer === 'sanitized' && safe.privacy.status !== 'passed') { out.visual = { status: 'not-compared', reasons: ['privacy-not-passed'] }; return out; }
     const dpr = env.dpr || 1;
     const regions = config.verify?.visual?.dynamicRegions || [];
     const masks = [];
@@ -95,17 +136,30 @@ async function pageDrift({ provider, projectRoot, config, stateDirAbs, release, 
     }
     const { used, refused } = applicableMasks(masks, critical);
     for (const r of refused) out.warnings.push(`critical-region-not-masked: 动态区域 ${r.id} 与断言目标 ${r.overlaps} 重叠，关键区域不能被忽略。`);
-    const diffPath = path.join(stateDirAbs, 'verifications', `${reportId}-visual-diff.png`);
-    const compared = await compareImages({
-      baseline: path.join(projectRoot, published.path),
-      current: path.join(work, 'published.png'),
-      masks: used.map((m) => scaleRect(m.rect, dpr)),
-      tolerance: config.verify?.visual?.tolerance,
-      threshold: config.verify?.visual?.threshold,
-      diffPath,
-    });
+    // 待比较的图：sanitized 一张；带标注图按 part 逐张（拆图张数不同即视为变化）
+    const pairs = layer === 'sanitized'
+      ? [{ baseline: path.join(projectRoot, sanitizedArtifact.path), current: path.join(work, 'sanitized.png') }]
+      : baselineParts.map((artifact, index) => ({ baseline: path.join(projectRoot, artifact.path), current: path.join(work, index === 0 ? 'published.png' : `published.part-${index + 1}.png`) }));
+    const currentParts = layer === 'annotated' ? (safe.parts ? safe.parts.length : 1) : 1;
+    if (layer === 'annotated' && currentParts !== baselineParts.length) {
+      out.visual = { status: 'changed', reasons: [`annotation-parts: ${baselineParts.length} → ${currentParts}`], layer, baselineCaptureId: baseline.id };
+      return out;
+    }
+    let compared = null;
+    for (const [index, pair] of pairs.entries()) {
+      const result = await compareImages({
+        ...pair,
+        masks: used.map((m) => scaleRect(m.rect, dpr)),
+        tolerance: config.verify?.visual?.tolerance,
+        threshold: config.verify?.visual?.threshold,
+        diffPath: path.join(stateDirAbs, 'verifications', `${reportId}-visual-diff${index ? `-part-${index + 1}` : ''}.png`),
+      });
+      // 多张时取最先出现变化的一张；全部相同则为 same
+      if (!compared || (compared.status === 'same' && result.status !== 'same')) compared = result;
+    }
     out.visual = {
       ...compared,
+      layer,
       diffPath: compared.diffPath ? path.relative(projectRoot, compared.diffPath).replace(/\\/g, '/') : null,
       masks: used.map((m) => m.id),
       refusedMasks: refused,
@@ -217,20 +271,33 @@ async function verifyLive({ projectRoot, config, target, session, timeoutMs = DE
   let expected = {};
   let identityAssertions = [];
   let plan = null;
+  let setup = [];
+  let variantAssertions = [];
 
   if (target.type === 'page') {
     const page = normalizePage(entity);
     if (!isActivePage(page)) throw new RuntimeError('page-not-active', `页面 ${page.id} 当前是 ${page.lifecycle}：手册需要下线或更新，不能在线验证。`);
-    const resolved = resolveScenario(stateDirAbs, derivePageScenario(page, config), { stepIds: [] });
+    // verify scenario:<id>：在线验证 Scenario 变体（B5-06），而不是永远只看默认状态
+    const resolved = target.scenarioId
+      ? readScenario(stateDirAbs, target.scenarioId, { stepIds: [] })
+      : resolveScenario(stateDirAbs, derivePageScenario(page, config), { stepIds: [] });
     if (!resolved.ok) throw new RuntimeError('invalid-scenario', resolved.errors.join('；'));
+    if (!resolved.scenario) throw new RuntimeError('unknown-target', `找不到 Scenario: ${target.scenarioId}`);
     scenario = resolved.scenario;
     // 与采集相同的入口解析：显式 Scenario 的 path / query 打开同一条具体内容
     const entry = scenario.entry?.path !== undefined || scenario.entry?.params ? scenario.entry : { ...scenario.entry, params: page.params || {} };
     const route = resolveEntryLocation(page.route, entry);
     if (!route.ok) throw new RuntimeError('invalid-arguments', `页面 ${page.id} 的入口无法解析：${[...route.missing, ...route.invalid].join(', ')}`);
     url = joinUrl(config.project.baseUrl, route.route) + route.search;
-    expected = { statuses: scenario.expected?.httpStatuses, state: scenario.expected?.state };
+    // 声明的合法跳转同样适用于在线验证（B5-06a）：否则合法落到登录页的入口永远只能是 inconclusive
+    expected = { statuses: scenario.expected?.httpStatuses, state: scenario.expected?.state,
+      ...(scenario.expected?.redirects?.length ? { allowRedirects: scenario.expected.redirects } : {}) };
     identityAssertions = (page.states?.default?.assertions || implicitDefaultState(page).assertions || []).filter((a) => a.type !== 'url');
+    if (target.scenarioId) {
+      // 变体：setup 之后用检查点断言确认状态
+      setup = scenario.setup || [];
+      variantAssertions = (scenario.checkpoints?.[0]?.assertions || []).filter((a) => a.type !== 'url');
+    }
   } else {
     const task = entity;
     const resolved = resolveScenario(stateDirAbs, deriveTaskScenario(task, model.pages, config), { stepIds: (task.steps || []).map((s) => s.id) });
@@ -251,10 +318,16 @@ async function verifyLive({ projectRoot, config, target, session, timeoutMs = DE
     const navigation = await openEntry(provider, url, expected, checks, auth);
     if (!navigation) return { stepRecords: [] };
     checks.push(...await collectAssertions(provider, identityAssertions, { scope: 'page-identity', idPrefix: `${target.id}:default`, timeoutMs }));
+    if (setup.length || variantAssertions.length) {
+      try { await runSetup(provider, setup, { timeoutMs }); checks.push(check(`scenario-setup:${target.scenarioId}`, 'scenario-state', 'passed')); }
+      catch (error) { checks.push(failedCheck(`scenario-setup:${target.scenarioId}`, 'scenario-state', error)); }
+      checks.push(...await collectAssertions(provider, variantAssertions, { scope: 'scenario-state', idPrefix: `${target.scenarioId}:checkpoint`, timeoutMs }));
+    }
     const identityOk = !checks.some((c) => c.outcome !== 'passed');
     const stepRecords = [];
     if (!plan) {
-      if (driftEnabled && identityOk) {
+      // 漂移以发布时的默认截图为基线；变体状态与它不可比，只做行为回放
+      if (driftEnabled && identityOk && !target.scenarioId) {
         try {
           drift = await pageDrift({ provider, projectRoot, config, stateDirAbs, release, identityAssertions, reportId });
         } catch (error) {
@@ -364,7 +437,7 @@ async function verifyLive({ projectRoot, config, target, session, timeoutMs = DE
     kind: 'live',
     manualId,
     releaseId: release.id,
-    target: `${target.type}:${target.id}`,
+    target: `${target.type}:${target.id}${target.scenarioId ? `@${target.scenarioId}` : ""}`,
     startedAt,
     finishedAt: new Date().toISOString(),
     onlineChecked: true,

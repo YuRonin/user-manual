@@ -82,8 +82,10 @@ function classifyAuthFailure(error, auth) {
   return classified;
 }
 
-function assertAuthenticated(openResult, auth) {
+function assertAuthenticated(openResult, auth, { allowRedirects } = {}) {
   const finalUrl = String(openResult?.finalUrl || '');
+  // Scenario 声明了会合法落到这个地址（如 /password-reset → /login?view=reset）：不是登录墙（B5-06a）
+  if (require('../evidence/validate-page').declaredRedirect(allowRedirects, finalUrl)) return;
   if (LOGIN_PATH_RE.test(finalUrl)) {
     const base = new CaptureError(REASON.LOGIN_REQUIRED, '访问后被重定向到了登录页。', { finalUrl });
     throw classifyAuthFailure(base, auth);
@@ -163,7 +165,7 @@ async function refreshAuth(provider, auth, { onlyIfChanged = false } = {}) {
  */
 function authRuntimeFor(auth, { refresh = true } = {}) {
   return {
-    assertAuthenticated: (openResult) => assertAuthenticated(openResult, auth),
+    assertAuthenticated: (openResult, options) => assertAuthenticated(openResult, auth, options),
     classify: (error) => classifyAuthFailure(error, auth),
     ...(refresh ? { refresh: (provider) => refreshAuth(provider, auth) } : {}),
   };

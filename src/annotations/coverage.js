@@ -100,6 +100,26 @@ function buildPlan({ inventory, page, task = null, step = null, annotations = nu
   return out;
 }
 
+/**
+ * 失败原因 → 修复类别（B5-13）。定向修复按类别决定动作：
+ *   draw         只需重新派生（主题 / 布局）    locate / visibility  重新定位或局部补采
+ *   state        重新回放 Scenario / 步骤       plan / inventory / description  改定义，进入人工审核
+ *   privacy      目标被隐私遮罩盖住：调整遮罩规则或演示数据，不能靠重试
+ */
+const FAILURE_CATEGORY = {
+  'missing-from-inventory': 'inventory', 'missing-from-plan': 'plan', 'missing-from-task-plan': 'plan', 'target-not-declared': 'plan', 'description-missing': 'description',
+  'target-not-located': 'locate', 'target-not-found': 'locate', 'annotation-target-missing': 'locate', 'target-ambiguous': 'locate',
+  'target-not-visible': 'visibility', 'target-transparent': 'visibility', 'target-occluded': 'visibility', 'outside-image': 'visibility', 'partially-clipped': 'visibility',
+  'annotation-hover-conflict': 'state', 'scenario-state-lost': 'state',
+  'marker-outside-image': 'draw', 'marker-redacted': 'draw', 'annotation-layout-crowded': 'draw', 'marker-limit-exceeded': 'draw',
+  'not-drawn': 'locate',
+  'target-redacted': 'privacy',
+};
+
+function categoryOf(reason) {
+  return FAILURE_CATEGORY[reason] || 'locate';
+}
+
 function verifyCoverage({ inventory = [], plan = [], rendered = [], discovered = inventory, candidates = [] }) {
   const failures = [];
   const planned = new Map(plan.map((item) => [item.feature_id, item]));
@@ -119,6 +139,7 @@ function verifyCoverage({ inventory = [], plan = [], rendered = [], discovered =
   }
   const passed = required.filter((item) => !failures.some((failure) => failure.feature_id === item.feature_id)).length;
   const pending = inventory.filter((item) => item.priority === 'undecided').map((item) => ({ feature_id: item.feature_id, label: item.label, reason: 'priority-undecided' }));
+  for (const failure of failures) failure.category = categoryOf(failure.reason);
   const ok = failures.length === 0;
   // 页面上观察到、清单里没有的可交互元素：不编造 Required，但未决时不能宣称"功能已全部覆盖"（B2-03）
   const unresolvedCandidates = candidates.map((item) => ({ candidate_id: item.candidate_id, label: item.label, role: item.role, source: item.source || 'dom-observed', reason: 'candidate-unresolved' }));
@@ -196,4 +217,4 @@ function stepInventory({ page, task, step }) {
   return buildInventory({ page: scoped, task: { ...task, steps: [step] } });
 }
 
-module.exports = { buildInventory, buildPlan, verifyCoverage, verifyExplanations, pageInventory, stepInventory, stepFeatures, domCandidates };
+module.exports = { buildInventory, buildPlan, verifyCoverage, verifyExplanations, pageInventory, stepInventory, stepFeatures, domCandidates, FAILURE_CATEGORY, categoryOf };

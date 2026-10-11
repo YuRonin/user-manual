@@ -25,6 +25,13 @@ const { isActivePage, ANALYSIS } = require('../inspect/model');
 const { authDisabled, identityRevision } = require('../auth/identity');
 const { policyRevision } = require('../publication/validate');
 const { RENDERER_VERSION } = require('../evidence/image-pipeline');
+const { repairDecision } = require('./repair');
+
+/** 缓存里的标注失败（"<captureId>:<featureId>:<reason>"）→ { feature_id, reason }；"没有发布图"只是结果，不单独计。 */
+function parseAnnotationFailures(list = []) {
+  return list.map((text) => String(text).split(':')).filter((parts) => parts.length >= 3)
+    .map((parts) => ({ feature_id: parts.slice(1, -1).join(':'), reason: parts[parts.length - 1] }));
+}
 const { TEMPLATE_VERSION } = require('../generate/render');
 const { DEFAULT_READY_OPTIONS } = require('../browser/provider');
 const { capabilitiesFor, missingCapabilities } = require('../browser/capabilities');
@@ -96,6 +103,7 @@ function scenarioDataRevision(stateDirAbs, scenario) {
 
 function scenarioIndex(stateDirAbs, model, config) {
   const out = [];
+  const invalid = [];
   for (const task of model.tasks) {
     const derived = deriveTaskScenario(task, model.pages, config);
     out.push({ id: derived.id, subject: { type: 'task', id: task.id }, derived, stepIds: (task.steps || []).map((s) => s.id) });
@@ -113,10 +121,11 @@ function scenarioIndex(stateDirAbs, model, config) {
       const id = file.slice(0, -'.yaml'.length);
       if (known.has(id)) continue;
       let parsed;
-      try { parsed = require('js-yaml').load(fs.readFileSync(require('path').join(dir, file), 'utf8')); } catch (_) { continue; }
+      // 损坏或指向不存在主体的 Scenario 不能静默跳过：记入 invalid，由规划结果报告（B5-07a）
+      try { parsed = require('js-yaml').load(fs.readFileSync(require('path').join(dir, file), 'utf8')); } catch (error) { invalid.push({ id, reason: `scenario-unreadable: ${error.message.split('\n')[0]}` }); continue; }
       const task = parsed?.userTaskId ? model.tasks.find((t) => t.id === parsed.userTaskId) : null;
       const page = !task && parsed?.entry?.pageId ? model.pages.find((p) => p.id === parsed.entry.pageId) : null;
-      if (!task && !page) continue;
+      if (!task && !page) { invalid.push({ id, reason: `scenario-subject-missing: ${parsed?.userTaskId ? `任务 ${parsed.userTaskId}` : `页面 ${parsed?.entry?.pageId || '(未声明)'}`} 不存在` }); continue; }
       out.push({
         id, variant: true,
         subject: task ? { type: 'task', id: task.id } : { type: 'page', id: page.id },
@@ -124,6 +133,7 @@ function scenarioIndex(stateDirAbs, model, config) {
       });
     }
   }
+  out.invalid = invalid;
   return out;
 }
 
@@ -222,7 +232,8 @@ function collectPlanningInputs({ projectRoot, config, base, targets, mode, cache
       });
       cache = found.hit
         ? { hit: true, reusedFrom: found.reusedFrom, observedAt: found.observedAt, stale: found.stale, uncertainty: found.uncertainty, imageInputs: found.entry.meta?.imageInputs || null, outputRefs: found.outputRefs }
-        : { hit: false, reason: found.reason || null, bypassed: found.bypassed || null, changedFields: found.changedFields || null };
+        : { hit: false, reason: found.reason || null, bypassed: found.bypassed || null, changedFields: found.changedFields || null,
+          ...(found.reason === 'annotation-incomplete' ? { annotationFailures: found.failures || [], repairAttempts: found.repairAttempts || 0, failedImageInputs: found.imageInputs, failedOutputRefs: found.outputRefs, failedObservedAt: found.observedAt } : {}) };
     }
     subjects[key] = {
       subject: { type: target.type, id: target.id, ...(variantEntry ? { scenarioId: variantEntry.id } : {}) },
@@ -239,6 +250,7 @@ function collectPlanningInputs({ projectRoot, config, base, targets, mode, cache
   }
   return {
     version: PLAN_VERSION,
+    invalidScenarios: scenarios.invalid || [],
     modelRevision: base.modelRevision,
     capturePipelineVersion: CAPTURE_PIPELINE_VERSION,
     projectId: config.project.id || null,
@@ -271,6 +283,7 @@ function plan(snapshot, policy) {
   const errors = [];
   const nodes = [];
   const summary = { actions: [], browserScenarios: 0, riskBoundaries: [], cache: [], waitingFor: [], warnings: [] };
+  for (const item of snapshot.invalidScenarios || []) summary.warnings.push(`scenario-invalid: .manual/scenarios/${item.id}.yaml 未参与规划（${item.reason}）`);
   const captureByKey = new Map();
   const multi = snapshot.targets.length > 1;
   const idOf = (kind, index) => (multi ? `${kind}-t${index + 1}` : kind);
@@ -334,8 +347,17 @@ function plan(snapshot, policy) {
     let derived = null;
     if (!captureId) {
       const cache = s.cache;
-      const reuse = cache?.hit ? { from: cache.reusedFrom, observedAt: cache.observedAt, stale: !!cache.stale, onlineChecked: false } : null;
-      const reason = cache?.hit
+      // 上次标注失败：按失败类别定向修复，而不是一律重拍（B5-15 ~ B5-17）
+      const repair = cache && !cache.hit && cache.reason === 'annotation-incomplete'
+        ? repairDecision({ failures: parseAnnotationFailures(cache.annotationFailures), attempts: cache.repairAttempts, executesWrites: !!s.executesWrites,
+          imageInputsChanged: !sameImageInputs(cache.failedImageInputs, snapshot.imageInputs) })
+        : null;
+      if (repair && ['review', 'unrepairable'].includes(repair.action)) { errors.push(repair.message); return; }
+      if (repair) summary.warnings.push(`${subjectKey(subject)}：${repair.message}`);
+      const repairReuse = repair?.action === 'derive' && cache.failedOutputRefs
+        ? { from: s.captureKey, observedAt: cache.failedObservedAt, stale: false, onlineChecked: false, repair: true } : null;
+      const reuse = cache?.hit ? { from: cache.reusedFrom, observedAt: cache.observedAt, stale: !!cache.stale, onlineChecked: false } : repairReuse;
+      const reason = repairReuse ? 'annotation-repair→derive' : repair ? `capture-required:annotation-incomplete→${repair.action}` : cache?.hit
         ? `cache-hit${cache.stale ? '-stale' : ''}`
         : (cache?.bypassed ? `cache-${cache.bypassed}` : `capture-required:${cache?.reason || 'no-cache'}${cache?.changedFields?.length ? `(${cache.changedFields.join(',')})` : ''}`);
       captureId = add({
@@ -357,13 +379,13 @@ function plan(snapshot, policy) {
         summary.actions.push(`采集 ${subjectKey(subject)}（Scenario ${s.scenario.id}）`);
       } else {
         summary.actions.push(`复用 ${subjectKey(subject)} 的已有证据（观察于 ${reuse.observedAt}）`);
-        // 隐私规则 / 主题 / 渲染器变化：raw 仍可用，只重新派生发布图。
-        if (!sameImageInputs(cache.imageInputs, snapshot.imageInputs)) {
+        // 隐私规则 / 主题 / 渲染器变化：raw 仍可用，只重新派生发布图；定向修复同样只重新派生。
+        if (reuse.repair || !sameImageInputs(cache.imageInputs, snapshot.imageInputs)) {
           derived = add({
             id: idOf('derive-image', index), kind: 'derive-image', dependsOn: [captureId],
             inputHash: revisionOf({ capture: s.captureKey, imageInputs: snapshot.imageInputs }),
             input: { subject, imageInputs: snapshot.imageInputs },
-            reason: 'image-inputs-changed→derive-required',
+            reason: reuse.repair ? 'annotation-repair→derive-required' : 'image-inputs-changed→derive-required',
           });
           summary.actions.push(`从已有原图重新派生 ${subjectKey(subject)} 的发布图`);
         }
@@ -474,4 +496,4 @@ function checkDag(nodes) {
   return { order: [...new Set(order)], errors };
 }
 
-module.exports = { PLAN_VERSION, collectPlanningInputs, plan, checkDag, captureKeyFields, imageInputsOf, subjectKey };
+module.exports = { PLAN_VERSION, collectPlanningInputs, plan, checkDag, captureKeyFields, imageInputsOf, subjectKey, parseAnnotationFailures };

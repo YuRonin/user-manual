@@ -42,6 +42,14 @@ const POLICIES = {
   'network-access-denied': FAIL,
   // 标注排版失败是确定性的：同一页面重拍结果不变
   'annotation-layout-failed': FAIL,
+  'annotation-hover-conflict': FAIL,
+  'annotation-split-failed': FAIL,
+  'geometry-scale-mismatch': FAIL,
+  // Scenario 状态：setup 失败是确定性的；截图后状态丢失多为指针 / 时序，允许有限重试；前置数据被消费需要人重新准备
+  'scenario-setup-failed': FAIL,
+  'scenario-state-lost': RETRY,
+  'precondition-consumed': INPUT,
+  'auth-identity-mismatch': FAIL,
   // 目标被浮层遮挡且有界等待后仍未消失：不重试（重试会从头重放步骤，可能重复保存）
   'target-obscured': FAIL,
   // 截图后定义变了：重试同一计划无意义，需要重新规划 / 重采

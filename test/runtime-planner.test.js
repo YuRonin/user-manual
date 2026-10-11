@@ -95,7 +95,7 @@ function treeDigest(dir) {
 }
 
 /** 伪造一次成功采集并写入缓存（用于命中测试）。 */
-function seedCaptureCache(root, subject, { imageInputs, annotation = { status: 'passed', failures: [] } } = {}) {
+function seedCaptureCache(root, subject, { imageInputs, annotation = { status: 'passed', failures: [] }, repairAttempts } = {}) {
   const { config, stateDirAbs } = context(root);
   const { snapshot } = planFor(root, [`${subject.type}:${subject.id}`], { cache: false });
   const s = snapshot.subjects[`${subject.type}:${subject.id}`];
@@ -112,7 +112,7 @@ function seedCaptureCache(root, subject, { imageInputs, annotation = { status: '
   createCacheStore({ stateDirAbs }).put({
     kind: 'capture', key: keyInfo.key, input: keyInfo.input, subject: `capture:${subject.type}:${subject.id}`,
     outputRefs: [{ kind: 'capture', ref: record.id }], observedAt: record.observedAt, validationScopes: ['page-identity'],
-    privacy: { status: 'passed' }, annotation, uncertainty: [], meta: { imageInputs: imageInputs || imageInputsOf(config) },
+    privacy: { status: 'passed' }, annotation, uncertainty: [], meta: { imageInputs: imageInputs || imageInputsOf(config), ...(repairAttempts !== undefined ? { repairAttempts } : {}) },
   });
   return record;
 }
@@ -193,11 +193,38 @@ try {
     assert.ok(!chat.tasks.some((t) => t.kind === 'analyze'));
   });
 
-  test('标注覆盖失败或未知的采集不作为缓存命中：capture-required:annotation-incomplete', () => {
+  test('标注覆盖失败或未知的采集不作为缓存命中：capture-required:annotation-incomplete（按类别定向修复）', () => {
     seedCaptureCache(root, { type: 'page', id: 'chat' }, { annotation: { status: 'failed', failures: ['x:upload:not-drawn'] } });
-    assert.strictEqual(planFor(root, ['page:chat']).plan.tasks.find((t) => t.id === 'capture').reason, 'capture-required:annotation-incomplete');
+    assert.strictEqual(planFor(root, ['page:chat']).plan.tasks.find((t) => t.id === 'capture').reason, 'capture-required:annotation-incomplete→relocate');
     seedCaptureCache(root, { type: 'page', id: 'chat' }, { annotation: null });
-    assert.strictEqual(planFor(root, ['page:chat']).plan.tasks.find((t) => t.id === 'capture').reason, 'capture-required:annotation-incomplete');
+    assert.strictEqual(planFor(root, ['page:chat']).plan.tasks.find((t) => t.id === 'capture').reason, 'capture-required:annotation-incomplete→relocate');
+  });
+
+  test('B5-15 定向修复：纯绘制失败 + 主题已变 → 沿用原图重新派生；主题没变 / 清单缺口 → 审核；用完预算 → annotation-unrepairable', () => {
+    const oldInputs = { privacyRevision: 'p', themeRevision: 'old-theme', rendererVersion: 'sharp-svg-2' };
+    seedCaptureCache(root, { type: 'page', id: 'chat' }, { annotation: { status: 'failed', failures: ['x:upload:annotation-layout-crowded', 'x:no-published-artifact'] }, imageInputs: oldInputs });
+    const derive = planFor(root, ['page:chat']).plan;
+    assert.strictEqual(derive.tasks.find((t) => t.id === 'capture').reason, 'annotation-repair→derive');
+    assert.strictEqual(derive.tasks.find((t) => t.id === 'capture').reuse.repair, true);
+    assert.strictEqual(derive.tasks.find((t) => t.id === 'derive-image').reason, 'annotation-repair→derive-required');
+    assert.strictEqual(derive.summary.browserScenarios, 0, '不重新打开浏览器');
+    seedCaptureCache(root, { type: 'page', id: 'chat' }, { annotation: { status: 'failed', failures: ['x:upload:annotation-layout-crowded'] } });
+    assert.match(planFor(root, ['page:chat']).errors.join('\n'), /annotation-review-required: 编号无法排版/);
+    seedCaptureCache(root, { type: 'page', id: 'chat' }, { annotation: { status: 'failed', failures: ['x:upload:missing-from-plan'] } });
+    assert.match(planFor(root, ['page:chat']).errors.join('\n'), /annotation-review-required: 标注失败来自功能清单/);
+    seedCaptureCache(root, { type: 'page', id: 'chat' }, { annotation: { status: 'failed', failures: ['x:upload:target-not-visible'] }, repairAttempts: 2 });
+    assert.match(planFor(root, ['page:chat']).errors.join('\n'), /annotation-unrepairable: 已连续定向修复 2 次仍失败（upload:target-not-visible）/);
+  });
+
+  test('B5-07a 损坏的 Scenario 文件不静默跳过：规划提示 scenario-invalid', () => {
+    const file = path.join(root, '.manual', 'scenarios', 'broken-variant.yaml');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, 'id: [unclosed');
+    try {
+      assert.match(planFor(root, ['page:chat']).plan.summary.warnings.join('\n'), /scenario-invalid: \.manual\/scenarios\/broken-variant\.yaml 未参与规划（scenario-unreadable/);
+      fs.writeFileSync(file, 'schemaVersion: 1\nid: broken-variant\nentry: { pageId: nowhere }\n');
+      assert.match(planFor(root, ['page:chat']).plan.summary.warnings.join('\n'), /scenario-subject-missing: 页面 nowhere 不存在/);
+    } finally { fs.rmSync(file, { force: true }); }
   });
 
   test('缓存命中：capture 标为 reuse candidate（不预先标成功），不计入需要浏览器的场景；图像输入变化插入 derive-image', () => {

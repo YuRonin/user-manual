@@ -120,9 +120,10 @@ function buildTaskFactPack({ task, evidence, images, claims, language, entryPage
  * 页面事实包。detectedActions 来自源码分析：没有逐项的浏览器交互证据，一律标为 inferred。
  * @param {{ page, image, language, headerComments, captureId }} p
  */
-function buildPageFactPack({ page, image = null, language, headerComments = [], observedTerms = [] }) {
+function buildPageFactPack({ page, image = null, images = null, language, headerComments = [], observedTerms = [] }) {
   templateFor(language);
-  const artifacts = image ? [{ id: 'img-1', ...image }] : [];
+  const list = images?.length ? images : image ? [image] : [];
+  const artifacts = list.map((item, index) => ({ id: `img-${index + 1}`, ...item }));
   const actions = (Array.isArray(page.detectedActions) ? page.detectedActions : []).filter(Boolean)
     .map((text, index) => ({ id: `action-${index + 1}`, text, status: 'inferred' }));
   return seal({
@@ -131,7 +132,7 @@ function buildPageFactPack({ page, image = null, language, headerComments = [], 
     manualId: page.id,
     language,
     templateRevision: templateRevision(language),
-    inputRevision: revision({ definition: definitionRevision('page', page), sourceRevision: page.analysis?.sourceRevision ?? null, captureId: image?.captureId ?? null }),
+    inputRevision: revision({ definition: definitionRevision('page', page), sourceRevision: page.analysis?.sourceRevision ?? null, captureId: list[0]?.captureId ?? null }),
     title: page.title,
     route: page.route,
     actions,

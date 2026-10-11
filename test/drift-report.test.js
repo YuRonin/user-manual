@@ -117,6 +117,8 @@ const writeJson = (file, v) => { fs.writeFileSync(file, JSON.stringify(v)); retu
       const file = path.join(state, 'pages', 'dashboard.yaml');
       const page = yaml.load(fs.readFileSync(file, 'utf8'));
       page.states = { default: { assertions: [{ id: 'dashboard-heading', type: 'visible', target: { role: 'heading', name: '数据看板' } }] } };
+      // 导出按钮带定位目标：发布图上画了标注，在线验证必须用冻结计划重新绘制后再比较（B4-06 / AC-19）
+      page.guide = [{ id: 'export', title: '导出报表', instruction: '点击「导出报表」下载本周数据。', target: { role: 'button', name: '导出报表' } }];
       fs.writeFileSync(file, yaml.dump(page));
       await expectExit(root, ['generate', 'page:dashboard', '--copy-default'], 0, env);
       const release = releases.readCurrentRelease(state, 'page-dashboard');
@@ -129,6 +131,17 @@ const writeJson = (file, v) => { fs.writeFileSync(file, JSON.stringify(v)); retu
       const report = await verify(0);
       assert.strictEqual(report.drift.classification, 'none', JSON.stringify(report.drift));
       assert.strictEqual(report.drift.visual.status, 'same');
+      assert.strictEqual(report.drift.visual.layer, 'annotated', '带标注图对带标注图比较');
+      const again = await verify(0);
+      assert.strictEqual(again.drift.visual.status, 'same', 'AC-19：连续运行不误报漂移');
+    });
+
+    await step('只换标注主题：baseline-incompatible（重新派生即可），不当作页面漂移', async () => {
+      editConfig((c) => { c.annotation.themes.default.primary = '#2563EB'; });
+      const report = await verify(0);
+      assert.strictEqual(report.drift.visual.status, 'baseline-incompatible');
+      assert.deepStrictEqual(report.drift.visual.reasons, ['annotation-theme-changed']);
+      editConfig((c) => { c.annotation.themes.default.primary = '#E86349'; });
     });
 
     await step('按钮改名（行为断言不涉及它）：content-changed → drift，退出码 4', async () => {

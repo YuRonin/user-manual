@@ -29,7 +29,7 @@ function screenshotRelativeToDocs(docsOutputDir, screenshotPath) {
  * @returns {{ markdown, facts }}  facts 是给用户看的事实来源说明
  */
 function buildDraft(page, context) {
-  const { docsOutputDir, pageFilePath, includeScreenshot = true, indexContext = null, image = null, language = 'zh-CN' } = context;
+  const { docsOutputDir, pageFilePath, includeScreenshot = true, indexContext = null, image = null, images = null, language = 'zh-CN' } = context;
   const browser = page.browser || {};
   // 草稿头部只放元信息。它在 HTML 注释里，不参与事实校验，也不会进最终文档。
   const headerComments = ['<!-- 事实草稿，由 `manual generate` 生成。不要手工编辑这个文件。 -->', `<!-- 页面模型: ${pageFilePath} -->`];
@@ -45,10 +45,11 @@ function buildDraft(page, context) {
   headerComments.push('<!-- 注意: 图片路径相对最终文档位置，在草稿里预览会显示不出来，这是正常的。 -->');
 
   // 截图只引用经过发布门槛的产物（context.image），从不直接引用原图
-  const published = includeScreenshot && image
-    ? { ...image, markdownHref: image.markdownHref || screenshotRelativeToDocs(docsOutputDir, image.artifactPath) }
-    : null;
-  const pack = buildPageFactPack({ page, image: published, language, headerComments, observedTerms: context.observedTerms || [] });
+  // 拆图时 images 有多张（B4-02），否则只有 image 一张
+  const list = includeScreenshot ? (images?.length ? images : image ? [image] : []) : [];
+  const publishedList = list.map((item) => ({ ...item, markdownHref: item.markdownHref || screenshotRelativeToDocs(docsOutputDir, item.artifactPath) }));
+  const published = publishedList[0] || null;
+  const pack = buildPageFactPack({ page, images: publishedList, language, headerComments, observedTerms: context.observedTerms || [] });
   return {
     markdown: renderPage(pack, {}, { draft: true }),
     pack,

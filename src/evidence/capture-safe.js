@@ -44,6 +44,27 @@ function demoGate(captured) {
   return decision;
 }
 
+/**
+ * 标注目标定位：有界短等待（B5-14）。元素尚未渲染 / 刚开始显示时最多再试 tries 次，每次间隔 delayMs；
+ * 其他错误（歧义、透明、遮挡）立即返回。不改写配置里的定位，备选定位的命中由 resolution 记录。
+ */
+async function inspectWithRetry(provider, target, { tries = 2, delayMs = 300 } = {}) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await provider.performAction({ type: 'inspect', target });
+    } catch (error) {
+      if (error.code !== 'target-not-visible' || attempt >= tries) throw error;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+}
+
+/** 定位失败的原因码：页面上根本没有该元素记 target-not-found，存在但不可见仍为 target-not-visible（B5-13）。 */
+function locateReason(error, fallback = 'target-not-located') {
+  if (error?.code === 'target-not-visible' && error.presence === 'absent') return 'target-not-found';
+  return error?.code || fallback;
+}
+
 function captureError(code, message, extra = {}) {
   return Object.assign(new Error(message), { code, ...extra });
 }
@@ -80,13 +101,15 @@ async function confirmTargetsShown(provider, located) {
  * @param {() => Promise<Array<{label, rect}>>} [p.resolveTargets]  截图时刻的标注目标（CSS 坐标）
  * @returns {{ shot, geometry, targets, candidates, attempts }}
  */
-async function captureStable(provider, { rawPath, fullPage = false, format = 'png', resolveTargets = async () => [], maxAttempts = MAX_ATTEMPTS, stabilityMs = undefined }) {
+async function captureStable(provider, { rawPath, fullPage = false, format = 'png', resolveTargets = async () => [], maxAttempts = MAX_ATTEMPTS, stabilityMs = undefined, assertState = null }) {
   let quiet = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     // 先等页面静置再取几何：否则收尾渲染期间的连续重试会全部落在同一段变化里。
     // DOM 在等待上限内仍在变化（如回复仍在逐字输出）时这一轮不截图，进入下一次尝试。
     quiet = provider.waitForQuiet ? await provider.waitForQuiet(stabilityMs ? { maxMs: stabilityMs } : undefined) : null;
     if (quiet?.dom === 'max-wait') continue;
+    // 整页截图从页面顶部开始：client 坐标即文档坐标，sticky 元素回到自然位置（B4-04）
+    if (fullPage && provider.scrollToTop) await provider.scrollToTop();
     // Demo：截图前把 data-redact 区域换成演示值；之后的几何快照以替换后的 DOM 为基准
     if (provider.applyDemo) await provider.applyDemo();
     const before = provider.collectGeometry ? await provider.collectGeometry({ fullPage }) : null;
@@ -109,6 +132,12 @@ async function captureStable(provider, { rawPath, fullPage = false, format = 'pn
       const geometry = after
         ? { ...after, fullPage }
         : { dpr: shot.meta?.deviceScaleFactor || 1, viewport: shot.meta?.viewport, scroll: { x: 0, y: 0 }, documentSize: null, fullPage, mutationGeneration: null };
+      // 截图后复核预期状态（B5-05）：定位标注时的悬停 / 滚动把菜单、弹窗弄没了，这张图就不是声明的状态
+      if (assertState) {
+        try { await assertState(); } catch (error) {
+          throw captureError('scenario-state-lost', `截图后预期状态不再成立（${error.message}）：定位标注时的指针移动或滚动可能关闭了菜单 / 弹窗；不会产出发布图。`);
+        }
+      }
       // 数据请求在等待上限内仍未结束：不阻断（长轮询页面），但必须在证据中提示
       const warnings = quiet?.network === 'busy' ? [`screenshot-network-busy: 截图时仍有 ${quiet.pendingRequests} 个数据请求未结束，内容可能尚未加载完成。`] : [];
       return { shot, geometry, targets, candidates, attempts: attempt, warnings, demo };
@@ -131,24 +160,42 @@ async function derivePublished({ captured, rawPath, sanitizedPath, publishedPath
   if (!detection.ok) throw captureError('privacy-uncertain', detection.errors.join('；'));
   const { geometry } = captured;
   const canvas = geometry.fullPage && geometry.documentSize ? geometry.documentSize : (geometry.viewport || captured.shot.meta.viewport);
-  const locatedTargets = (captured.targets || []).filter((item) => item.rect);
-  const maxMarkers = Number.isInteger(theme.maxMarkersPerImage) ? theme.maxMarkersPerImage : locatedTargets.length;
-  const overflow = locatedTargets.slice(maxMarkers);
-  const layout = layoutAnnotations(locatedTargets.slice(0, maxMarkers), canvas, theme);
-  if (!layout.ok) throw captureError('annotation-layout-failed', layout.errors.join('；'));
+  // boundingBox 为空的目标不能当作已定位（null 展开成 {} 会被误当作矩形）
+  const hasRect = (item) => item.rect && ['x', 'y', 'width', 'height'].every((key) => Number.isFinite(Number(item.rect[key])));
+  const locatedTargets = (captured.targets || []).filter(hasRect);
+  // 拆图（B4-02）：超过单图上限时按顺序分组，每组一张发布图；编号沿用全局 label，正文与图片仍一一对应
+  const maxMarkers = Number.isInteger(theme.maxMarkersPerImage) ? theme.maxMarkersPerImage : Math.max(1, locatedTargets.length);
+  const groups = [];
+  for (let i = 0; i < locatedTargets.length; i += maxMarkers) groups.push(locatedTargets.slice(i, i + maxMarkers));
+  if (!groups.length) groups.push([]);
+  const split = groups.length > 1;
+  const annotations = [];
+  for (const [index, group] of groups.entries()) {
+    const layout = layoutAnnotations(group.map((target) => (split ? { ...target, part: index + 1 } : target)), canvas, theme, { avoid: detection.redactions || [] });
+    if (!layout.ok) throw captureError('annotation-split-failed', `第 ${index + 1} 张拆分图布局失败：${layout.errors.join('；')}`);
+    annotations.push(...layout.annotations);
+  }
   const privacy = buildPrivacyRecord({ redactions: detection.redactions, config: { privacy: redactionRules }, demo });
   const image = await sharp(rawPath).metadata();
-  const rendered = renderAnnotationResults(layout.annotations, { width: image.width, height: image.height, dpr: geometry.dpr || 1, redactions: detection.redactions || [], minVisibleRatio: theme.minVisibleRatio ?? 0.8 });
-  for (const target of overflow) rendered.push({ feature_id: target.feature_id || null, located: true, outlined: false, intersects: false, drawn: false, reason: 'marker-limit-exceeded' });
-  for (const target of captured.targets || []) if (!target.rect) rendered.push({ feature_id: target.feature_id || null, located: false, outlined: false, intersects: false, drawn: false, reason: target.reason || 'target-not-located' });
+  // 截图尺寸必须等于画布 × DPR（B4-04）：不一致说明坐标换算不可信，框和遮罩都会错位
+  const expected = canvas?.width ? { width: Math.round(canvas.width * (geometry.dpr || 1)), height: Math.round(canvas.height * (geometry.dpr || 1)) } : null;
+  if (expected && (Math.abs(image.width - expected.width) > 2 || Math.abs(image.height - expected.height) > 2)) {
+    throw captureError('geometry-scale-mismatch', `截图尺寸 ${image.width}×${image.height} 与画布 ${canvas.width}×${canvas.height} × DPR ${geometry.dpr || 1} 不一致，坐标换算不可信；不会产出发布图。`);
+  }
+  const rendered = renderAnnotationResults(annotations, { width: image.width, height: image.height, dpr: geometry.dpr || 1, redactions: detection.redactions || [], minVisibleRatio: theme.minVisibleRatio ?? 0.8 });
+  for (const target of captured.targets || []) if (!hasRect(target)) rendered.push({ feature_id: target.feature_id || null, located: false, outlined: false, intersects: false, drawn: false, reason: target.reason || 'target-not-located' });
   const coverage = captured.inventory ? verifyCoverage({ inventory: captured.inventory, plan: captured.plan || [], rendered, discovered: captured.discovered || captured.inventory, candidates: captured.featureCandidates || [] }) : null;
   // 隐私检测未通过（如高风险项无法定位）时只留私有 sanitized，不向文档目录写发布图。
   const published = privacy.status === 'passed' && (!coverage || coverage.ok) ? publishedPath : null;
+  const partPath = (n) => (n === 1 ? published : published.replace(/(\.[a-z]+)$/i, `.part-${n}$1`));
+  const parts = split && published ? groups.map((_, index) => ({ part: index + 1, publishedPath: partPath(index + 1), annotations: annotations.filter((item) => item.part === index + 1) })) : null;
   const derived = await deriveImages({
-    rawPath, geometry, redactions: detection.redactions, annotations: layout.annotations, theme, sanitizedPath, publishedPath: published,
+    rawPath, geometry, redactions: detection.redactions, annotations, theme, sanitizedPath, publishedPath: published, parts,
   });
-  const quality = require('../generate/quality').imageQuality(captured, detection.redactions, layout.annotations);
-  return { redactions: detection.redactions, annotations: layout.annotations, rendered, coverage, privacy, quality, derived, published: !!published };
+  const quality = require('../generate/quality').imageQuality(captured, detection.redactions, annotations);
+  return { redactions: detection.redactions, annotations, rendered, coverage, privacy, quality, derived, published: !!published,
+    // 拆图时第 2 张起的发布图（第 1 张即 publishedPath）；调用方把它们作为 part: N 的 published 产物提交
+    parts: parts ? parts.map(({ part, publishedPath: file }) => ({ part, file })) : null };
 }
 
-module.exports = { captureStable, confirmTargetsShown, derivePublished, demoGate, sameGeometry, MAX_ATTEMPTS };
+module.exports = { captureStable, confirmTargetsShown, derivePublished, demoGate, sameGeometry, inspectWithRetry, locateReason, MAX_ATTEMPTS };

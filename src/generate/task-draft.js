@@ -7,7 +7,7 @@ const { writeFileAtomic } = require('../util/atomic-write');
 const { computeClaims } = require('../evidence/claims');
 const { buildTaskFactPack } = require('./fact-pack');
 const { renderTask } = require('./render');
-const { createCaptureStore } = require('../evidence/store');
+const { createCaptureStore, publishedParts } = require('../evidence/store');
 const { verifyCaptureRecord, describeProblems } = require('../evidence/integrity');
 const { subjectKey, recaptureBlocked } = require('../evidence/demo-gate-log');
 
@@ -23,8 +23,9 @@ function publishedFromCapture(projectRoot, stateDir, captureId, artifactPath, ex
   if (expected && (captureRecord.kind !== 'task-step' || captureRecord.subject?.taskId !== expected.taskId || captureRecord.subject?.stepId !== expected.stepId)) {
     return { ok: false, error: `capture-subject-mismatch: Capture ${captureId} 属于 ${captureRecord.subject?.taskId || captureRecord.subject?.pageId}/${captureRecord.subject?.stepId || '-'}，不是 ${expected.taskId}/${expected.stepId}` };
   }
-  const artifact = (captureRecord.artifacts || []).find((a) => a.kind === 'published');
-  if (!artifact || artifact.path !== artifactPath) return { ok: false, error: captureRecord.annotationCoverage && !captureRecord.annotationCoverage.ok
+  // 拆图时一条记录有多张发布图：证据清单里的路径必须是其中一张
+  const artifact = publishedParts(captureRecord).find((a) => a.path === artifactPath);
+  if (!artifact) return { ok: false, error: captureRecord.annotationCoverage && !captureRecord.annotationCoverage.ok
     ? `annotation-coverage-failed: ${captureRecord.annotationCoverage.failures.map((item) => `${item.feature_id}:${item.reason}`).join('、')}`
     : `证据清单与 Capture ${captureId} 的发布图不一致。` };
   const integrity = verifyCaptureRecord(projectRoot, captureRecord, { kinds: ['published'] });
@@ -55,7 +56,11 @@ function buildTaskDraft(task, evidence, context = {}) {
   const images = [];
   for (const record of evidence?.steps || []) {
     const step = task.steps?.find((item) => item.id === record.id);
-    for (const shot of record.screenshots || []) {
+    // 拆图（B4-02）：一次截图可能有多张发布图，按 part 顺序逐张进入正文
+    const shots = (record.screenshots || []).flatMap((shot) => (shot.annotatedParts?.length > 1
+      ? shot.annotatedParts.map((part) => ({ ...shot, annotated: part.path, sha256: part.sha256, part: part.part }))
+      : [shot]));
+    for (const shot of shots) {
       // 证据中仍保留截图；标注误导时可显式不放进面向读者的正文。
       if (step?.capture?.readerVisible === false) continue;
       // 标注覆盖失败时本来就不会有发布图：先报真实原因，再报"缺 annotated 图"
@@ -87,7 +92,7 @@ function buildTaskDraft(task, evidence, context = {}) {
       }
       const markdownHref = toMarkdownHref({ manualFile: finalPath, artifactFile });
       // sha256 固定草稿时的图片内容；privacy 只能来自采集时实际执行的检测记录，缺失即 unknown。
-      images.push({ artifactPath, markdownHref, sha256, privacy, ...(shot.timing ? { timing: shot.timing } : {}), ...(step?.capture?.readerCaption ? { readerCaption: step.capture.readerCaption } : {}), ...(shot.captureId ? { captureId: shot.captureId } : {}), ...(demoRecapture ? { demoRecapture } : {}), stepId: record.id });
+      images.push({ artifactPath, markdownHref, sha256, privacy, ...(shot.timing ? { timing: shot.timing } : {}), ...(step?.capture?.readerCaption ? { readerCaption: step.capture.readerCaption } : {}), ...(shot.captureId ? { captureId: shot.captureId } : {}), ...(shot.part ? { part: shot.part } : {}), ...(demoRecapture ? { demoRecapture } : {}), stepId: record.id });
     }
   }
   if (images.length === 0) errors.push('任务指南至少需要一张 annotated 关键状态截图。');

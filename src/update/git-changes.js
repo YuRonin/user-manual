@@ -16,7 +16,7 @@
 
 const { execFileSync } = require('child_process');
 
-const { hashFile, GLOBAL_FILES } = require('../inspect/fingerprint');
+const { contentHash: hashFile, GLOBAL_FILES } = require('../inspect/fingerprint');
 
 class ChangeDetectionError extends Error {
   constructor(code, message) {

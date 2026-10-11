@@ -92,6 +92,10 @@ function impactBody(analysis) {
     })),
     sections: analysis.sections.map((s) => ({ manualId: s.manualId, documentPath: s.documentPath, confidence: s.confidence, reasonPaths: s.reasonPaths, ...(s.retirement ? { retirement: true } : {}), ...(s.brokenReference ? { brokenReference: true } : {}) })),
     fullRebuild: analysis.fullRebuild,
+    unpublishedPages: analysis.unpublishedPages || [],
+    renameCandidates: analysis.renameCandidates || [],
+    unowned: analysis.unowned || [],
+    ignoredGlobal: analysis.ignoredGlobal || [],
     runtimeFreshness: analysis.runtimeFreshness,
     warnings: analysis.warnings,
   };
@@ -107,6 +111,11 @@ function textLines({ analysis, targets, retirement, blocked }) {
   }
   for (const r of retirement) L.push(`  下线建议  ${r.manualId}: ${r.suggestion}`);
   for (const b of blocked) L.push(`  阻塞  ${b.target}（${b.code}）: ${b.errors[0]}`);
+  // 不会被本次 update 处理、但需要人知道的变化（B5-10）
+  if (analysis.unpublishedPages?.length) L.push(`  未发布  ${analysis.unpublishedPages.join('、')}：新页面不在更新范围，需要时用 manual generate page:<id> 生成`);
+  for (const c of analysis.renameCandidates || []) L.push(`  疑似改名  ${c.pageId}: ${c.fromRoute} → ${c.toRoute}（未自动合并；确认后在 routeBindings 中登记）`);
+  if (analysis.unowned?.length) L.push(`  未归属  ${analysis.unowned.length} 个改动不属于任何页面：${analysis.unowned.slice(0, 5).join('、')}${analysis.unowned.length > 5 ? ' …' : ''}`);
+  for (const g of analysis.ignoredGlobal || []) L.push(`  忽略  ${g}（不影响运行，不触发重新采集）`);
   for (const w of analysis.warnings) L.push(`  注意  ${w}`);
   if (analysis.runtimeFreshness) L.push(`  ${analysis.runtimeFreshness.note}`);
   return L;

@@ -47,9 +47,13 @@ ${body}
  *   exportLabel 仪表盘导出按钮名称
  *   missing     返回 404 的路径（页面被下线）
  */
-const DEFAULT_STATE = { editLabel: '编辑资料', canEdit: true, benefit: '教师版', clock: '09:00', shift: 0, exportLabel: '导出报表', missing: [] };
+const DEFAULT_STATE = { editLabel: '编辑资料', canEdit: true, benefit: '教师版', clock: '09:00', shift: 0, exportLabel: '导出报表', missing: [], draftPending: true };
 
 const DYNAMIC = {
+  // ---- B5 Scenario（test/scenario-states.test.js）：一次性前置数据（"待补充"会话被补完后消失）
+  '/drafts': (state) => html(`
+<h1>草稿箱</h1>
+${state.draftPending ? '<p id="pending">待补充：七年级期中分析</p>' : '<p>没有待补充的会话</p>'}`),
   '/task-profile': (state) => html(`
 <h1>个人中心</h1>
 ${state.canEdit ? `<button aria-label="${state.editLabel}" onclick="document.getElementById('editor').hidden=false">${state.editLabel}</button>` : ''}
@@ -259,6 +263,61 @@ const PAGES = {
   else navigator.serviceWorker.register('/sw.js').then(() => { el.textContent = 'registered'; }, () => { el.textContent = 'rejected'; });
 </script>`),
 
+  // ---- B4 标注几何（test/annotation-golden.test.js）：sticky 顶栏、长页面深处的按钮、fixed 底栏里的手机号输入框
+  '/layout-golden': `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>布局</title><style>
+  body { margin: 0; font-family: sans-serif; background: #ffffff; }
+  header { position: sticky; top: 0; height: 56px; background: #0f766e; }
+  header button { position: absolute; left: 24px; top: 10px; width: 120px; height: 36px; background: #facc15; border: 0; }
+  .spacer { height: 1100px; }
+  #deep { display: block; margin-left: 300px; width: 160px; height: 48px; background: #1d4ed8; color: #fff; border: 0; }
+  .tail { height: 600px; }
+  footer { position: fixed; left: 0; right: 0; bottom: 0; height: 64px; background: #7c2d12; }
+  footer button { position: absolute; right: 40px; top: 12px; width: 140px; height: 40px; background: #16a34a; border: 0; }
+  footer input { position: absolute; left: 40px; top: 16px; width: 200px; height: 30px; background: #ffffff; border: 0; font-size: 16px; }
+</style></head><body>
+<header><button id="menu">菜单</button></header>
+<div class="spacer"></div>
+<button id="deep">深处按钮</button>
+<div class="tail"></div>
+<footer><label for="phone" style="display:none">手机号</label><input id="phone" value="13812345678"><button id="buy">立即购买</button></footer>
+</body></html>`,
+  // 7 个功能按钮的工具栏：单图最多 5 个标注，必须拆成两张图（AC-16）
+  '/layout-dense': html(`
+<h1>批改工具栏</h1>
+<div style="display:grid;grid-template-columns:repeat(4,160px);gap:60px 80px;margin-top:40px">
+${['新建', '导入', '导出', '分享', '打印', '归档', '删除'].map((name) => `<button style="height:40px">${name}</button>`).join('\n')}
+</div>`),
+  // ---- B5 Scenario 状态：标签页、下拉菜单、弹窗、悬停提示、自动消失的浮层
+  '/scenario-ui': html(`
+<h1>班级管理</h1>
+<div role="tablist"><button role="tab" aria-selected="true" id="tab-a">成员</button><button role="tab" id="tab-b">账单</button></div>
+<section id="panel-a" role="tabpanel" aria-label="成员">成员列表</section>
+<section id="panel-b" role="tabpanel" aria-label="账单" hidden><button>下载账单</button></section>
+<div style="margin-top:20px"><button id="more" aria-haspopup="menu">更多</button>
+<ul role="menu" aria-label="更多操作" id="menu" hidden><li role="menuitem">导出名单</li><li role="menuitem">打印</li></ul></div>
+<button id="create" style="margin-top:20px">新建班级</button>
+<div role="dialog" aria-label="新建班级" id="dialog" hidden style="position:fixed;top:120px;left:300px;width:320px;padding:20px;background:#fff;border:1px solid #ccc">
+  <label for="class-name">班级名称</label><input id="class-name"><button>创建</button></div>
+<span id="help" style="display:inline-block;margin-top:20px;padding:4px">帮助</span>
+<span role="tooltip" id="tip" style="visibility:hidden">查看帮助文档</span>
+<button id="notice" style="margin-left:20px">通知</button>
+<div id="toast" role="status" hidden>有 3 条新通知</div>
+<script>
+  document.getElementById('tab-b').onclick = () => { document.getElementById('panel-a').hidden = true; document.getElementById('panel-b').hidden = false; };
+  document.getElementById('more').onclick = () => { document.getElementById('menu').hidden = false; };
+  document.getElementById('create').onclick = () => { document.getElementById('dialog').hidden = false; };
+  document.getElementById('help').onmouseenter = () => { document.getElementById('tip').style.visibility = 'visible'; };
+  // 浮层打开后很快自己关闭：用来复现"截图之后状态不再成立"
+  document.getElementById('notice').onclick = () => { const t = document.getElementById('toast'); t.hidden = false; setTimeout(() => { t.hidden = true; }, 150); };
+</script>`),
+  // 加载中状态：数据接口由 Fixture 延迟响应
+  '/loading-report': html(`
+<h1>月度报表</h1>
+<div id="report" aria-busy="true">加载中…</div>
+<script>fetch('/api/demo/report').then((r) => r.json()).then((d) => { const el = document.getElementById('report'); el.removeAttribute('aria-busy'); el.textContent = d.title; });</script>`),
+  // 角色：只有管理员看得到"系统设置"（这里固定为普通成员视图）
+  '/member-home': html('<h1>首页</h1><nav><a href="/member-home">我的课程</a></nav>'),
+
   // 状态码 200，但内容是「页面不存在」：软 404
   '/soft-404': html('<h1>页面不存在</h1><p>你访问的页面已被移除。</p><a href="/">返回首页</a>'),
 
@@ -334,6 +393,12 @@ function startServer() {
         res.end(JSON.stringify({ items: [{ title: '王小明的期中成绩分析' }, { title: '家长沟通记录：李华' }] }));
         return;
       }
+    }
+    // 合法跳转：找回密码入口落到登录页的重置视图
+    if (pathname === '/password-reset') {
+      res.writeHead(302, { Location: '/login?view=reset' });
+      res.end();
+      return;
     }
     if (pathname === '/api/permissions') {
       res.writeHead(200, { 'Content-Type': 'application/json' });

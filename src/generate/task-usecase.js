@@ -28,6 +28,7 @@ const { RuntimeError } = require('../runtime/errors');
 const { reconcileDocument } = require('./manual-store');
 const { checkedSections, validateTaskFeatureCoverage } = require('../model/links');
 const { qualityGate, qualitySummary } = require('./quality-summary');
+const { definitionViews, stateRevisions } = require('../update/model-changes');
 
 function failure(code, errors, extra = {}) {
   const list = Array.isArray(errors) ? errors : [errors];
@@ -188,7 +189,7 @@ function prepareTaskFinal({ projectRoot, config, taskId, copy = null, markdown =
  * 两者不是一个事务：文档已替换而状态写入失败时报告 partial-commit，不伪称成功。
  */
 function publishTaskFinal({ projectRoot, config, taskId, prepared, force = false, runId = null, hooks = {} }) {
-  const { projectStore, base, task } = loadTask({ projectRoot, config, taskId });
+  const { projectStore, base, task, pages } = loadTask({ projectRoot, config, taskId });
   const { final, facts, manualFile, generated = null, merge = {} } = prepared;
   let published;
   const linked = checkedSections({ projectRoot, stateDirAbs: path.join(projectRoot, config.artifacts.stateDir), pack: facts.factPack,
@@ -206,6 +207,8 @@ function publishTaskFinal({ projectRoot, config, taskId, prepared, force = false
       facts,
       captureIds: task.lastCapture?.captureIds || task.captureIds || (facts.images || []).map((image) => image.captureId),
       definitionRevisions: { [task.id]: definitionRevision('userTask', task) },
+      definitionViews: { [task.id]: definitionViews('userTask', task) },
+      stateRevisions: stateRevisions(task, pages),
       force,
       runId,
       hooks,

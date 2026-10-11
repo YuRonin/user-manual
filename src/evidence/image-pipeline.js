@@ -14,10 +14,12 @@ const fs = require('fs');
 const sharp = require('sharp');
 
 const { DEFAULT_MOSAIC } = require('../privacy/renderer');
+const { DEFAULT_THEME } = require('../config/annotation');
 const { sha256Hex, revisionOf } = require('../util/hash');
 const { writeFileAtomic } = require('../util/atomic-write');
 
-const RENDERER_VERSION = 'sharp-svg-2';
+// 3：避让碰撞的布局（B4-01）、拆图（B4-02）、主题参数全部生效（B4-03）
+const RENDERER_VERSION = 'sharp-svg-3';
 const MIN_MASK = { width: 24, height: 8 };
 
 /** CSS 矩形 → 图像像素矩形（取整向外扩，保证完全覆盖），裁剪到图像范围；完全落在图外返回 null。 */
@@ -63,9 +65,13 @@ function maskSvg({ width, height, rects, dpr, style = DEFAULT_MOSAIC }) {
     `</pattern></defs>${body}</svg>`;
 }
 
-function annotationSvg({ width, height, annotations, dpr, theme }) {
+function annotationSvg({ width, height, annotations, dpr, theme: rawTheme }) {
+  // 主题只给了部分字段（旧配置、测试替身）时其余取默认值；所有视觉参数都来自主题（B4-03）
+  const theme = { ...DEFAULT_THEME, ...(rawTheme || {}) };
   const primary = paint(theme.primary);
   const halo = paint(theme.halo);
+  const ring = paint(theme.labelBackground);
+  const text = paint(theme.markerText);
   const parts = [];
   for (const item of annotations) {
     const t = toImageRect(item.target, { dpr, width, height });
@@ -73,33 +79,61 @@ function annotationSvg({ width, height, annotations, dpr, theme }) {
     const marker = item.marker && toImageRect({ x: item.marker.x, y: item.marker.y, width: item.marker.size, height: item.marker.size }, { dpr, width, height });
     if (source && t && marker) {
       const r = Math.round(theme.targetRadius * dpr);
-      parts.push(`<rect x="${t.x}" y="${t.y}" width="${t.width}" height="${t.height}" rx="${r}" fill="none" stroke="${halo.color}" stroke-opacity="${halo.opacity}" stroke-width="${Math.round(10 * dpr)}"/>`);
+      if (theme.haloWidth > 0) parts.push(`<rect x="${t.x}" y="${t.y}" width="${t.width}" height="${t.height}" rx="${r}" fill="none" stroke="${halo.color}" stroke-opacity="${halo.opacity}" stroke-width="${Math.round(theme.haloWidth * dpr)}"/>`);
       parts.push(`<rect x="${t.x}" y="${t.y}" width="${t.width}" height="${t.height}" rx="${r}" fill="none" stroke="${primary.color}" stroke-opacity="${primary.opacity}" stroke-width="${Math.max(1, Math.round(theme.outlineWidth * dpr))}"/>`);
       const size = item.marker.size * dpr;
       const cx = (item.marker.x * dpr) + size / 2;
       const cy = (item.marker.y * dpr) + size / 2;
-      parts.push(`<circle cx="${cx}" cy="${cy}" r="${size / 2 - dpr}" fill="${primary.color}" stroke="#ffffff" stroke-width="${2 * dpr}"/>`);
-      parts.push(`<text x="${cx}" y="${cy}" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="${16 * dpr}" text-anchor="middle" dominant-baseline="central">${escapeXml(item.label)}</text>`);
+      const strokeWidth = theme.markerStrokeWidth * dpr;
+      parts.push(`<circle cx="${cx}" cy="${cy}" r="${size / 2 - strokeWidth / 2}" fill="${primary.color}" stroke="${ring.color}" stroke-opacity="${ring.opacity}" stroke-width="${strokeWidth}"/>`);
+      // 字号随编号尺寸缩放：markerSize 改小时数字不会溢出圆点
+      parts.push(`<text x="${cx}" y="${cy}" fill="${text.color}" fill-opacity="${text.opacity}" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="${Math.round(size * theme.fontScale)}" text-anchor="middle" dominant-baseline="central">${escapeXml(item.label)}</text>`);
     }
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">${parts.join('')}</svg>`;
 }
 
 const area = (rect) => (rect ? rect.width * rect.height : 0);
-function overlap(a, b) {
-  const x = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
-  const y = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
-  return x * y;
+function clip(a, b) {
+  const x = Math.max(a.x, b.x);
+  const y = Math.max(a.y, b.y);
+  const w = Math.min(a.x + a.width, b.x + b.width) - x;
+  const h = Math.min(a.y + a.height, b.y + b.height) - y;
+  return w > 0 && h > 0 ? { x, y, width: w, height: h } : null;
+}
+
+/** 多个矩形的并集面积（坐标压缩；相互重叠的遮罩不重复计算）。 */
+function unionArea(rects) {
+  if (!rects.length) return 0;
+  const xs = [...new Set(rects.flatMap((r) => [r.x, r.x + r.width]))].sort((a, b) => a - b);
+  let total = 0;
+  for (let i = 0; i < xs.length - 1; i++) {
+    const x0 = xs[i];
+    const x1 = xs[i + 1];
+    const spans = rects.filter((r) => r.x <= x0 && r.x + r.width >= x1).map((r) => [r.y, r.y + r.height]).sort((a, b) => a[0] - b[0]);
+    let covered = 0;
+    let end = -Infinity;
+    for (const [y0, y1] of spans) {
+      if (y1 <= end) continue;
+      covered += y1 - Math.max(y0, end);
+      end = y1;
+    }
+    total += covered * (x1 - x0);
+  }
+  return total;
 }
 
 /**
- * 逐项渲染结果（B2-07 / B2-08）。几何上的判断，不冒充像素验收：
+ * 逐项渲染结果（B2-07 / B2-08 / B4-05）。几何上的判断，不冒充像素验收：
  *   visibleRatio  元素本身（sourceRect）落在截图内的面积比例；低于 minVisibleRatio 记 partially-clipped
- *   redactedRatio 元素被隐私遮罩盖住的比例；超过一半记 target-redacted（框画在马赛克上没有意义）
+ *   redactedRatio 元素被隐私遮罩盖住的比例（遮罩按实际绘制尺寸、并集计算）；超过一半记 target-redacted
+ *   outlineRatio  目标框落在截图内的面积比例（框线被裁掉的程度）
+ *   编号圆点必须完整落在图内且不压在遮罩上；布局找不到安全位置时为 annotation-layout-crowded
  * visible=false 的项不算"标到了"。
  */
 function renderAnnotationResults(annotations, { width, height, dpr, redactions = [], minVisibleRatio = 0.8 }) {
-  const masks = redactions.map((item) => item.rect && toImageRect(item.rect, { width, height, dpr })).filter(Boolean);
+  // 与 deriveImages 实际绘制的遮罩一致（含最小尺寸）
+  const masks = redactions.map((item) => item.rect && toImageRect(item.rect, { width, height, dpr }, MIN_MASK)).filter(Boolean);
   return annotations.map((item) => {
     const target = item.target && toImageRect(item.target, { width, height, dpr });
     const source = item.sourceRect && toImageRect(item.sourceRect, { width, height, dpr });
@@ -110,11 +144,19 @@ function renderAnnotationResults(annotations, { width, height, dpr, redactions =
     const full = raw ? Number(raw.width) * Number(raw.height) * dpr * dpr : 0;
     const shown = item.sourceRect ? source : target;
     const visibleRatio = full > 0 ? Math.round((area(shown) / full) * 1000) / 1000 : 0;
-    const redactedRatio = shown && area(shown) > 0 ? Math.round((masks.reduce((sum, mask) => sum + overlap(shown, mask), 0) / area(shown)) * 1000) / 1000 : 0;
-    const reason = !item.target ? 'target-not-located' : !intersects ? 'outside-image' : !marker ? 'marker-outside-image'
-      : visibleRatio < minVisibleRatio ? 'partially-clipped' : redactedRatio > 0.5 ? 'target-redacted' : null;
+    const redactedRatio = shown && area(shown) > 0 ? Math.round((unionArea(masks.map((mask) => clip(shown, mask)).filter(Boolean)) / area(shown)) * 1000) / 1000 : 0;
+    const boxFull = item.target ? Number(item.target.width) * Number(item.target.height) * dpr * dpr : 0;
+    const outlineRatio = boxFull > 0 ? Math.round((area(target) / boxFull) * 1000) / 1000 : 0;
+    const markerFull = item.marker ? (item.marker.size * dpr) ** 2 : 0;
+    const markerClipped = !!marker && area(marker) < markerFull * 0.98;
+    const markerMasked = !!marker && masks.some((mask) => clip(marker, mask));
+    const reason = !item.target ? 'target-not-located' : !intersects ? 'outside-image'
+      : !item.marker && item.layoutReason ? item.layoutReason
+        : !marker || markerClipped ? 'marker-outside-image' : markerMasked ? 'marker-redacted'
+          : visibleRatio < minVisibleRatio ? 'partially-clipped' : redactedRatio > 0.5 ? 'target-redacted' : null;
     return { feature_id: item.feature_id || null, label: item.label || null, located: !!item.target, outlined: intersects, intersects, drawn, visible: drawn && !reason,
-      visibleRatio, redactedRatio, imageRect: shown || null, target: target || null, marker: marker || null, reason,
+      visibleRatio, redactedRatio, outlineRatio, imageRect: shown || null, target: target || null, marker: marker || null, reason,
+      ...(item.part ? { part: item.part } : {}),
       // 实际命中的定位：{ strategyIndex, fallback } 或 { source: 'declared-rect' }
       ...(item.resolution ? { locator: item.resolution } : {}) };
   });
@@ -131,7 +173,7 @@ function renderAnnotationResults(annotations, { width, height, dpr, redactions =
  * @param {string} p.sanitizedPath  私有目录
  * @param {string|null} p.publishedPath  发布目录（annotatedDir）；null 表示只生成私有 sanitized
  */
-async function deriveImages({ rawPath, geometry, redactions = [], annotations = [], theme, sanitizedPath, publishedPath }) {
+async function deriveImages({ rawPath, geometry, redactions = [], annotations = [], theme, sanitizedPath, publishedPath, parts = null }) {
   const rawBytes = fs.readFileSync(rawPath);
   const meta = await sharp(rawBytes).metadata();
   const dpr = Number(geometry?.dpr) || 1;
@@ -145,24 +187,32 @@ async function deriveImages({ rawPath, geometry, redactions = [], annotations = 
   const sanitized = maskRects.length
     ? await sharp(rawBytes).composite([{ input: Buffer.from(maskSvg({ width: meta.width, height: meta.height, rects: maskRects, dpr })), top: 0, left: 0 }]).png().toBuffer()
     : await sharp(rawBytes).png().toBuffer();
-  const published = annotations.length
-    ? await sharp(sanitized).composite([{ input: Buffer.from(annotationSvg({ width: meta.width, height: meta.height, annotations, dpr, theme })), top: 0, left: 0 }]).png().toBuffer()
-    : sanitized;
+  const render = async (list) => (list.length
+    ? sharp(sanitized).composite([{ input: Buffer.from(annotationSvg({ width: meta.width, height: meta.height, annotations: list, dpr, theme })), top: 0, left: 0 }]).png().toBuffer()
+    : sanitized);
+  // 拆图（B4-02）：同一份 sanitized 上分别画各组标注，编号保持全局连续
+  const groups = parts || [{ part: null, annotations, publishedPath }];
+  const rendered = [];
+  for (const group of groups) rendered.push({ ...group, bytes: await render(group.annotations) });
 
   // 先写私有 sanitized，再写发布图；任何一步失败都不会留下未遮罩的发布文件。
   writeFileAtomic(sanitizedPath, sanitized);
-  if (publishedPath) writeFileAtomic(publishedPath, published);
+  for (const group of rendered) if (group.publishedPath) writeFileAtomic(group.publishedPath, group.bytes);
+  const published = rendered[0].bytes;
 
   return {
     rawHash: `sha256:${sha256Hex(rawBytes)}`,
     geometryHash: revisionOf({ geometry: geometry || null, masks: maskRects }),
     sanitizedSha256: sha256Hex(sanitized),
     publishedSha256: sha256Hex(published),
+    ...(parts ? { parts: rendered.map((group) => ({ part: group.part, sha256: sha256Hex(group.bytes) })) } : {}),
     rendererVersion: RENDERER_VERSION,
+    // 与 runtime/planner 的 imageInputs 同一算法：在线验证据此判断主题是否已变（B4-06）
+    themeRevision: revisionOf({ theme }),
     width: meta.width,
     height: meta.height,
     maskRects,
   };
 }
 
-module.exports = { RENDERER_VERSION, toImageRect, maskSvg, annotationSvg, renderAnnotationResults, deriveImages, paint };
+module.exports = { RENDERER_VERSION, MIN_MASK, toImageRect, maskSvg, annotationSvg, renderAnnotationResults, deriveImages, paint, unionArea };

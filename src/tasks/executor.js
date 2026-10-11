@@ -4,8 +4,8 @@ const fs = require('fs');
 const path = require('path');
 const { writeText } = require('../util/fsx');
 const { sha256Hex } = require('../util/hash');
-const { captureStable, derivePublished, confirmTargetsShown, demoGate } = require('../evidence/capture-safe');
-const { createCaptureStore, sanitizeUrl } = require('../evidence/store');
+const { captureStable, derivePublished, confirmTargetsShown, demoGate, inspectWithRetry, locateReason } = require('../evidence/capture-safe');
+const { createCaptureStore, sanitizeUrl, publishedEntries, publishedParts } = require('../evidence/store');
 const { subjectKey, recordGateFailure, clearGateFailure } = require('../evidence/demo-gate-log');
 const { revisionOf } = require('../util/hash');
 const { validateNavigation, validateWithReload, runAssertions, isUrlOnly, DEFAULT_ASSERTION_TIMEOUT_MS } = require('../evidence/validate-page');
@@ -69,14 +69,14 @@ function annotationResolver(provider, step, annotationPlan) {
       const target = annotation.target === 'action.target' ? step.action?.target : annotation.target;
       if (!target) { out.push({ feature_id: annotation.feature_id, label: annotation.label, reason: 'target-not-declared' }); continue; }
       try {
-        const found = await provider.performAction({ type: 'inspect', target });
+        const found = await inspectWithRetry(provider, target);
         if (!found?.rect) throw new Error('目标没有可用几何。');
         // 目标被浮层盖住：框会画在别的元素上，记为 target-occluded（B2-08）
         if (found.obscuredBy) { out.push({ feature_id: annotation.feature_id, label: annotation.label, reason: 'target-occluded' }); continue; }
         out.push({ feature_id: annotation.feature_id, label: annotation.label, rect: found.rect, resolution: found.resolution || null });
         located.push({ target, label: annotation.label, revealedBy: found.revealedBy || null });
       } catch (error) {
-        out.push({ feature_id: annotation.feature_id, label: annotation.label, reason: error.code || 'annotation-target-missing' });
+        out.push({ feature_id: annotation.feature_id, label: annotation.label, reason: error.code ? locateReason(error) : 'annotation-target-missing' });
       }
     }
     await confirmTargetsShown(provider, located);
@@ -101,7 +101,10 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
   const inventory = stepInventory({ page, task, step });
   const annotationPlan = buildPlan({ inventory, page, task, step });
   try {
-    const captured = await captureStable(provider, { rawPath, stabilityMs: options.waits?.stabilityMs, resolveTargets: publish ? annotationResolver(provider, step, annotationPlan) : async () => [] });
+    // 动作后的截图：截图之后复核步骤的预期状态仍成立（B5-05）
+    const stateAssertions = timing === 'after' ? (step.expectedState?.assertions || []).filter((a) => a && a.type !== 'url') : [];
+    const captured = await captureStable(provider, { rawPath, stabilityMs: options.waits?.stabilityMs, resolveTargets: publish ? annotationResolver(provider, step, annotationPlan) : async () => [],
+      assertState: stateAssertions.length ? async () => runAssertions(provider, stateAssertions, { scope: 'state-after', idPrefix: `${step.id}:after-shot`, timeoutMs: 1500 }) : null });
     captured.inventory = inventory;
     captured.plan = annotationPlan;
     // 这一步截图时页面上的可访问名称（不含控件值，已去掉个人信息）：文案里的控件名据此判断是否被观察到（B3-03）
@@ -126,7 +129,7 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
       if (fallbacks.length) captured.warnings = [...(captured.warnings || []), `annotation-locator-fallback: 主定位未命中，改用备选定位：${fallbacks.join('、')}；确认后更新 target。`];
       artifacts.push({ kind: 'annotations', file: staging.file('annotations.json'), dir: `${stateRelative}/artifacts/annotations`, prefix });
       artifacts.push({ kind: 'sanitized', file: staging.file('sanitized.png'), dir: `${stateRelative}/artifacts/sanitized`, prefix });
-      if (safe.published) artifacts.push({ kind: 'published', file: staging.file('published.png'), dir: options.annotatedDir, prefix });
+      artifacts.push(...publishedEntries(safe, { file: staging.file('published.png'), dir: options.annotatedDir, prefix }));
     }
     const meta = captured.shot.meta || {};
     const spec = { viewport: meta.viewport || null, dpr: meta.deviceScaleFactor || null, fullPage: !!meta.fullPage };
@@ -160,6 +163,7 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
           derivedFromRawHash: safe.derived.rawHash,
           geometryHash: safe.derived.geometryHash,
           rendererVersion: safe.derived.rendererVersion,
+          themeRevision: safe.derived.themeRevision,
         } : { mode: options.provenanceMode || 'live' },
       },
     });
@@ -184,6 +188,9 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
       output.geometryHash = safe.derived.geometryHash;
       output.rendererVersion = safe.derived.rendererVersion;
       output.sha256 = artifactOf('published')?.sha256 || null;
+      // 拆图（B4-02）：每张发布图都进入证据清单，任务指南按顺序引用
+      const parts = publishedParts(record);
+      if (parts.length > 1) output.annotatedParts = parts.map((a) => ({ part: a.part || 1, path: a.path, sha256: a.sha256 }));
     }
     return output;
   } catch (error) {
@@ -204,6 +211,7 @@ function screenshotFromRecord(record, projectRoot) {
     privacy: record.privacy,
     quality: record.quality,
     sha256: artifact('published')?.sha256 || null,
+    ...(publishedParts(record).length > 1 ? { annotatedParts: publishedParts(record).map((a) => ({ part: a.part || 1, path: a.path, sha256: a.sha256 })) } : {}),
   };
 }
 
@@ -418,7 +426,7 @@ async function executeCapturePlan(plan, provider, options) {
         },
         validate: (observation) => {
           const current = { ...openResult, finalUrl: observation?.url || openResult.finalUrl };
-          if (options.authRuntime?.assertAuthenticated) options.authRuntime.assertAuthenticated(current);
+          if (options.authRuntime?.assertAuthenticated) options.authRuntime.assertAuthenticated(current, { allowRedirects: plan.entry.expected?.allowRedirects });
           return validateNavigation({ requestedUrl: result.url, openResult, observation, expected: plan.entry.expected || {} });
         },
         enabled: waits.reloadOnStuckLoading, timeout: waits.readinessMs,

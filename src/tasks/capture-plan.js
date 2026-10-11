@@ -146,6 +146,12 @@ function buildCapturePlan(task, pages, options = {}) {
         params,
         state: 'default',
         assertions: ({ default: implicitDefaultState(entryPage), ...(entryPage.states || {}) }).default.assertions || [],
+        // 显式 Scenario 的入口预期（状态码 / 页面状态 / 声明的跳转）在任务入口同样生效（B5-02 / B5-06a）
+        ...(options.scenario?.expected && options.scenarioExplicit === true ? { expected: {
+          ...(options.scenario.expected.httpStatuses?.length ? { statuses: options.scenario.expected.httpStatuses } : {}),
+          state: options.scenario.expected.state || 'normal',
+          ...(options.scenario.expected.redirects?.length ? { allowRedirects: options.scenario.expected.redirects } : {}),
+        } } : {}),
       },
       steps,
     },

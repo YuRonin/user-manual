@@ -100,14 +100,19 @@ test('内部模式允许 preserve 普通语义字段，配置冲突仍阻止', (
   assert.match(conflict.errors.join('\n'), /冲突/);
 });
 
-test('标注布局限制数量并将标签放在目标外侧', () => {
-  const { layoutAnnotations } = require('../src/artifacts/annotation');
+test('标注布局限制数量；编号放在目标外侧，紧邻目标时改放上方，不压住别的目标', () => {
+  const { layoutAnnotations, intersects } = require('../src/artifacts/annotation');
   const targets = Array.from({ length: 6 }, (_, i) => ({ label: i + 1, rect: { x: 50 + i * 80, y: 50, width: 60, height: 30 } }));
   const tooMany = layoutAnnotations(targets, { width: 800, height: 600 }, { maxMarkersPerImage: 5, markerSize: 30, targetPadding: 5 });
   assert.strictEqual(tooMany.ok, false);
   const result = layoutAnnotations(targets.slice(0, 3), { width: 800, height: 600 }, { maxMarkersPerImage: 5, markerSize: 30, targetPadding: 5 });
   assert.strictEqual(result.ok, true);
-  assert.ok(result.annotations.every((item) => item.marker.x < item.target.x));
+  assert.strictEqual(result.annotations[0].placement, 'left');
+  assert.ok(result.annotations.every((item) => item.marker), '每个编号都有安全位置');
+  for (const item of result.annotations) {
+    const box = { x: item.marker.x, y: item.marker.y, width: 30, height: 30 };
+    assert.ok(!targets.slice(0, 3).some((t) => intersects(box, t.rect)), `编号 ${item.label} 压住了目标`);
+  }
 });
 
 test('隐私矩形会裁剪、去重并丢弃零面积区域', () => {

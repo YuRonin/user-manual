@@ -58,7 +58,9 @@ function validateCaptureLinks(record) {
   for (const item of proof.rendered || []) if (item.feature_id && !planned.has(item.feature_id)) errors.push(issue('missing-reference', `绘制结果引用了计划中没有的功能 ${item.feature_id}`));
   if (record.annotationCoverage) {
     const { coverageFromProof } = require('../annotations/proof');
-    if (JSON.stringify(coverageFromProof(proof).failures) !== JSON.stringify(record.annotationCoverage.failures)) errors.push(issue('annotation-metadata-invalid', '记录的覆盖结论与标注证明不一致'));
+    // 只比较结论本身（feature_id + reason）；category 是派生字段，旧记录没有
+    const core = (list) => JSON.stringify((list || []).map(({ feature_id, reason }) => ({ feature_id, reason })));
+    if (core(coverageFromProof(proof).failures) !== core(record.annotationCoverage.failures)) errors.push(issue('annotation-metadata-invalid', '记录的覆盖结论与标注证明不一致'));
   }
   return errors;
 }

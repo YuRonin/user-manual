@@ -117,6 +117,8 @@ function validateTarget(c, target, path) {
   if (nonEmpty(target.role) && !nonEmpty(target.name) && !usable) c.error(`${path}.name`, 'invalid-target', 'role 定位需要同时给出 name。');
 }
 
+const SETUP_RISKY_RE = /删除|移除|注销|清空|提交|保存|支付|付款|购买|确认|发送|发布|撤销|delete|remove|submit|save|pay|purchase|confirm|send|publish|destroy|revoke/i;
+
 function validateAction(c, action, path) {
   if (!isObject(action)) { c.error(path, 'invalid-action', 'action 需要是对象。'); return; }
   if (!ACTION_TYPES.includes(action.type)) {
@@ -500,6 +502,46 @@ function validateScenario(scenario, context = {}) {
   }
   if (scenario.expected?.state !== undefined && !['normal', 'loading', 'error', 'empty'].includes(scenario.expected.state)) {
     c.error('expected.state', 'invalid-state', `expected.state 需要是 normal / loading / error / empty，收到: ${scenario.expected.state}`);
+  }
+  // 跳转（B5-06a）：字符串为路径；对象 { path, query? } 还要求查询参数相同（如 /login?view=reset）
+  if (scenario.expected?.redirects !== undefined) {
+    if (!Array.isArray(scenario.expected.redirects)) c.error('expected.redirects', 'invalid-redirects', 'expected.redirects 需要是数组。');
+    else scenario.expected.redirects.forEach((entry, i) => {
+      const p = typeof entry === 'string' ? entry : entry?.path;
+      if (typeof p !== 'string' || !p.startsWith('/')) c.error(`expected.redirects[${i}]`, 'invalid-redirects', '跳转需要是以 / 开头的路径，或 { path, query? }。');
+      if (isObject(entry) && entry.query !== undefined && (!isObject(entry.query) || Object.values(entry.query).some((v) => typeof v !== 'string'))) c.error(`expected.redirects[${i}].query`, 'invalid-redirects', 'query 需要是 { 参数名: 字符串 }。');
+    });
+  }
+  if (scenario.expected?.httpStatuses !== undefined && (!Array.isArray(scenario.expected.httpStatuses) || scenario.expected.httpStatuses.some((n) => !Number.isInteger(n) || n < 100 || n > 599))) {
+    c.error('expected.httpStatuses', 'invalid-status', 'expected.httpStatuses 需要是 HTTP 状态码数组。');
+  }
+  // 角色断言（B5-04）：以 authProfile 的身份打开后，页面必须呈现这个角色应有的内容（如"管理"菜单可见）；
+  // 不满足时报 auth-identity-mismatch，绝不改用其他身份重试
+  if (scenario.expected?.roleAssertions !== undefined) validateAssertions(c, scenario.expected.roleAssertions, 'expected.roleAssertions');
+  // 页面 setup（B5-01）：打开页面后、截图前执行的只读动作（展开菜单、切换标签、打开弹窗）；
+  // 有副作用的动作不能放在这里（重拍会重复执行），写操作只能走任务的 writeAuthorization
+  if (scenario.setup !== undefined) {
+    if (!Array.isArray(scenario.setup)) c.error('setup', 'invalid-setup', 'setup 需要是动作数组。');
+    else scenario.setup.forEach((action, i) => {
+      validateAction(c, action, `setup[${i}]`);
+      const label = [action?.target?.name, action?.target?.text, action?.target?.label].filter(Boolean).join(' ');
+      if (isObject(action) && action.type !== 'inspect' && action.type !== 'hover' && SETUP_RISKY_RE.test(label)) c.error(`setup[${i}]`, 'setup-write-risk', `setup 动作「${label}」看起来有副作用；setup 只能是展开、切换、打开等只读动作。`);
+      if (isObject(action) && action.expect !== undefined) validateAssertions(c, action.expect, `setup[${i}].expect`);
+    });
+  }
+  // 一次性前置数据（B5-06b）：每次截图前重新确认它仍然存在（如"待补充"的会话、未读的通知）
+  if (scenario.preconditions !== undefined) {
+    if (!Array.isArray(scenario.preconditions)) c.error('preconditions', 'invalid-preconditions', 'preconditions 需要是数组。');
+    else scenario.preconditions.forEach((item, i) => {
+      if (!isObject(item) || !isSafeId(item.id)) c.error(`preconditions[${i}].id`, 'invalid-preconditions', '前置条件需要 id。');
+      validateAssertions(c, item?.assertions || [], `preconditions[${i}].assertions`);
+      if (!Array.isArray(item?.assertions) || !item.assertions.length) c.error(`preconditions[${i}].assertions`, 'invalid-preconditions', '前置条件至少需要一条断言。');
+    });
+  }
+  // 空状态必须有 URL 以外的证据（B5-03）：只看地址无法区分"空列表"和"还没加载"
+  if (scenario.expected?.state === 'empty' && Array.isArray(scenario.checkpoints)
+    && !scenario.checkpoints.some((cp) => (cp?.assertions || []).some((a) => a?.type && a.type !== 'url'))) {
+    c.error('checkpoints', 'empty-state-unproven', 'expected.state 为 empty 时，检查点需要至少一条 URL 以外的断言（如空状态提示可见）。');
   }
   if (!Array.isArray(scenario.checkpoints)) c.error('checkpoints', 'required', 'checkpoints 需要是数组。');
   else {

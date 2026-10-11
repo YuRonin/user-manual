@@ -280,7 +280,7 @@ const annotationCodes = (errors) => errors.map((item) => item.code).filter((code
     assert.strictEqual(items.length, 1);
   });
 
-  await test('派生发布图：坐标越界 / 5 of 6 / 超出单图上限 / 缺说明都不出发布图', async (root) => {
+  await test('派生发布图：坐标越界 / 5 of 6 / 缺说明都不出发布图', async (root) => {
     const rawPath = path.join(root, 'raw.png');
     const publishedPath = path.join(root, 'published.png');
     fs.writeFileSync(rawPath, await png());
@@ -294,17 +294,20 @@ const annotationCodes = (errors) => errors.map((item) => item.code).filter((code
     assert.strictEqual(safe.coverage.ok, false);
     assert.strictEqual(safe.rendered[0].reason, 'outside-image');
     assert.ok(!fs.existsSync(path.join(root, 'invalid.png')));
+    // 之后的用例目标较多：用足够大的画布，避免编号互相避让失败（布局拥挤另有用例）
+    fs.writeFileSync(rawPath, await png(600, 300));
+    Object.assign(captured, { shot: { meta: { viewport: { width: 600, height: 300 } } }, geometry: { viewport: { width: 600, height: 300 }, dpr: 1 } });
+    const spaced = (index) => ({ x: 60 + index * 90, y: 120, width: 40, height: 24 });
     captured.inventory = inventory.slice(0, 6);
     captured.plan = plan;
-    captured.targets = plan.slice(0, 5).map((item, index) => ({ feature_id: item.feature_id, label: String(index + 1), rect: { x: 20 + index * 10, y: 20, width: 8, height: 8 } }));
+    captured.targets = plan.slice(0, 5).map((item, index) => ({ feature_id: item.feature_id, label: String(index + 1), rect: spaced(index) }));
     safe = await derivePublished({ captured, rawPath, sanitizedPath: path.join(root, 'sanitized.png'), publishedPath: path.join(root, 'five-of-six.png'), theme: { ...DEFAULT_THEME, maxMarkersPerImage: 6 } });
     assert.strictEqual(safe.coverage.required.verified, 5);
     assert.strictEqual(safe.published, false);
     captured.inventory = inventory;
-    captured.targets = plan.map((item, index) => ({ feature_id: item.feature_id, label: String(index + 1), rect: { x: 10 + index * 10, y: 20, width: 8, height: 8 } }));
+    captured.targets = plan.map((item, index) => ({ feature_id: item.feature_id, label: String(index + 1), rect: spaced(index) }));
     safe = await derivePublished({ captured, rawPath, sanitizedPath: path.join(root, 'sanitized.png'), publishedPath: path.join(root, 'six-of-eight.png'), theme: DEFAULT_THEME });
-    assert.deepStrictEqual(safe.coverage.failures.filter((item) => item.reason === 'missing-from-plan').map((item) => item.feature_id), ['feature-7', 'feature-8']);
-    assert.ok(safe.coverage.failures.some((item) => item.reason === 'marker-limit-exceeded'));
+    assert.deepStrictEqual(safe.coverage.failures.map((item) => item.reason), ['missing-from-plan', 'missing-from-plan'], '超出单图上限不再是失败（自动拆图），只剩计划缺口');
     assert.ok(!fs.existsSync(path.join(root, 'six-of-eight.png')));
     captured.inventory = [{ ...inventory[0], description: '' }];
     captured.plan = [plan[0]];

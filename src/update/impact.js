@@ -18,12 +18,13 @@
 
 const path = require('path');
 
-const { GLOBAL_FILES, hashFile, impactReport } = require('../inspect/fingerprint');
+const { GLOBAL_FILES, contentHash: hashFile, impactReport } = require('../inspect/fingerprint');
 const { SOURCE_EXTENSIONS, ASSET_EXTENSIONS } = require('../inspect/import-graph');
 const { taskPageIds } = require('../inspect/index-builder');
 const { derivePageScenario, deriveTaskScenario } = require('../scenarios/model');
 const { manualIdFor } = require('../publication/release-store');
 const { filterChanges, graphFileHashes } = require('./git-changes');
+const { classifyGlobalChange, runtimeChangeDetail } = require('./global-files');
 
 const CONFIDENCE = { EXACT: 'exact', CONSERVATIVE: 'conservative' };
 
@@ -120,13 +121,18 @@ function analyzeImpact({ projectRoot, config, detection, baseGraph = null, curre
   const coverageOf = (pageId) => currentGraph.pages[pageId]?.completeness || baseGraph?.pages?.[pageId]?.completeness || 'unknown';
 
   const broadImpact = [];
+  const ignoredGlobal = [];
   const unowned = [];
   for (const change of changes) {
     const paths = [change.oldPath, change.path].filter(Boolean);
     const global = paths.find(isGlobalFile);
     if (global) {
-      broadImpact.push(`global-changed:${global}`);
-      for (const pageId of pageIds) hit(pageId, `global-changed:${global}`, [global], CONFIDENCE.CONSERVATIVE);
+      // 只改 scripts 之类不影响运行的字段、或 lockfile 里运行关键依赖未变：不让全部页面重采（B5-09）
+      const classified = change.status !== 'D' ? classifyGlobalChange({ projectRoot, base: detection.base, file: global }) : null;
+      if (classified?.ignored) { ignoredGlobal.push(`global-ignored:${classified.detail}`); continue; }
+      const detail = runtimeChangeDetail({ projectRoot, base: detection.base, file: global });
+      broadImpact.push(`global-changed:${detail}`);
+      for (const pageId of pageIds) hit(pageId, `global-changed:${detail}`, [global], CONFIDENCE.CONSERVATIVE);
       continue;
     }
     let owned = false;
@@ -152,7 +158,7 @@ function analyzeImpact({ projectRoot, config, detection, baseGraph = null, curre
     if (entry.status === 'removed') hit(entry.id, 'page-removed', ['(page-removed)'], CONFIDENCE.EXACT);
     else if (entry.status === 'added' || entry.status === 'initialized') hit(entry.id, 'page-added', ['(page-added)'], CONFIDENCE.EXACT);
     else if (entry.status === 'changed' && !pageHits.has(entry.id)) {
-      for (const reason of entry.reasons) {
+      for (const reason of entry.reasons.filter((r) => !ignoredGlobal.some((ignored) => ignored.startsWith(`global-ignored:${r.slice('global-changed:'.length)}#`)))) {
         const file = reason.includes(':') ? reason.slice(reason.indexOf(':') + 1) : `(${reason})`;
         hit(entry.id, reason, [file], coverageOf(entry.id) === 'complete' ? CONFIDENCE.EXACT : CONFIDENCE.CONSERVATIVE);
       }
@@ -230,6 +236,7 @@ function analyzeImpact({ projectRoot, config, detection, baseGraph = null, curre
     excluded: filtered.excluded,
     unowned: [...new Set(unowned)].sort(),
     broadImpact: [...new Set(broadImpact)].sort(),
+    ignoredGlobal: [...new Set(ignoredGlobal)].sort(),
     pages,
     scenarios: [...scenarios.values()].sort((a, b) => a.id.localeCompare(b.id)),
     sections: sectionList,
@@ -308,12 +315,29 @@ function analyzeProject({ projectRoot, config, base = null }) {
     }
     for (const warning of group.report.warnings || []) warnings.push(warning);
   }
+  // .manual 定义、页面状态、标注主题与在线验证结果引起的更新（B5-07 / B5-11 / B5-12a）
+  const { modelChangeSections } = require('./model-changes');
+  const { imageInputsOf } = require('../runtime/planner');
+  for (const section of modelChangeSections({ projectRoot, stateDirAbs, model: { pages: scanned.result.pages, tasks: committed.model.tasks }, published, imageInputs: imageInputsOf(config), docsDir: toPosix(config.docs.outputDir) })) {
+    const existing = sections.find((item) => item.manualId === section.manualId);
+    if (existing) existing.reasonPaths.push(...section.reasonPaths);
+    else sections.push(section);
+  }
   const fallbackGroups = groups.filter((g) => g.report.fallback).flatMap((g) => g.manualIds);
   const rebuild = [...new Set([...missing, ...fallbackGroups])].sort();
   if (published.length === 0) return { ...fullRebuild('no-baseline', '还没有任何发布记录，没有可比较的基线：先用 manual generate <目标> 生成手册。'), currentGraph, model };
   const conservative = groups.some((g) => g.report.confidence === CONFIDENCE.CONSERVATIVE) || rebuild.length > 0;
+  // 不在任何已发布手册里、update 不会处理的变化，也要让人看见（B5-10）：新页面、疑似改名、无法归属的改动
+  const publishedPages = new Set(published.filter((id) => id.startsWith('page-')).map((id) => id.slice(5)));
+  const visibility = {
+    unpublishedPages: scanned.result.pages.filter((p) => p.lifecycle !== 'retired' && p.includeInManual !== false && !publishedPages.has(p.id)).map((p) => p.id).sort(),
+    renameCandidates: scanned.result.renameCandidates || [],
+    unowned: [...new Set(groups.flatMap((g) => g.report.unowned || []))].sort(),
+    ignoredGlobal: [...new Set(groups.flatMap((g) => g.report.ignoredGlobal || []))].sort(),
+  };
   return {
     ok: true,
+    ...visibility,
     mode: base ? 'explicit-base' : 'per-release',
     groups,
     sections: sections.sort((a, b) => a.manualId.localeCompare(b.manualId)),

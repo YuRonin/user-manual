@@ -189,7 +189,7 @@ function pruneHistory(stateDirAbs, manualId) {
  * @param {object} [p.hooks]           故障注入：after:<state>
  * @param {string} [p.runId]           Run 内发布时事务目录放在 runs/<runId>/publication/
  */
-function publish({ projectRoot, stateDirAbs, manualId, documentFile, markdown, facts, captureIds = [], definitionRevisions = {}, force = false, hooks = {}, runId = null, sourceBaseline = null, generated = null, baseDocHash = null, acceptedEdits = [], sections = null }) {
+function publish({ projectRoot, stateDirAbs, manualId, documentFile, markdown, facts, captureIds = [], definitionRevisions = {}, definitionViews = null, stateRevisions = null, force = false, hooks = {}, runId = null, sourceBaseline = null, generated = null, baseDocHash = null, acceptedEdits = [], sections = null }) {
   const documentPath = toPosix(path.relative(projectRoot, documentFile));
   const oldDocHash = fileHash(documentFile);
   const newDocHash = hashOf(markdown);
@@ -214,6 +214,9 @@ function publish({ projectRoot, stateDirAbs, manualId, documentFile, markdown, f
     factsHash: facts.factsHash || hashOf(JSON.stringify(facts)),
     captureIds: captureIds.filter(Boolean),
     definitionRevisions,
+    // update 用：定义的"采集相关 / 只影响文案"两个视图与引用的页面状态（B5-07 / B5-12a）
+    ...(definitionViews ? { definitionViews } : {}),
+    ...(stateRevisions ? { stateRevisions } : {}),
     language: facts.factPack?.language || null,
     templateRevision: facts.factPack?.templateRevision || null,
     artifacts: (facts.images || []).map((image) => ({ kind: 'published', path: image.artifactPath, sha256: String(image.sha256).replace(/^sha256:/, '') })),

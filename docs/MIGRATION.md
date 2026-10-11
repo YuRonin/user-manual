@@ -39,6 +39,19 @@ manual migrate --rollback <迁移 id>             # 用完整备份恢复
 | Fixture 的 JSON 响应体在登记时校验（可解析、可选 `shape`、列表 id 唯一） | 写坏的 Fixture 以 `fixture-invalid` 拒绝使用 | 按报错修正 Fixture |
 | Service Worker 的注册在 Demo Context 中明确失败 | 之前 `serviceWorkers: block` 在当前 Playwright 下仍可能注册成功 | 无 |
 
+## 标注布局、拆图与 Scenario 状态（B4 / B5）
+
+| 变化 | 影响 | 需要做什么 |
+|---|---|---|
+| 渲染器升级为 `sharp-svg-3`（编号避让、拆图、主题参数全部生效） | 已有发布图在下次 `generate` 时重新派生一次（沿用原图，不重新登录或采集）；`verify --live` 对旧图报 `baseline-incompatible` 直到重新发布 | 无 |
+| 超过 `maxMarkersPerImage` 不再报 `marker-limit-exceeded`，改为拆成多张图 | 一条 Capture 可有多张 `published`（`part: N`，文件名带 `--part-N`）；页面与任务手册按顺序引用 | 无 |
+| 主题新增 `haloWidth`、`markerStrokeWidth`、`markerText`、`fontScale`；`primaryDark`、`labelText`、`focusMask`、`fallbackColor` 弃用 | 旧配置照常读取，出现弃用字段时提示 `annotation-theme-deprecated` | 删除弃用字段即可 |
+| 整页截图前回到页面顶部，fixed 元素按贴边方向换算 | 整页截图里 fixed / sticky 元素上的框与遮罩位置更准；截图尺寸与画布 × DPR 不一致时报 `geometry-scale-mismatch` | 无 |
+| 源码图解析版本升级（`package.json` / `package-lock.json` 只按运行相关内容计入指纹） | 升级后第一次 `update` / `generate` 会把所有页面视为全局配置变化一次 | 正常重新生成一次；之后只改 scripts 不再触发全量 |
+| 显式 Scenario 的 `setup`、`checkpoint.capture.mode`、`expected.redirects` 的查询参数、`preconditions`、`expected.roleAssertions` 开始生效 | 之前被静默忽略的字段现在会执行；`expected.state: empty` 需要 URL 以外的检查点断言；setup 中有副作用的动作被拒绝 | 按 `manual capture scenario:<id>` 的报错补全或删除这些字段 |
+| 标注失败按类别定向修复 | 同一失败反复出现时不再无限重拍：清单 / 计划问题与"图像输入没变的绘制失败"直接要求审核，连续两次修复失败报 `annotation-unrepairable` | 按提示修正定义或主题后 `generate --refresh` |
+| 发布记录新增 `definitionViews` / `stateRevisions` | `update` 能区分"只改文案"与"需要重采"；旧发布记录按 `model-changed:definition` 保守处理 | 无 |
+
 ## 历史产物只留当前版本
 
 早期版本把每次模型提交的完整快照、每次发布的记录和每次验证的报告都留在 `.manual/` 并入库，

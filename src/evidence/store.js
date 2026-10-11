@@ -172,6 +172,7 @@ function createCaptureStore({ projectRoot, stateDirAbs }) {
       const { path: artifactPath, reused } = install(bytes, sha, { dir: artifact.dir, prefix: artifact.prefix, ext });
       return {
         kind: artifact.kind,
+        ...(Number.isInteger(artifact.part) ? { part: artifact.part } : {}),
         path: artifactPath,
         sha256: sha,
         bytes: bytes.length,
@@ -254,4 +255,16 @@ function createCaptureStore({ projectRoot, stateDirAbs }) {
   return { begin, abort, commit, importRecord, read, list, readLatest, setLatest, cleanupStaging, evidenceDir, stagingRoot };
 }
 
-module.exports = { createCaptureStore, CaptureStoreError, sanitizeUrl, imageSize, evidenceDirFor, recordFileFor, CAPTURE_SCHEMA_VERSION };
+/** derivePublished 的发布图 → commit 的 published 产物；拆图（B4-02）时每张带 part，第 2 张起前缀加 --part-N。 */
+function publishedEntries(safe, { file, dir, prefix }) {
+  if (!safe?.published) return [];
+  if (!safe.parts) return [{ kind: 'published', file, dir, prefix }];
+  return safe.parts.map(({ part, file: partFile }) => ({ kind: 'published', part, file: partFile, dir, prefix: part === 1 ? prefix : `${prefix}--part-${part}` }));
+}
+
+/** 记录中的全部发布图，按 part 排序（未拆图的记录只有一张）。 */
+function publishedParts(record) {
+  return (record?.artifacts || []).filter((a) => a.kind === 'published').sort((a, b) => (a.part || 1) - (b.part || 1));
+}
+
+module.exports = { createCaptureStore, CaptureStoreError, sanitizeUrl, imageSize, evidenceDirFor, recordFileFor, CAPTURE_SCHEMA_VERSION, publishedEntries, publishedParts };

@@ -227,6 +227,22 @@ async function launchBrowser(providerConfig = {}, { browserType = null } = {}) {
   }
 }
 
+
+/**
+ * client 矩形 → 截图画布坐标（B4-04）。视口截图即 client 坐标；整页截图加滚动偏移，
+ * 但 position: fixed 的元素不随滚动：贴顶的按 client 坐标，贴底的落在文档底部。
+ * 标注目标与隐私遮罩都用这一个换算，二者不会相对错位。
+ */
+function toCanvasRect(rect, { fullPage, geometry, pinned = null }) {
+  if (!fullPage) return { ...rect };
+  if (pinned === 'top') return { ...rect };
+  if (pinned === 'bottom') {
+    const lift = (geometry.documentSize?.height || 0) - (geometry.viewport?.height || 0);
+    return { ...rect, y: rect.y + lift };
+  }
+  return { ...rect, x: rect.x + (geometry.scroll?.x || 0), y: rect.y + (geometry.scroll?.y || 0) };
+}
+
 class PlaywrightBrowserProvider extends BrowserProvider {
   /**
    * @param {object} options  除 BrowserProvider 的字段外：
@@ -307,6 +323,7 @@ class PlaywrightBrowserProvider extends BrowserProvider {
         this.mockedRequests.push(`${method} ${url.pathname}`);
         this.guard.mocked.push(`${method} ${url.pathname}`);
         this.guard.routes[index].hits++;
+        if (hit.delayMs) await new Promise((resolve) => setTimeout(resolve, hit.delayMs));
         return route.fulfill({ status: hit.status, contentType: hit.contentType, body: hit.body });
       }
       if (verdict === 'block') {
@@ -667,17 +684,21 @@ class PlaywrightBrowserProvider extends BrowserProvider {
 
   async uniqueVisibleLocator(target) {
     const strategies = [target, ...(target.alternatives || [])];
+    let anyMatch = false;
     for (const [index, strategy] of strategies.entries()) {
       const locator = this.locatorFor({ ...strategy, within: strategy.within || target.within });
       const visible = [];
-      for (let i = 0, count = await locator.count(); i < count; i++) {
+      const count = await locator.count();
+      if (count > 0) anyMatch = true;
+      for (let i = 0; i < count; i++) {
         const item = locator.nth(i);
         if (await item.isVisible().catch(() => false)) visible.push(item);
       }
       if (visible.length > 1) throw Object.assign(new Error(`目标元素匹配到 ${visible.length} 个可见结果，请限定所在区域。`), { code: 'target-ambiguous' });
       if (visible.length === 1) { this.lastResolution = { strategyIndex: index, fallback: index > 0 }; return visible[0]; }
     }
-    throw Object.assign(new Error('目标元素不存在或不可见；检查前置数据、空结果和页面状态。'), { code: 'target-not-visible' });
+    // presence 区分"页面上根本没有"与"有但不可见"（B5-13）；code 保持不变，旧的处理分支不受影响
+    throw Object.assign(new Error(anyMatch ? '目标元素存在但不可见；检查它需要的前置交互（展开、悬停、切换标签）。' : '目标元素不存在；检查前置数据、空结果和页面状态。'), { code: 'target-not-visible', presence: anyMatch ? 'hidden' : 'absent' });
   }
 
   /** 元素实际画出来了吗：自身 visibility 不可见，或自身与祖先 opacity 连乘近 0（hover 才显示的图标常见写法）都算透明。 */
@@ -737,8 +758,8 @@ class PlaywrightBrowserProvider extends BrowserProvider {
       revealedBy = 'hover';
       if (await this.isTransparent(locator)) throw transparent();
     }
-    // 被浮层盖住的目标照常返回几何，由调用方判定为 target-occluded（B2-08）
-    return { target, rect: await locator.boundingBox(), resolution: this.lastResolution, revealedBy, obscuredBy: await this.coverOf(locator) };
+    // 被浮层盖住的目标照常返回几何，由调用方判定为 target-occluded（B2-08）；boundingBox 为空时 rect 为 null，不能当作已定位
+    return { target, rect: await locator.boundingBox(), resolution: this.lastResolution, revealedBy, obscuredBy: await this.occlusionOf(locator), pinned: await this.pinnedOf(locator) };
   }
 
   /**
@@ -755,6 +776,46 @@ class PlaywrightBrowserProvider extends BrowserProvider {
       const label = top.getAttribute('role') || top.tagName.toLowerCase();
       return `${label}「${(top.innerText || top.getAttribute('aria-label') || '').trim().slice(0, 40)}」`;
     }).catch(() => null);
+  }
+
+  /**
+   * 标注目标的遮挡（B4-05）：中心点 + 四个内侧点（25% / 75%）取样，中心被盖住或至少 3 个点被盖住即视为遮挡。
+   * 只看中心点会漏掉盖住大半个按钮的浮层。返回遮挡物描述或 null。
+   */
+  occlusionOf(locator) {
+    return locator.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const points = [[0.5, 0.5], [0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]];
+      let covered = 0;
+      let first = null;
+      let centerCovered = false;
+      points.forEach(([fx, fy], i) => {
+        const top = document.elementFromPoint(r.left + r.width * fx, r.top + r.height * fy);
+        if (!top || el === top || el.contains(top) || top.contains(el)) return;
+        covered++;
+        if (i === 0) centerCovered = true;
+        first = first || top;
+      });
+      if (!centerCovered && covered < 3) return null;
+      const label = first.getAttribute('role') || first.tagName.toLowerCase();
+      return `${label}「${(first.innerText || first.getAttribute('aria-label') || '').trim().slice(0, 40)}」`;
+    }).catch(() => null);
+  }
+
+  /** 元素或其祖先是 position: fixed 时返回 'top' / 'bottom'（按贴边方向），否则 null。整页截图据此换算坐标（B4-04）。 */
+  pinnedOf(locator) {
+    return locator.evaluate((el) => {
+      for (let node = el; node && node !== document.documentElement; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (style.position === 'fixed') return style.top === 'auto' && style.bottom !== 'auto' ? 'bottom' : 'top';
+      }
+      return null;
+    }).catch(() => null);
+  }
+
+  /** 整页截图前回到页面顶部：client 坐标即文档坐标，sticky 元素也回到自然位置（B4-04）。 */
+  async scrollToTop() {
+    if (this.page) await this.page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
   }
 
   async ensureUnobscured(locator, { timeoutMs = 5000 } = {}) {
@@ -818,6 +879,14 @@ class PlaywrightBrowserProvider extends BrowserProvider {
     const candidates = await this.page.evaluate(() => {
       const out = [];
       const seen = new Set();
+      // position: fixed 的祖先决定整页截图中的位置（与 pinnedOf 一致）
+      const pinnedOf = (el) => {
+        for (let node = el; node && node !== document.documentElement; node = node.parentElement) {
+          const style = getComputedStyle(node);
+          if (style.position === 'fixed') return style.top === 'auto' && style.bottom !== 'auto' ? 'bottom' : 'top';
+        }
+        return null;
+      };
       const add = (element, text, label, source, inputType, rectOverride) => {
         const rect = rectOverride || element.getBoundingClientRect();
         if (!rect.width || !rect.height) return;
@@ -828,6 +897,7 @@ class PlaywrightBrowserProvider extends BrowserProvider {
           text: String(text || ''), label: String(label || ''), source,
           inputType: String(inputType || ''), pagePath: location.pathname,
           selectorHint: element.id ? `#${element.id}` : '',
+          pinned: pinnedOf(element),
           rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
         });
       };
@@ -884,9 +954,8 @@ class PlaywrightBrowserProvider extends BrowserProvider {
     // 完全落在图像外的元素不会出现在像素里，可以跳过。
     const geometry = await this.collectGeometry({ fullPage });
     const canvas = fullPage ? geometry.documentSize : geometry.viewport;
-    const offset = fullPage ? geometry.scroll : { x: 0, y: 0 };
     return candidates
-      .map((candidate) => ({ ...candidate, rect: clipRect({ ...candidate.rect, x: candidate.rect.x + offset.x, y: candidate.rect.y + offset.y }, canvas) }))
+      .map(({ pinned, ...candidate }) => ({ ...candidate, rect: clipRect(toCanvasRect(candidate.rect, { fullPage, geometry, pinned }), canvas) }))
       .filter((candidate) => candidate.rect);
   }
 
@@ -1047,4 +1116,4 @@ class PlaywrightBrowserProvider extends BrowserProvider {
   }
 }
 
-module.exports = { PlaywrightBrowserProvider, launchBrowser, launchOptionsFor, loadPlaywright, resolvePlaywright, legacyPlaywrightCandidates, FREEZE_CSS };
+module.exports = { PlaywrightBrowserProvider, launchBrowser, launchOptionsFor, loadPlaywright, resolvePlaywright, legacyPlaywrightCandidates, FREEZE_CSS, toCanvasRect };

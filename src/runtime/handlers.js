@@ -19,7 +19,7 @@ const { writeFileAtomic } = require('../util/atomic-write');
 const { createProjectStore } = require('../store/project');
 const { approvalState, APPROVAL_STATES, approvalMessage } = require('../model/approval');
 const { ANALYSIS } = require('../inspect/model');
-const { createCaptureStore } = require('../evidence/store');
+const { createCaptureStore, publishedParts } = require('../evidence/store');
 const { annotationSummary } = require('../evidence/integrity');
 const { currentScope, staleness } = require('../annotations/proof');
 const { packWarnings, qualitySummary } = require('../generate/quality-summary');
@@ -223,11 +223,16 @@ function readRecords(ctx, captureIds) {
 
 function writeCaptureCache(ctx, task, current, outputs, records, observedAt) {
   if (!ctx.mode.write || !ctx.cacheStore) return;
+  const annotation = annotationSummary(records);
+  // 定向修复预算（B5-16）：同一采集输入下连续标注失败的次数；成功即归零
+  const previous = ctx.cacheStore.get('capture', current.captureKey);
+  const repairAttempts = annotation.status === 'passed' ? 0
+    : (previous && previous.annotation?.status !== 'passed' ? Number(previous.meta?.repairAttempts || 0) + 1 : 1);
   ctx.cacheStore.put({
     kind: 'capture', key: current.captureKey, input: current.captureKeyInput, uncertainty: current.captureUncertainty,
     subject: `capture:${subjectKey(task.input.subject)}`, outputRefs: outputs, observedAt,
-    validationScopes: scopesPassed(records), privacy: privacySummary(records), annotation: annotationSummary(records),
-    meta: { imageInputs: imageInputsOf(ctx.config) },
+    validationScopes: scopesPassed(records), privacy: privacySummary(records), annotation,
+    meta: { imageInputs: imageInputsOf(ctx.config), repairAttempts },
   });
 }
 
@@ -247,7 +252,14 @@ function restoreProjection(ctx, subject, outputs, observedAt, current) {
     return;
   }
   const entity = base.model.tasks.find((t) => t.id === subject.id);
-  if (JSON.stringify(entity.lastCapture?.captureIds || null) === JSON.stringify(captureIds)) return;
+  if (JSON.stringify(entity.lastCapture?.captureIds || null) === JSON.stringify(captureIds)) {
+    // 缓存命中且指针未变：证据仍然有效，残留的 stale 标记必须清掉，否则 generate 一直报 evidence-stale（B5-12）
+    if (entity.stale) {
+      const { stale: _stale, ...fresh } = entity;
+      projectStore.commit({ base, kind: 'observation', changes: { tasks: [fresh] } });
+    }
+    return;
+  }
   const manifest = outputs.find((r) => r.kind === 'file');
   const updated = taskProjection(entity, base.model.pages, {
     capturedAt: observedAt, captureIds, manifestRelative: manifest.ref,
@@ -267,7 +279,8 @@ async function capture(ctx, task) {
     const found = lookup({
       store: ctx.cacheStore, keyInfo: { kind: 'capture', key: current.captureKey, input: current.captureKeyInput, uncertainty: current.captureUncertainty },
       mode: ctx.mode, projectRoot: ctx.projectRoot, stateDirAbs: ctx.stateDirAbs, requiredScopes: ['page-identity'],
-      privacy: { audience: ctx.config.privacy?.audience || 'public' }, cachePolicy: ctx.config.cache, requireAnnotation: true, now: ctx.now,
+      // 定向修复（task.reuse.repair）：沿用标注失败那次的原图，由后续 derive-image 重新派生
+      privacy: { audience: ctx.config.privacy?.audience || 'public' }, cachePolicy: ctx.config.cache, requireAnnotation: !task.reuse.repair, now: ctx.now,
     });
     if (found.hit) {
       restoreProjection(ctx, subject, found.outputRefs, found.observedAt, current);
@@ -324,6 +337,7 @@ function remapManifest(ctx, manifestRef, mapping, records) {
         sanitized: artifactOf('sanitized') ? path.join(ctx.projectRoot, artifactOf('sanitized').path) : null,
         annotated: artifactOf('published')?.path || null,
         sha256: artifactOf('published')?.sha256 || null,
+        annotatedParts: publishedParts(record).length > 1 ? publishedParts(record).map((a) => ({ part: a.part || 1, path: a.path, sha256: a.sha256 })) : undefined,
         privacy: record.privacy,
         redactions: safe.redactions,
         annotations: safe.annotations,

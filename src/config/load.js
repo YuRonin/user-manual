@@ -183,6 +183,7 @@ function loadConfig(projectRoot) {
   const annotation = resolveAnnotationConfig(raw.annotation);
   if (!annotation.ok) return { ok: false, errors: annotation.errors };
   config.annotation = annotation.config;
+  warnings.push(...(annotation.warnings || []));
 
   // index.md 目录分组（docs.catalog）：整段可选，不配置时沿用默认两组
   const catalog = resolveCatalogConfig(raw.docs?.catalog);

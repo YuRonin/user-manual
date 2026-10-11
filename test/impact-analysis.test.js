@@ -18,6 +18,7 @@ const { analyzeProject, analyzeImpact } = require('../src/update/impact');
 const { loadConfig } = require('../src/config/load');
 const { newUuid } = require('../src/model/ids');
 const { hashFile } = require('../src/inspect/fingerprint');
+const { createProjectStore } = require('../src/store/project');
 
 const CLI = path.resolve(__dirname, '..', 'bin', 'manual.js');
 const HEX = 'a'.repeat(64);
@@ -151,8 +152,48 @@ test('全局配置（package.json）变化：保守扩散到所有页面并给�
   const report = analyze(root);
   assert.deepStrictEqual(ids(report), ALL.slice().sort());
   assert.strictEqual(report.confidence, 'conservative');
-  assert.ok(report.groups[0].report.broadImpact.includes('global-changed:package.json'));
+  assert.ok(report.groups[0].report.broadImpact.includes('global-changed:package.json#dependencies'), report.groups[0].report.broadImpact.join(','));
   assert.strictEqual(section(report, 'page-profile').confidence, 'conservative');
+});
+
+test('B5-09 package.json 只改 scripts：不扩散到任何页面；分级器识别为可忽略', (root) => {
+  prepare(root);
+  publish(root, ALL);
+  const file = path.join(root, 'package.json');
+  const pkg = JSON.parse(fs.readFileSync(file, 'utf8'));
+  pkg.scripts = { ...(pkg.scripts || {}), lint: 'eslint .' };
+  fs.writeFileSync(file, JSON.stringify(pkg, null, 2));
+  const report = analyze(root);
+  assert.deepStrictEqual(ids(report), [], JSON.stringify(report.sections.map((s) => s.reasonPaths[0])));
+  // 指纹只取运行相关字段：内容二次确认判定为"与基线等价"，不进入影响
+  assert.ok(report.groups[0].report.identical.some((c) => c.path === 'package.json'), JSON.stringify(report.groups[0].report.identical));
+  const { classifyGlobalChange } = require('../src/update/global-files');
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim();
+  assert.deepStrictEqual(classifyGlobalChange({ projectRoot: root, base: head, file: 'package.json' }), { ignored: true, detail: 'package.json#scripts' });
+});
+
+test('B5-07 .manual 定义变化：发布记录的分视图 revision 区分需要重采与只改文案；旧记录按 definition 处理', (root) => {
+  prepare(root);
+  publish(root, ['page-chat', 'page-skills', 'page-profile']);
+  const { definitionViews } = require('../src/update/model-changes');
+  const { definitionRevision } = require('../src/model/revision');
+  const store = createProjectStore({ stateDirAbs: stateDir(root), docsOutputDir: 'docs/manual' });
+  const model = store.readCommitted().model;
+  const page = (id) => model.pages.find((p) => p.id === id);
+  const rewrite = (manualId, extra) => {
+    const release = { ...releases.readCurrentRelease(stateDir(root), manualId), id: newUuid(), ...extra };
+    releases.writeRelease(stateDir(root), release);
+    releases.setCurrent(stateDir(root), release);
+  };
+  const chat = page('chat');
+  rewrite('page-chat', { definitionViews: { chat: definitionViews('page', { ...chat, guide: [{ id: 'send', title: '发送', instruction: '旧说明', target: { role: 'button', name: '发送' } }] }) } });
+  rewrite('page-skills', { definitionViews: { skills: definitionViews('page', { ...page('skills'), title: '旧标题' }) } });
+  rewrite('page-profile', { definitionRevisions: { profile: definitionRevision('page', { ...page('profile'), purpose: '旧用途' }) } });
+  const report = analyze(root);
+  const reasons = (id) => section(report, id).reasonPaths.map((p) => p[1]);
+  assert.deepStrictEqual(reasons('page-chat'), ['model-changed:capture']);
+  assert.deepStrictEqual(reasons('page-skills'), ['model-changed:docs-only']);
+  assert.deepStrictEqual(reasons('page-profile'), ['model-changed:definition']);
 });
 
 test('框架约定 layout 变化：按依赖图精确影响所有页面（非全局猜测）', (root) => {
@@ -242,7 +283,7 @@ test('非 Git 项目：用发布时的图快照比较内容', (root) => {
   fx.writeFile(root, 'components/profile/Only.tsx', 'export default function Only() { return 2 }\n');
   const report = analyze(root);
   assert.strictEqual(report.groups[0].report.mode, 'snapshot');
-  assert.deepStrictEqual(ids(report), ['page-profile']);
+  assert.deepStrictEqual(ids(report), ['page-profile'], JSON.stringify(report.sections.map((s) => s.reasonPaths[0])));
 }, { git: false });
 
 test('内容二次确认：Git 报告修改但内容与基线一致 → 不计入影响', (root) => {

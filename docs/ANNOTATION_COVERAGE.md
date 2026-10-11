@@ -37,7 +37,18 @@
 
 ## 逐项结果
 
-每一项记录 `located / drawn / visible / visibleRatio / redactedRatio / locator / reason`；`locator` 是实际命中的定位（`{ strategyIndex, fallback }`，或声明矩形 `{ source: 'declared-rect' }`），用了备选定位时采集给出 `annotation-locator-fallback` 提示。几何上能判定的失败：`target-not-declared`、`target-not-located`、`target-occluded`（中心点被别的元素盖住）、`outside-image`、`partially-clipped`（露出比例低于主题的 `minVisibleRatio`，默认 0.8，可配置）、`target-redacted`（一半以上被隐私遮罩盖住）、`marker-limit-exceeded`。Required 只要有一项失败就不生成发布图。
+每一项记录 `located / drawn / visible / visibleRatio / redactedRatio / outlineRatio / part / locator / reason`；`locator` 是实际命中的定位（`{ strategyIndex, fallback }`，或声明矩形 `{ source: 'declared-rect' }`），用了备选定位时采集给出 `annotation-locator-fallback` 提示。几何上能判定的失败：`target-not-declared`、`target-not-located`（包括元素没有几何）、`target-occluded`（中心点被盖住，或五个取样点中至少三个被盖住）、`outside-image`、`partially-clipped`（露出比例低于主题的 `minVisibleRatio`，默认 0.8，可配置）、`target-redacted`（一半以上被隐私遮罩盖住，多块遮罩按并集计算）、`annotation-layout-crowded`（编号找不到不压住其他目标、编号和遮罩的位置）、`marker-outside-image` / `marker-redacted`（编号出图或压在遮罩上）。Required 只要有一项失败就不生成发布图。
+
+## 布局与拆图
+
+- **编号位置**：依次尝试目标框左侧（与上边线居中）、右侧、上方、下方、左右居中、上下靠右，外侧都放不下时才放进框内角。候选位置必须完整落在画布内，且不能压住已放置的编号、其他目标的元素矩形和隐私遮罩。全部不可用时这一项不画，记 `annotation-layout-crowded`，不会硬塞到重叠位置。贴边目标的框会裁剪到画布边缘，不会整体平移、指向旁边的元素。
+- **拆图**：标注数超过主题的 `maxMarkersPerImage`（默认 5）时，按顺序拆成多张发布图（第 1 张 1–5，第 2 张 6–10……）。编号全局连续，正文编号不变。同一条 Capture 记录里每张图是一个 `part: N` 的 `published` 产物，第 2 张起文件名带 `--part-N`；逐项结果与精简证明记录每项在哪张图。页面手册和任务步骤按顺序引用全部分图。
+- **坐标**：整页截图前先回到页面顶部；`position: fixed` 的元素不加滚动偏移，贴底的落到文档底部。标注框和隐私遮罩用同一套换算。截图像素尺寸与画布 × DPR 不一致时报 `geometry-scale-mismatch`，不出发布图。
+- **主题**：`primary`、`halo` / `haloWidth`、`labelBackground` / `markerStrokeWidth`（编号描边）、`markerText`、`markerSize` / `fontScale`（字号 = 编号直径 × fontScale）、`outlineWidth`、`targetPadding`、`targetRadius` 全部生效。`primaryDark`、`labelText`、`focusMask`、`fallbackColor` 没有消费者，配置里出现时提示 `annotation-theme-deprecated`。布局与主题变化通过渲染器版本（`sharp-svg-3`）和主题修订号触发重新派生，不需要重新登录或采集。
+
+## 在线验证的视觉比较
+
+`verify --live` 不拿历史带标注图去比新的无标注图。它用基线 Capture 冻结的标注计划，在当前页面重新定位、重新绘制，然后带标注图对带标注图逐张比较（拆图时每张都比，张数不同即视为变化，`layer: annotated`）。基线没有标注计划时，未标注的 sanitized 对 sanitized（`layer: sanitized`）。只换了标注主题时结果是 `baseline-incompatible`（`annotation-theme-changed`），重新派生即可，不算页面漂移。
 
 ## 证据：随仓库提交的精简证明
 

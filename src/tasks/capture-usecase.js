@@ -70,7 +70,7 @@ async function captureTask({ projectRoot, config, taskId, session = null, runId 
     ? { ok: true, scenario: variantScenario, variant: true }
     : resolveScenario(stateDir, deriveTaskScenario(task, pages, config), { stepIds: (task.steps || []).map((step) => step.id) });
   if (!scenario.ok) throw inputError('invalid-scenario', scenario.errors);
-  const built = buildCapturePlan(task, pages, { scenario: scenario.scenario, config, preflight });
+  const built = buildCapturePlan(task, pages, { scenario: scenario.scenario, scenarioExplicit: !!(scenario.variant || scenario.explicit), config, preflight });
   if (!built.ok) {
     const APPROVAL_CODES = { pending: 'approval-required', 'legacy-unverified': 'approval-required', 'scope-changed': 'scope-changed', rejected: 'approval-rejected' };
     throw inputError(APPROVAL_CODES[built.code] || 'invalid-plan', built.errors);

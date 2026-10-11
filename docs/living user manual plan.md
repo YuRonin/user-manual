@@ -5,7 +5,7 @@
 > **适用仓库**：`E:\NeoStar\user-manual`（审计时 `living-manual` 0.1.0）  
 > **依据**：《Living User Manual Skill 七阶段优化进度审计报告》（2026-10-10；基线 `main@6da5bf7` + 审计时工作区未提交改动）  
 > **补充依据**：NeoAgent `demo/website/docs/manual-full-rerun-plan.md` 的“已知问题与对策”（2026-10-10）。该记录是一次测试环境运行快照；实施前仍须复核现状。  
-> **实施状态**：B0–B3 已完成（见第 15 节）；B4 起待实施。未勾选的项目不代表已修改或验证通过。  
+> **实施状态**：B0–B4 已完成，B5 基本完成（见第 15 节）；B6 待实施。未勾选的项目不代表已修改或验证通过。  
 > **维护方式**：每批次开始前重新核对最新仓库；完成后勾选任务、登记测试和变更证据。
 
 ---
@@ -340,22 +340,22 @@ Page.features [Feature ID + scope + source]
 
 ### B4 工作项
 
-- [ ] **B4-01｜标注布局器**：编号候选位置按 左/右/上/下/框内角及安全留白评分；与其他编号、边框、隐私遮挡区域检测碰撞；无安全位置时记录明确失败而不是硬塞。
-- [ ] **B4-02｜密度控制与拆图**：`maxMarkersPerImage` 是触发分组的条件而不是整次报错；保留单个 Screenshot 的来源与分图 `part-N`、全局编号及 Section 引用。
-- [ ] **B4-03｜主题参数统一**：光晕、线宽、字体大小、颜色、编号背景和字号比例全部由主题控制；删除死配置或接入消费方。
-- [ ] **B4-04｜坐标与图像自检**：严格核对 viewport/full-page 的截图尺寸、DPR、scroll offset、null boundingBox；修复 fixed/sticky 在整页图的坐标偏移，并同时覆盖隐私打码。
-- [ ] **B4-05｜裁切与遮挡**：对真实可见占比、边框有效像素、马赛克交集计算结果；Required 失败会沿现有门禁传播。
-- [ ] **B4-06｜视觉漂移公平比较**：对比相同层级（sanitized 对 sanitized，或按同一 plan 重绘 annotated 对 annotated）；避免“历史带标注图 vs 新无标注图”的必然误报。
-- [ ] **B4-07｜Golden/Fixture**：覆盖紧邻按钮、四边贴边、全宽按钮、密集表单、滚动 + fixed/sticky、DPR=1/1.5/2、不同页面主题。
-- [ ] **B4-08｜异常处理**：拆图失败、布局拥挤必须有可诊断的 `annotation-*` 代码，不回写成导航失败。
+- [x] **B4-01｜标注布局器**：编号候选位置按 左/右/上/下/框内角及安全留白评分；与其他编号、边框、隐私遮挡区域检测碰撞；无安全位置时记录明确失败而不是硬塞。
+- [x] **B4-02｜密度控制与拆图**：`maxMarkersPerImage` 是触发分组的条件而不是整次报错；保留单个 Screenshot 的来源与分图 `part-N`、全局编号及 Section 引用。
+- [x] **B4-03｜主题参数统一**：光晕、线宽、字体大小、颜色、编号背景和字号比例全部由主题控制；删除死配置或接入消费方。
+- [x] **B4-04｜坐标与图像自检**：严格核对 viewport/full-page 的截图尺寸、DPR、scroll offset、null boundingBox；修复 fixed/sticky 在整页图的坐标偏移，并同时覆盖隐私打码。
+- [x] **B4-05｜裁切与遮挡**：对真实可见占比、边框有效像素、马赛克交集计算结果；Required 失败会沿现有门禁传播。
+- [x] **B4-06｜视觉漂移公平比较**：对比相同层级（sanitized 对 sanitized，或按同一 plan 重绘 annotated 对 annotated）；避免“历史带标注图 vs 新无标注图”的必然误报。（页面手册已实现；任务步骤截图的在线视觉比较未做，`verify --live` 对任务仍只做行为回放）
+- [x] **B4-07｜Golden/Fixture**：覆盖紧邻按钮、四边贴边、全宽按钮、密集表单、滚动 + fixed/sticky、DPR=1/1.5/2、不同页面主题。（`test/annotation-layout.test.js` 几何单测 + `test/annotation-golden.test.js` 真实浏览器像素断言；“不同页面主题”只覆盖了标注主题，未做页面配色变体）
+- [x] **B4-08｜异常处理**：拆图失败、布局拥挤必须有可诊断的 `annotation-*` 代码，不回写成导航失败。
 
 ### B4 验收
 
-- [ ] **AC-16**：7 个目标、单图上限 5 个 → 生成 2 张图（例如 1–5、6–7），说明与编号一致。
-- [ ] **AC-17**：紧邻目标、贴边、全宽目标的编号不压住必要控件，边框不错误指向其他元素。
-- [ ] **AC-18**：DPR=1、1.5、2 和整页滚动组合下标注/隐私遮罩仍准确落在目标位置。
-- [ ] **AC-19**：没有页面变化时连续运行 `verify --live`，带标注页面返回 `visual.status = same`（或等效稳定结果）。
-- [ ] **AC-20**：设计变更后可以只重派生图片而不强制重新登录和采集。
+- [x] **AC-16**：7 个目标、单图上限 5 个 → 生成 2 张图（例如 1–5、6–7），说明与编号一致。
+- [x] **AC-17**：紧邻目标、贴边、全宽目标的编号不压住必要控件，边框不错误指向其他元素。
+- [x] **AC-18**：DPR=1、1.5、2 和整页滚动组合下标注/隐私遮罩仍准确落在目标位置。
+- [x] **AC-19**：没有页面变化时连续运行 `verify --live`，带标注页面返回 `visual.status = same`（或等效稳定结果）。
+- [x] **AC-20**：设计变更后可以只重派生图片而不强制重新登录和采集。
 
 ---
 
@@ -366,36 +366,36 @@ Page.features [Feature ID + scope + source]
 
 ### B5-A：Scenario 状态覆盖
 
-- [ ] **B5-01｜页面 setup 动作**：让 `scenario.setup` 有实际消费者，可复用任务已存在的 `validateAction / performAction`，而不是再写第二套浏览器动作引擎。
-- [ ] **B5-02｜Checkpoint 实际执行**：`checkpoint.state/afterStepId`、`capture.annotations`、`capture.mode`、`expected` 与 Fixture/身份的语义统一；对没有消费者的字段明确“实现或弃用”，不能继续无声接受。
-- [ ] **B5-03｜可复现状态**：稳定复现 Modal、Dropdown、Tab、Hover、Loading、Error、Empty；Empty 至少需要明确非 URL 的断言证据；Loading 使用可控 Fixture 时序，不靠碰巧捕获。
-- [ ] **B5-04｜逐角色断言**：Auth Profile 与角色期望一致；权限不足应报告真实限制，不自动代入其他角色。
-- [ ] **B5-05｜截图后状态复核**：复核 expectedState、hover/菜单可见性，避免定位步骤移动鼠标后把菜单弄没却留下“已成功”记录。
-- [ ] **B5-06｜变体出口**：变体截图可经 Section/手册页面明确引用，而不是仅存档却无人消费；`verify --live` 不应永远只检查默认状态。
-- [ ] **B5-06a｜合法跳转与登录判定**：Scenario 明确声明的 `redirects`（如 `/password-reset` → `/login?view=reset`）应按预期终点和页面状态校验；仅 URL 落到 `/login` 不得直接判为需要登录。未声明跳转及真正的登录墙仍应报告。`verify --live` 对合法跳转不能长期只给 `inconclusive`。
-- [ ] **B5-06b｜一次性前置数据**：对“待补充”会话、已保存产物等消耗型状态记录创建/选取/消费前提；每次重采前检查状态仍在，并确认目标位于可见区域。失效时提示重新准备，不能悄悄截取其他会话或视口外标注。
+- [x] **B5-01｜页面 setup 动作**：让 `scenario.setup` 有实际消费者，可复用任务已存在的 `validateAction / performAction`，而不是再写第二套浏览器动作引擎。（`scenario.setup` 经 `runSetup` 复用 `performAction` 与断言；有副作用名称的动作在 schema 拒绝；页面采集与 `verify scenario:<id> --live` 都执行）
+- [x] **B5-02｜Checkpoint 实际执行**：`checkpoint.state/afterStepId`、`capture.annotations`、`capture.mode`、`expected` 与 Fixture/身份的语义统一；对没有消费者的字段明确“实现或弃用”，不能继续无声接受。（`checkpoint.capture.mode: fullPage` 生效；显式 Scenario 的 `expected` 进入任务入口；`routeBindingId` / `data.revision` / `checkpoint.state` 仍是派生定义里的字段，未加弃用提示）
+- [x] **B5-03｜可复现状态**：稳定复现 Modal、Dropdown、Tab、Hover、Loading、Error、Empty；Empty 至少需要明确非 URL 的断言证据；Loading 使用可控 Fixture 时序，不靠碰巧捕获。（Modal / Dropdown / Tab / Hover / Loading 真实浏览器用例；empty 必须有非 URL 断言；Fixture `delayMs`）
+- [x] **B5-04｜逐角色断言**：Auth Profile 与角色期望一致；权限不足应报告真实限制，不自动代入其他角色。（Scenario `expected.roleAssertions` → `auth-identity-mismatch`，不改用其他身份；按 auth profile 配置身份断言未做）
+- [x] **B5-05｜截图后状态复核**：复核 expectedState、hover/菜单可见性，避免定位步骤移动鼠标后把菜单弄没却留下“已成功”记录。（`captureStable` 的 `assertState`：页面变体检查点断言、任务 after 截图的预期状态 → `scenario-state-lost`）
+- [ ] **B5-06｜变体出口**：变体截图可经 Section/手册页面明确引用，而不是仅存档却无人消费；`verify --live` 不应永远只检查默认状态。（部分：`verify scenario:<id> --live` 已可在线验证变体；Section / 手册页面引用变体截图仍未做）
+- [x] **B5-06a｜合法跳转与登录判定**：Scenario 明确声明的 `redirects`（如 `/password-reset` → `/login?view=reset`）应按预期终点和页面状态校验；仅 URL 落到 `/login` 不得直接判为需要登录。未声明跳转及真正的登录墙仍应报告。`verify --live` 对合法跳转不能长期只给 `inconclusive`。（`redirects` 支持 `{ path, query }`；页面采集、任务入口、认证判定、`verify --live` 一致）
+- [x] **B5-06b｜一次性前置数据**：对“待补充”会话、已保存产物等消耗型状态记录创建/选取/消费前提；每次重采前检查状态仍在，并确认目标位于可见区域。失效时提示重新准备，不能悄悄截取其他会话或视口外标注。（Scenario `preconditions` 每次截图前确认 → `precondition-consumed`）
 
 **Scenario 验收**：Modal / Dropdown / Tab / Hover 四个真实浏览器 Fixture 能打开指定状态、在弹层内部完成 Required 标注、经 replay 得到同一结论；损坏的 Scenario 定义不能静默 `continue`。另以合法密码重置跳转、付款空状态 Fixture、已消费的待补充会话为负例/正例，检查跳转、空状态和前置数据诊断。
 
 ### B5-B：增量更新准确性
 
-- [ ] **B5-07｜模型定义和配置变更**：`update --plan` 能识别 `.manual/` 的 guide/任务/Scenario/图片配置变化，同时把纯文档修改与采集必要变更区分开。
-- [ ] **B5-08｜依赖图完整性**：未解析依赖采用 `partial/unresolved` 并保守扩散，不能宣称 complete；B1 修复规则建立持续测试。
-- [ ] **B5-09｜全局文件分级**：package.json scripts 等无运行影响修改不应全量重采；React/Playwright/核心运行依赖升级时有明确失效理由；lockfile 处理需依据实际解析相关性而非粗暴“一变全重建”。
-- [ ] **B5-10｜新页面/移动路由可见性**：文本输出提示未归属改动、未发布新页面、renameCandidates；不要静默过滤。
-- [ ] **B5-11｜视觉/语义漂移回流**：live verify 结果进入 update 规划或待修清单，能定位到 page/task/scenario/section。
-- [ ] **B5-12｜缓存新鲜度**：消除 `task.stale` 在缓存命中后未清除等问题，冻结版本变化可解释，避免误复用。
-- [ ] **B5-12a｜页面状态定义的影响范围**：更改 `page:chat` 等共享状态断言时，列出所有引用该状态的任务和 Capture；`verify` 应说明 `evidence-stale` 的具体状态修订及需要重采的范围，不得把历史证据误判为当时无效。
+- [x] **B5-07｜模型定义和配置变更**：`update --plan` 能识别 `.manual/` 的 guide/任务/Scenario/图片配置变化，同时把纯文档修改与采集必要变更区分开。（发布记录 `definitionViews` 区分 `model-changed:capture` / `docs-only`；旧记录 `model-changed:definition`；主题 / 渲染器 → `image-inputs-changed`）
+- [x] **B5-08｜依赖图完整性**：未解析依赖采用 `partial/unresolved` 并保守扩散，不能宣称 complete；B1 修复规则建立持续测试。（沿用 B1 的 partial / unresolved 保守扩散与回归测试，本批未改）
+- [x] **B5-09｜全局文件分级**：package.json scripts 等无运行影响修改不应全量重采；React/Playwright/核心运行依赖升级时有明确失效理由；lockfile 处理需依据实际解析相关性而非粗暴“一变全重建”。（`package.json` 只看运行相关字段、`package-lock.json` 只看运行关键依赖版本，指纹与 update 用同一算法；pnpm / yarn lockfile 仍保守）
+- [x] **B5-10｜新页面/移动路由可见性**：文本输出提示未归属改动、未发布新页面、renameCandidates；不要静默过滤。（update 文本与 JSON 输出 `unpublishedPages` / `renameCandidates` / `unowned` / `ignoredGlobal`）
+- [x] **B5-11｜视觉/语义漂移回流**：live verify 结果进入 update 规划或待修清单，能定位到 page/task/scenario/section。（发布后最近一次 live 报告失败 / 漂移 → `live-drift:<类别>` 进入 update 目标）
+- [x] **B5-12｜缓存新鲜度**：消除 `task.stale` 在缓存命中后未清除等问题，冻结版本变化可解释，避免误复用。（缓存命中且指针未变时清除任务残留的 `stale`；未单独加测试，由 runtime 测试间接覆盖）
+- [x] **B5-12a｜页面状态定义的影响范围**：更改 `page:chat` 等共享状态断言时，列出所有引用该状态的任务和 Capture；`verify` 应说明 `evidence-stale` 的具体状态修订及需要重采的范围，不得把历史证据误判为当时无效。（发布记录 `stateRevisions`，update 报 `state-changed:<页面>#<状态>`；`verify` 的 `evidence-stale` 文案未改）
 
 **更新验收**：修改 `.manual/pages/` 对应 guide 会列出受影响文档；只改无关脚本不引起全量截图；修改关键共享依赖时影响范围可解释；单页面修改不会更新无关文档字节。
 
 ### B5-C：标注失败定向修复（有界、无副作用）
 
-- [ ] **B5-13｜失败原因分类**：`locate / visibility / state / plan / inventory / draw / description / privacy`；区分 not-found 与 not-visible；`annotation-*` 纳入 HINTS/POLICIES。
-- [ ] **B5-14｜定位短等待与备选记录**：有界等待元素（可用两次短重试作初始策略），记录 fallback 被采用的 locator 与当前证据，不静默替换原配置。
-- [ ] **B5-15｜Repair Planner**：只因主题/布局失败时重新 derive；定位失败时重新定位/局部补采；状态缺失才重新播放 Scenario；源清单错误进入审核而不是盲采。
-- [ ] **B5-16｜重试预算与幂等**：建议初始最多 **2 次定向修复**（独立于现有通用重试，需要总预算协调）；涉及写操作的任务不得在不确认副作用情况下自动重放。
-- [ ] **B5-17｜终态报告**：修复不可行时报告 `annotation-unrepairable`、关联 feature 和明确行动建议；`waiting_input` 不能被伪装为 succeeded。
+- [x] **B5-13｜失败原因分类**：`locate / visibility / state / plan / inventory / draw / description / privacy`；区分 not-found 与 not-visible；`annotation-*` 纳入 HINTS/POLICIES。（覆盖失败带 `category`；`target-not-found` / `target-not-visible` 区分；HINTS / POLICIES / CLASSIFY 补齐新码）
+- [x] **B5-14｜定位短等待与备选记录**：有界等待元素（可用两次短重试作初始策略），记录 fallback 被采用的 locator 与当前证据，不静默替换原配置。（标注目标定位两次 300ms 短重试；备选命中沿用 B2-07 记录）
+- [x] **B5-15｜Repair Planner**：只因主题/布局失败时重新 derive；定位失败时重新定位/局部补采；状态缺失才重新播放 Scenario；源清单错误进入审核而不是盲采。（`src/runtime/repair.js`：derive / review / relocate / replay / unrepairable，接入规划的 annotation-incomplete 分支）
+- [x] **B5-16｜重试预算与幂等**：建议初始最多 **2 次定向修复**（独立于现有通用重试，需要总预算协调）；涉及写操作的任务不得在不确认副作用情况下自动重放。（缓存 `meta.repairAttempts`，同一采集输入连续 2 次；含写步骤的任务不自动重放；预算暂不可配置）
+- [x] **B5-17｜终态报告**：修复不可行时报告 `annotation-unrepairable`、关联 feature 和明确行动建议；`waiting_input` 不能被伪装为 succeeded。（`annotation-unrepairable` / `annotation-review-required` 规划错误，带 featureId:reason 与建议）
 
 **修复验收**：纯绘图失败直接重派生；操作失败只重跑允许的必要步骤；连续失败按预算停止；原模型/原截图未变化时不会永久命中错误缓存。
 
@@ -593,8 +593,8 @@ Page.features [Feature ID + scope + source]
 | B1 | 完成 | `fa9b500` | 待提交 | unit / browser 全部通过；新增 task-scenario-variant、capture-stability、target-obscured 测试，import-graph / runtime-planner / runtime-runner / auth-cache / scenario-fixtures 增补正反例 | 侧栏等 UI 状态需项目在 `auth.ephemeralStorageKeys` 声明并用 `requires` 断言；网络未空闲只提示不阻断（长轮询页面）；`reply-ready` 语义仍由目标项目的状态断言定义 |
 | B2 | 完成 | `8cc2fd1` | 待提交 | unit / browser 全部通过（与并行的 Demo Capture 改动一起跑）；新增 model-links 测试，annotation-coverage 29 项，target-obscured 增加遮挡用例 | Required 只认显式 features，NeoAgent 现有页面需在 describe 中确认候选后才能 public 发布；单图超上限拆图在 B4-02 |
 | B3 | 完成 | `c842c38` | 待提交 | unit / browser 全部通过；新增 grounding、quality-summary 测试，model-handoff 文案改为有依据的内容，runtime-runner 增补 quality 断言 | 真实性检查是规则级（控件 / 结果表达），只给 review-required 不自动证明语义；名称与 locator 逐项关联、步骤级 result 引用、严格 / 观察模式区分未做 |
-| B4 | 未开始 | 待填 | 待填 | 待填 | 待填 |
-| B5 | 未开始 | 待填 | 待填 | 待填 | 待填 |
+| B4 | 完成 | `50e7c6a` | 与 B5 同一提交（改动交织在同一批文件） | unit / browser 全部通过；新增 annotation-layout（8 项）、annotation-golden（DPR 1/1.5/2 × 视口/整页 + AC-16 端到端），drift-report 增补 AC-19 与主题变化用例 | 任务截图的在线视觉比较未做；拆图后 `PROOF_VERSION` 未升级（`part` 为可选字段，旧证明兼容）；页面配色变体的 golden 未做 |
+| B5 | 基本完成 | `50e7c6a` | 与 B4 同一提交 | unit / browser 全部通过；新增 scenario-states（10 项真实浏览器）、runtime-planner 定向修复与损坏 Scenario、impact-analysis 的 B5-07 / B5-09 用例；gate3 改为断言 live-drift 回流 | B5-06 手册引用变体截图未做；按 auth profile 配置身份断言未做；修复预算不可配置；派生 Scenario 的死字段未加弃用提示 |
 | B6 | 未开始 | 待填 | 待填 | 待填 | 待填 |
 
 **建议立即执行的第一条命令不是修改代码，而是检查最新仓库状态并做 B0-01 的差异核对。** 审计报告已有一批在并发开发中被修复/变动的结论；以最新实现为准，计划不会要求重新造轮子。

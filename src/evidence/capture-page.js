@@ -20,19 +20,20 @@ const { CONFIDENCE, ANALYSIS, normalizePage, isActivePage } = require('../inspec
 const { resolveRouteTemplate, resolveEntryLocation, derivePageScenario } = require('../scenarios/model');
 const { readIndexes, findForwardPage } = require('../inspect/index-store');
 const { prepareAuth, classifyAuthFailure, refreshAuth } = require('../auth/runtime');
-const { validateNavigation, validateWithReload, runAssertions } = require('./validate-page');
+const { validateNavigation, validateWithReload, runAssertions, runSetup, checkPreconditions } = require('./validate-page');
 const { resolveWaits } = require('../config/waits');
-const { captureStable, derivePublished, confirmTargetsShown } = require('./capture-safe');
+const { captureStable, derivePublished, confirmTargetsShown, inspectWithRetry, locateReason } = require('./capture-safe');
 const { pageInventory, buildPlan, domCandidates } = require('../annotations/coverage');
 const { annotationArtifacts } = require('../annotations/proof');
 const { createProjectStore } = require('../store/project');
-const { createCaptureStore, sanitizeUrl } = require('./store');
+const { createCaptureStore, sanitizeUrl, publishedEntries } = require('./store');
 const { definitionRevision } = require('../model/revision');
 const { revisionOf } = require('../util/hash');
 const { RuntimeError } = require('../runtime/errors');
 const { resolveScenario } = require('../scenarios/store');
 const { prepareScenarioData } = require('../scenarios/fixtures');
 const { mergeDemo } = require('../privacy/demo');
+const { toCanvasRect } = require('../browser/playwright');
 const { subjectKey, recordGateFailure, clearGateFailure } = require('./demo-gate-log');
 
 const REASON_CODES = new Set(Object.values(REASON));
@@ -173,7 +174,13 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
     ? { statuses: scenario.expected?.httpStatuses, state: scenario.expected?.state || 'normal', allowRedirects: scenario.expected?.redirects?.length ? scenario.expected.redirects : undefined }
     : {};
   const checkpoint = (scenario.checkpoints || []).find((c) => c.id === 'default') || scenario.checkpoints?.[0] || null;
-  const identityAssertions = ((isDefaultScenario ? page.states?.default?.assertions : checkpoint?.assertions) || []).filter((a) => a && a.type !== 'url');
+  // 检查点声明的截图方式生效（B5-02）：capture.mode: fullPage 与命令行 --full-page 等价
+  const fullPage = options.fullPage === true || checkpoint?.capture?.mode === 'fullPage';
+  // 变体的检查点状态断言（URL 以外）：setup 之后确认、截图之后复核
+  const stateAssertions = isDefaultScenario ? [] : (checkpoint?.assertions || []).filter((a) => a && a.type !== 'url');
+  // 有 setup 的变体：打开时页面还是默认状态，先用页面默认身份断言，检查点断言在 setup 之后确认
+  const hasSetup = (scenario.setup || []).length > 0;
+  const identityAssertions = ((isDefaultScenario || hasSetup ? page.states?.default?.assertions : checkpoint?.assertions) || []).filter((a) => a && a.type !== 'url');
   const inventory = pageInventory({ page, scenarioId: scenario.id, checkpoint });
   const annotationPlan = buildPlan({ inventory, page, annotations: isDefaultScenario ? null : (checkpoint?.capture?.annotations || []) });
   const staging = captureStore.begin();
@@ -216,11 +223,25 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
         });
       }
     }
+    // 显式 Scenario：一次性前置数据仍在（B5-06b）→ 执行页面 setup 进入目标状态（B5-01）→ 检查点断言
+    if (explicitScenario) {
+      const assertOptions = { timeoutMs: Math.min(readyOptions.timeout, 10000) };
+      try {
+        navigation.validations.push(...await runAssertions(provider, scenario.expected?.roleAssertions || [], { scope: 'auth-identity', idPrefix: `role:${scenario.authProfile}`, ...assertOptions }));
+      } catch (error) {
+        throw Object.assign(new Error(`以 ${scenario.authProfile} 身份打开后，页面没有呈现该角色应有的内容：${error.message}。确认账号权限；不会改用其他身份。`), { code: 'auth-identity-mismatch' });
+      }
+      navigation.validations.push(...await checkPreconditions(provider, scenario.preconditions || [], assertOptions));
+      navigation.validations.push(...await runSetup(provider, scenario.setup || [], assertOptions));
+      if (hasSetup && stateAssertions.length) navigation.validations.push(...await runAssertions(provider, stateAssertions, { scope: 'scenario-state', idPrefix: checkpoint?.id || 'default', timeoutMs: assertOptions.timeoutMs }));
+    }
     // 语义摘要与采集环境：在线验证据此判断内容漂移、视觉比较是否可比（P3-04）
     const semantic = provider.semanticSnapshot ? await provider.semanticSnapshot() : null;
-    const environment = provider.environmentInfo ? provider.environmentInfo({ fullPage: options.fullPage === true }) : null;
+    const environment = provider.environmentInfo ? provider.environmentInfo({ fullPage }) : null;
     // 稳定截图 + 离线派生：原图只留在 rawDir，发布图由同一份原图遮罩后写入 annotatedDir。
-    const captured = await captureStable(provider, { rawPath: stagedRaw, fullPage: options.fullPage === true, format, stabilityMs: waits.stabilityMs,
+    const captured = await captureStable(provider, { rawPath: stagedRaw, fullPage, format, stabilityMs: waits.stabilityMs,
+      // 截图后复核状态（B5-05）：定位标注时的悬停 / 滚动可能把菜单、弹窗弄没
+      assertState: stateAssertions.length ? async () => runAssertions(provider, stateAssertions, { scope: 'scenario-state', idPrefix: 'after-shot', timeoutMs: 1500 }) : null,
       resolveTargets: async () => {
         const targets = [];
         const located = [];
@@ -229,14 +250,16 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
           if (item.rect) { targets.push({ feature_id: item.feature_id, label, rect: item.rect, resolution: { source: 'declared-rect' } }); continue; }
           if (!item.target) { targets.push({ feature_id: item.feature_id, label, reason: 'target-not-declared' }); continue; }
           try {
-            const found = await provider.performAction({ type: 'inspect', target: item.target });
+            const found = await inspectWithRetry(provider, item.target);
             if (found.obscuredBy) { targets.push({ feature_id: item.feature_id, label, reason: 'target-occluded', obscuredBy: found.obscuredBy }); continue; }
-            const rect = { ...found.rect };
-            if (options.fullPage) { const geometry = await provider.collectGeometry({ fullPage: true }); rect.x += geometry.scroll.x; rect.y += geometry.scroll.y; }
+            if (!found.rect) { targets.push({ feature_id: item.feature_id, label, reason: 'target-not-located' }); continue; }
+            // 整页截图：与隐私遮罩同一套换算（滚动偏移、fixed 元素），框和遮罩不会相对错位（B4-04）
+            const geometry = fullPage ? await provider.collectGeometry({ fullPage: true }) : null;
+            const rect = toCanvasRect(found.rect, { fullPage, geometry, pinned: found.pinned || null });
             // 记录实际命中的定位策略（主目标或第几个备选），备选命中不再静默（B2-07）
             targets.push({ feature_id: item.feature_id, label, rect, resolution: found.resolution || null });
             located.push({ target: item.target, label, revealedBy: found.revealedBy || null });
-          } catch (error) { targets.push({ feature_id: item.feature_id, label, reason: error.code || 'target-not-located' }); }
+          } catch (error) { targets.push({ feature_id: item.feature_id, label, reason: locateReason(error) }); }
         }
         await confirmTargetsShown(provider, located);
         return targets;
@@ -297,7 +320,8 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
     if (e.code === 'browser-crashed' || e.code === 'session-closed') throw e;
     const normalized = e instanceof CaptureError
       ? e
-      : new CaptureError(e.code && REASON_CODES.has(e.code) ? e.code : REASON.NAVIGATION_FAILED, String(e.message || e), { url });
+      // 标注 / 几何类失败是确定性的，保留原码，不能改写成可重试的 navigation-failed（B4-08）
+      : new CaptureError(e.code && (REASON_CODES.has(e.code) || /^(annotation|geometry|scenario|precondition|auth-identity)-/.test(e.code)) ? e.code : REASON.NAVIGATION_FAILED, String(e.message || e), { url });
     throw classifyAuthFailure(normalized, auth);
   }
   const { shot, ready, navigation, identity, safe, semantic, environment } = observed;
@@ -320,7 +344,7 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
       { kind: 'derivation', file: stagedDerivation, dir: `${config.artifacts.stateDir}/artifacts/derivation`, prefix: pageId },
       { kind: 'annotations', file: stagedAnnotations, dir: `${config.artifacts.stateDir}/artifacts/annotations`, prefix: pageId },
     ];
-    if (safe.published) artifacts.push({ kind: 'published', file: stagedPublished, dir: config.artifacts.annotatedDir, prefix: `page--${pageId}` });
+    artifacts.push(...publishedEntries(safe, { file: stagedPublished, dir: config.artifacts.annotatedDir, prefix: `page--${pageId}` }));
     record = captureStore.commit(staging, {
       record: {
         kind: 'page',
@@ -353,6 +377,7 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
           derivedFromRawHash: safe.derived.rawHash,
           geometryHash: safe.derived.geometryHash,
           rendererVersion: safe.derived.rendererVersion,
+          themeRevision: safe.derived.themeRevision,
         },
       },
       artifacts,

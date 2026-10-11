@@ -6,7 +6,12 @@
  *   node test/run.js                  全部
  *   node test/run.js --group unit     不启动浏览器的测试（快，CI 先跑）
  *   node test/run.js --group browser  需要 Chromium / 本地测试服务器的集成测试
+ *   node test/run.js --group e2e      端到端（init → capture → generate → publish → update / verify 全链路），browser 的子集
+ *   node test/run.js --group golden   固定小页面集（标注几何、Demo 截图、Scenario 状态），不依赖远程业务环境
  *   node test/run.js --list [--group] 只列出文件
+ *
+ * 测试层级（B6-05）：unit（Inventory / Coverage / Layout / 契约）→ browser（Capture / Cache / Verify 集成）
+ *   → golden（真实浏览器的几何与状态断言）→ e2e（Generate → Validate → Publish → Update）。
  */
 
 const { spawnSync } = require('child_process');
@@ -99,6 +104,9 @@ const FILES = [
   'retention.test.js',
   'site.test.js',
   'docs-consistency.test.js',
+  'annotation-layout.test.js',
+  'annotation-golden.test.js',
+  'scenario-states.test.js',
   'gate3.test.js',
 ];
 
@@ -109,8 +117,12 @@ const BROWSER = new Set([
   'incremental-update.test.js', 'install-smoke.test.js', 'live-verify.test.js', 'model-handoff.test.js', 'page-validation.test.js',
   'performance.test.js', 'run-store.test.js', 'runtime-cli.test.js', 'runtime-planner.test.js', 'runtime-recovery.test.js',
   'runtime-runner.test.js', 'runtime-failure-matrix.test.js', 'scenario-fixtures.test.js', 'task-executor.test.js',
-  'task-first-e2e.test.js', 'task-rerun.test.js', 'retention.test.js', 'target-obscured.test.js', 'demo-capture.test.js',
+  'task-first-e2e.test.js', 'task-rerun.test.js', 'retention.test.js', 'target-obscured.test.js', 'demo-capture.test.js', 'annotation-golden.test.js', 'scenario-states.test.js',
 ]);
+
+// 端到端与 Golden 是 browser 组的子集，单独列出便于按层级运行（CI 仍按 unit / browser 两组跑全部）
+const E2E = new Set(['gate0.test.js', 'gate1.test.js', 'gate2.test.js', 'gate3.test.js', 'task-first-e2e.test.js', 'drift-report.test.js', 'incremental-update.test.js', 'install-smoke.test.js']);
+const GOLDEN = new Set(['annotation-golden.test.js', 'demo-capture.test.js', 'scenario-states.test.js', 'image-pipeline.test.js', 'target-obscured.test.js']);
 
 function groupOf(file) {
   return BROWSER.has(file) ? 'browser' : 'unit';
@@ -119,11 +131,13 @@ function groupOf(file) {
 function selected(argv) {
   const at = argv.indexOf('--group');
   const group = at === -1 ? null : argv[at + 1];
-  if (group !== null && !['unit', 'browser'].includes(group)) throw new Error(`未知分组: ${group}（unit / browser）`);
+  if (group !== null && !['unit', 'browser', 'e2e', 'golden'].includes(group)) throw new Error(`未知分组: ${group}（unit / browser / e2e / golden）`);
+  if (group === 'e2e') return FILES.filter((file) => E2E.has(file));
+  if (group === 'golden') return FILES.filter((file) => GOLDEN.has(file));
   return FILES.filter((file) => !group || groupOf(file) === group);
 }
 
-module.exports = { FILES, BROWSER, groupOf };
+module.exports = { FILES, BROWSER, E2E, GOLDEN, groupOf };
 
 if (require.main !== module) return;
 

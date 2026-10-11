@@ -23,6 +23,22 @@ function originOf(url) {
   try { return new URL(url).origin; } catch (_) { return null; }
 }
 
+/**
+ * 声明的跳转是否命中（B5-06a）：字符串只比路径；{ path, query } 还要求列出的查询参数相同，
+ * 这样 /login?view=reset 这类"合法落到登录页"的跳转可以和真正的登录墙区分开。
+ */
+function redirectMatches(entry, url) {
+  let parsed;
+  try { parsed = new URL(url); } catch (_) { return false; }
+  if (typeof entry === 'string') return parsed.pathname === entry;
+  if (!entry || parsed.pathname !== entry.path) return false;
+  return Object.entries(entry.query || {}).every(([key, value]) => parsed.searchParams.get(key) === value);
+}
+
+function declaredRedirect(allowRedirects, url) {
+  return Array.isArray(allowRedirects) && allowRedirects.some((entry) => redirectMatches(entry, url));
+}
+
 function passed(scope, check, extra = {}) {
   return { scope, check, outcome: 'passed', checkedAt: new Date().toISOString(), ...extra };
 }
@@ -58,8 +74,8 @@ function validateNavigation({ requestedUrl, openResult, observation = null, expe
   // ---- 登录跳转（含 SPA 延迟跳转：finalUrl 取自等待之后）
   const requestedIsLogin = LOGIN_PATH_RE.test(requestedUrl);
   // Scenario 显式声明了会跳到这个地址（如旧链接转到登录卡片里的找回密码），就不是“需要登录”
-  const declaredRedirect = Array.isArray(expected.allowRedirects) && expected.allowRedirects.includes(pathnameOf(finalUrl));
-  if (!requestedIsLogin && !declaredRedirect) {
+  const isDeclaredRedirect = declaredRedirect(expected.allowRedirects, finalUrl);
+  if (!requestedIsLogin && !isDeclaredRedirect) {
     if (LOGIN_PATH_RE.test(finalUrl)) {
       throw new CaptureError(REASON.LOGIN_REQUIRED, `访问 ${requestedUrl} 被重定向到了登录页。`, details);
     }
@@ -84,7 +100,7 @@ function validateNavigation({ requestedUrl, openResult, observation = null, expe
   const redirected = actualRoute !== requestedPath;
   if (redirected) {
     if (Array.isArray(expected.allowRedirects)) {
-      if (!expected.allowRedirects.includes(actualRoute)) {
+      if (!declaredRedirect(expected.allowRedirects, finalUrl)) {
         throw new CaptureError(REASON.UNEXPECTED_REDIRECT, `${requestedUrl} 跳转到了未声明的地址 ${actualRoute}。`, details);
       }
     } else {
@@ -189,7 +205,45 @@ async function validateWithReload(provider, { settle, validate, enabled = true, 
   }
 }
 
+/**
+ * Scenario 的页面 setup（B5-01）：打开页面后、截图前依次执行只读动作（展开菜单、切换标签、打开弹窗），
+ * 复用 provider.performAction 与断言引擎，不另写一套动作执行。每个动作可带 expect 断言确认状态已到达。
+ * 失败抛 scenario-setup-failed（确定性，不重试）。
+ */
+async function runSetup(provider, setup = [], { timeoutMs } = {}) {
+  const validations = [];
+  for (const [index, action] of setup.entries()) {
+    try {
+      await provider.performAction(action);
+      validations.push(...await runAssertions(provider, action.expect || [], { scope: 'scenario-state', idPrefix: `setup-${index + 1}`, timeoutMs }));
+    } catch (error) {
+      throw Object.assign(new Error(`Scenario setup 第 ${index + 1} 步（${action.type}）未完成：${error.message}`), { code: 'scenario-setup-failed', cause: error });
+    }
+  }
+  return validations;
+}
+
+/**
+ * 一次性前置数据（B5-06b）：每次截图前确认仍然存在。已被消费（如"待补充"会话已补完）时报 precondition-consumed，
+ * 不去截一个状态已经不对的页面。
+ */
+async function checkPreconditions(provider, preconditions = [], { timeoutMs } = {}) {
+  const validations = [];
+  for (const item of preconditions) {
+    try {
+      validations.push(...await runAssertions(provider, item.assertions || [], { scope: 'scenario-state', idPrefix: `precondition-${item.id}`, timeoutMs }));
+    } catch (error) {
+      throw Object.assign(new Error(`前置数据 ${item.id} 已不存在（可能已被上次采集或其他操作消费）：${error.message}。重新准备这份数据后再采集。`), { code: 'precondition-consumed', precondition: item.id });
+    }
+  }
+  return validations;
+}
+
 module.exports = {
+  redirectMatches,
+  declaredRedirect,
+  runSetup,
+  checkPreconditions,
   validateWithReload,
   LOGIN_PATH_RE,
   PAGE_STATES,
