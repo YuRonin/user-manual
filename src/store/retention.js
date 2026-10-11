@@ -328,7 +328,8 @@ function allowedRoots(projectRoot, config) {
 }
 
 function within(root, target) {
-  const relative = path.relative(root, target);
+  // Windows 路径不区分大小写（盘符、短名展开后的大小写都可能不同）
+  const relative = process.platform === 'win32' ? path.relative(root.toLowerCase(), target.toLowerCase()) : path.relative(root, target);
   return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
 }
 
@@ -343,9 +344,12 @@ function safeTarget(projectRoot, config, relative) {
     // 链接本身在根内时只删链接，不跟随；指向根外的链接照样只删链接（不会删到外部）
     return { ok: true, target, link: true };
   }
+  // 目标与根必须用同一种方式解析真实路径：Windows 上 native 与 JS 实现对 8.3 短名（如 RUNNER~1）的展开不同，
+  // 混用会把根内的对象误判为越界（escapes-allowed-roots）
+  const realOf = (p) => (fs.realpathSync.native ? fs.realpathSync.native(p) : fs.realpathSync(p));
   let real;
-  try { real = fs.realpathSync.native ? fs.realpathSync.native(target) : fs.realpathSync(target); } catch (_) { return { ok: false, reason: 'unresolvable' }; }
-  const realRoots = roots.map((root) => { try { return fs.realpathSync(root); } catch (_) { return root; } });
+  try { real = realOf(target); } catch (_) { return { ok: false, reason: 'unresolvable' }; }
+  const realRoots = roots.map((root) => { try { return realOf(root); } catch (_) { return root; } });
   if (!realRoots.some((root) => within(root, real))) return { ok: false, reason: 'escapes-allowed-roots' };
   return { ok: true, target, directory: stat.isDirectory() };
 }

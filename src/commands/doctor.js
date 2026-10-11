@@ -199,8 +199,10 @@ function checkCatalog(projectRoot, config) {
 function checkAuthPermissions(root, { platform = process.platform, env = process.env, home = require('os').homedir() } = {}) {
   if (!fs.existsSync(root)) return check('auth:permissions', 'skip', '认证缓存目录尚未创建。', { cacheRoot: root });
   if (platform === 'win32') {
-    const userRoots = [env.LOCALAPPDATA, env.APPDATA, home].filter(Boolean).map((p) => path.resolve(p).toLowerCase());
-    const resolved = path.resolve(root).toLowerCase();
+    // 用真实路径比较：临时目录常以 8.3 短名出现（C:\Users\RUNNER~1），与 LOCALAPPDATA 的长名不同
+    const real = (p) => { try { return (fs.realpathSync.native || fs.realpathSync)(p); } catch (_) { return path.resolve(p); } };
+    const userRoots = [env.LOCALAPPDATA, env.APPDATA, home].filter(Boolean).map((p) => real(p).toLowerCase());
+    const resolved = real(root).toLowerCase();
     if (userRoots.some((base) => resolved === base || resolved.startsWith(base + path.sep))) {
       return check('auth:permissions', 'ok', '认证缓存位于当前用户目录下，继承用户 ACL（未逐项验证 ACL）。', { cacheRoot: root, acl: 'inherited-unverified' });
     }

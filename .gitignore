@@ -2,3 +2,6 @@ node_modules/
 .manual/
 tmp/
 *.log
+
+# CI 测试日志与性能报告（工作流运行时生成，不入库、不进 npm 包）
+test-results/
