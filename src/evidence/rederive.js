@@ -78,6 +78,8 @@ async function rederiveCaptures({ projectRoot, config, captureIds, runId = null 
           ...rest,
           runId,
           privacy: safe.privacy,
+          // 采集于 Demo 模式之前的证据没有门禁结论：重新派生只能沿用旧遮罩（含马赛克），提示重新采集
+          quality: { ...safe.quality, warnings: [...safe.quality.warnings, ...(old.privacy?.demo ? [] : ['demo-evidence-legacy: 采集于 Demo 模式之前，重新派生沿用旧遮罩规则；需要清晰的演示截图时重新采集。'])] },
           ...(safe.coverage ? { annotationCoverage: safe.coverage } : {}),
           ...(annotationOut ? { annotationProof: annotationOut.proof } : {}),
           redactions: safe.redactions.map(({ kind, rect, result }) => ({ kind, rect, result })),

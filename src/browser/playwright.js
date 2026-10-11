@@ -273,18 +273,21 @@ class PlaywrightBrowserProvider extends BrowserProvider {
 
   /**
    * Demo 网络守卫（见 privacy/demo.js）：只作用于本 Scenario 的 Context，必须在打开页面之前安装。
-   * - Fixture 路由 routes: [{ matcher: RegExp(pathname), method?, query?, status, contentType, body }]，只匹配同源请求；
-   * - 其余请求按 classifyRequest 判定放行 / 中止；WebSocket 未登记即关闭。
+   * - Fixture 路由 routes: [{ matcher: RegExp(pathname), origin?: RegExp, method?, query?, status, contentType, body }]；
+   *   没写 origin 的路由只匹配同源请求，写了 origin 的可以拦截跨域接口；
+   * - 其余请求按 classifyRequest 判定放行 / 中止 / 记为未覆盖的读取；WebSocket 未登记即关闭。
    * 只记录方法、路径与判定，不记录查询串、请求体与响应。
+   * @param {string} [dataMode] Scenario 的数据准备方式（live / simulated / fixture），写入门禁的数据来源
    */
-  async installDemoGuard({ routes = [], baseUrl, demo = null }) {
+  async installDemoGuard({ routes = [], baseUrl, demo = null, dataMode = 'live' }) {
     await this.launch();
-    const { classifyRequest, websocketAllowed, mergeDemo, fixtureStrings } = require('../privacy/demo');
+    const { classifyRequest, websocketAllowed, mergeDemo, fixtureStrings, operationNameOf } = require('../privacy/demo');
     const origin = new URL(baseUrl).origin;
-    this.demo = { ...mergeDemo(demo || {}, null), known: fixtureStrings(routes) };
+    this.demo = { ...mergeDemo(demo || {}, null), known: fixtureStrings(routes), dataMode };
     this.writeOrigin = null;
     this.mockedRequests = [];
-    this.guard = { mocked: [], blocked: [], suppressed: 0, allowed: 0, authorized: 0, websockets: [] };
+    const ruleOf = (r) => `${r.method || '*'} ${r.originPattern ? `${r.originPattern}` : ''}${r.path || r.matcher.source}`;
+    this.guard = { mocked: [], blocked: [], suppressed: 0, allowed: 0, allowedReads: 0, authorized: 0, websockets: [], uncovered: [], routes: routes.map((r) => ({ rule: ruleOf(r), hits: 0 })) };
     this.pendingBlocked = [];
     const network = this.demo.network;
     await this.context.route(() => true, async (route) => {
@@ -293,22 +296,31 @@ class PlaywrightBrowserProvider extends BrowserProvider {
       try { url = new URL(request.url()); } catch (_) { return route.continue(); }
       if (!/^https?:$/.test(url.protocol)) return route.continue();
       const method = request.method();
-      const hit = url.origin === origin && routes.find((r) => r.matcher.test(url.pathname) && (!r.method || r.method === method) &&
+      const index = routes.findIndex((r) => (r.origin ? r.origin.test(url.origin) : url.origin === origin) && r.matcher.test(url.pathname) && (!r.method || r.method === method) &&
         (!r.query || Object.entries(r.query).every(([k, v]) => url.searchParams.get(k) === v)));
-      const verdict = classifyRequest({ method, url, resourceType: request.resourceType(), mocked: !!hit, network, writeOrigin: this.writeOrigin });
+      const hit = index >= 0 ? routes[index] : null;
+      let operationName = null;
+      try { operationName = operationNameOf(url, request.postData()); } catch (_) { operationName = null; }
+      const verdict = classifyRequest({ method, url, resourceType: request.resourceType(), mocked: !!hit, network, writeOrigin: this.writeOrigin, operationName });
+      const where = url.origin === origin ? url.pathname : `${url.origin}${url.pathname}`;
       if (verdict === 'mock') {
         this.mockedRequests.push(`${method} ${url.pathname}`);
         this.guard.mocked.push(`${method} ${url.pathname}`);
+        this.guard.routes[index].hits++;
         return route.fulfill({ status: hit.status, contentType: hit.contentType, body: hit.body });
       }
       if (verdict === 'block') {
-        const event = { method, path: url.origin === origin ? url.pathname : `${url.origin}${url.pathname}` };
+        const event = { method, path: where };
         this.guard.blocked.push(event);
         this.pendingBlocked.push(event);
         return route.abort('blockedbyclient');
       }
       if (verdict === 'suppress') { this.guard.suppressed++; return route.fulfill({ status: 204, body: '' }); }
-      if (verdict === 'allow') this.guard.allowed++;
+      if (verdict === 'unverified') {
+        const kind = request.resourceType() === 'eventsource' ? 'stream' : url.origin === origin ? 'same-origin' : 'cross-origin';
+        if (!this.guard.uncovered.some((r) => r.method === method && r.path === where)) this.guard.uncovered.push({ method, path: where, kind });
+      }
+      if (verdict === 'allow') { if (['GET', 'HEAD'].includes(method)) this.guard.allowedReads++; else this.guard.allowed++; }
       if (verdict === 'authorized') this.guard.authorized++;
       return route.continue();
     });
@@ -340,21 +352,26 @@ class PlaywrightBrowserProvider extends BrowserProvider {
   /** 网络守卫的累计记录副本；未安装守卫时返回 null。 */
   demoGuardState() {
     if (!this.guard) return null;
-    return { ...this.guard, mocked: [...this.guard.mocked], blocked: [...this.guard.blocked], websockets: [...this.guard.websockets] };
+    return { ...this.guard, mocked: [...this.guard.mocked], blocked: [...this.guard.blocked], websockets: [...this.guard.websockets],
+      uncovered: [...this.guard.uncovered], routes: this.guard.routes.map((r) => ({ ...r })) };
   }
 
-  /** 截图前把 data-redact 区域替换为演示值（幂等）。 */
+  /** 截图前把敏感区域（data-redact 与 capture.demo.selectors）替换为演示值（幂等）。 */
   async applyDemo() {
     if (!this.page) return null;
     const { applyDemoInPage } = require('../privacy/demo-page');
-    return this.page.evaluate(applyDemoInPage, { text: this.demo?.text || {}, images: this.demo?.images || {}, known: this.demo?.known || [] });
+    return this.page.evaluate(applyDemoInPage, this.demoPageArgs());
   }
 
   /** 截图后的只读审计；与截图前后几何的 DOM 计数一起确认属于同一时刻。 */
   async auditDemo() {
     if (!this.page) return null;
     const { auditDemoInPage } = require('../privacy/demo-page');
-    return this.page.evaluate(auditDemoInPage, { text: this.demo?.text || {}, images: this.demo?.images || {}, known: this.demo?.known || [] });
+    return this.page.evaluate(auditDemoInPage, this.demoPageArgs());
+  }
+
+  demoPageArgs() {
+    return { text: this.demo?.text || {}, images: this.demo?.images || {}, known: this.demo?.known || [], selectors: this.demo?.selectors || {} };
   }
 
   /** 为本 Scenario 新建隔离的 Context：认证快照、视口、DPR、语言、时区、配色都在这里注入。 */
@@ -376,6 +393,13 @@ class PlaywrightBrowserProvider extends BrowserProvider {
       // Service Worker 的请求不经过 context.route，会绕开 Demo 网络守卫与 Fixture
       serviceWorkers: 'block',
       ...(this.storageState ? { storageState: this.storageState } : {}),
+    });
+    // serviceWorkers: 'block' 在部分版本下仍允许注册成功：在页面脚本之前把注册改为明确失败，
+    // 只作用于本 Context 的浏览器内存，不改被采集项目
+    if (typeof this.context.addInitScript === 'function') await this.context.addInitScript(() => {
+      if (navigator.serviceWorker && typeof navigator.serviceWorker.register === 'function') {
+        navigator.serviceWorker.register = () => Promise.reject(new DOMException('Service Worker 已被 Demo 截图模式阻止', 'SecurityError'));
+      }
     });
     // 服务器下发 Set-Cookie（例如 refresh token 轮换）时通知上层立即持久化，不等 Scenario 结束：
     // 失败、超时、进程中断都不能让认证缓存停在已作废的旧令牌上。
@@ -807,10 +831,11 @@ class PlaywrightBrowserProvider extends BrowserProvider {
           rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
         });
       };
-      for (const input of document.querySelectorAll('input,textarea,[data-redact]')) {
+      for (const input of document.querySelectorAll('input,textarea,[data-redact],[data-manual-demo]')) {
         const id = input.id;
         const label = input.getAttribute('aria-label') || (id ? document.querySelector(`label[for="${CSS.escape(id)}"]`)?.innerText : '') || input.getAttribute('name') || '';
-        if (input.hasAttribute('data-redact')) {
+        // 已声明的敏感区域（data-redact，或被 capture.demo.selectors 命中并已换成演示值）交给 Demo 门禁，不再按表单控件打码
+        if (input.hasAttribute('data-redact') || input.closest('[data-manual-demo]')) {
           add(input, input.value || input.textContent, label, 'explicit', input.type);
           continue;
         }
@@ -850,7 +875,7 @@ class PlaywrightBrowserProvider extends BrowserProvider {
         if (/1[3-9]\d{9}|[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(text)) {
           const range = document.createRange();
           range.selectNodeContents(element);
-          add(element, text, element.getAttribute('aria-label') || '', 'text-pattern', '', range.getBoundingClientRect());
+          add(element, text, element.getAttribute('aria-label') || '', element.closest('[data-manual-demo]') ? 'explicit' : 'text-pattern', '', range.getBoundingClientRect());
         }
       }
       return out;

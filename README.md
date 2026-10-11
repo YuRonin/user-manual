@@ -173,9 +173,10 @@ DOM 连续静止 → 冻结 CSS 动画与过渡 → 静置回流。每步有独�
 ### 截图里的数据：Demo Capture
 
 截图只有一种数据模式 `capture.mode: demo`：真实界面 + 公开内容或可证明为虚构的演示数据。
-页面用 `data-redact="<键>"` 声明的敏感区域在截图前替换为 `capture.demo.text` 配置的演示值，
-或由 Fixture 接口数据提供；截图后审计原始值是否仍出现在页面其他可见位置。浏览器内的非只读请求默认中止，
-只放行登记过的请求。门禁结论为 `passed / needs_fixture / blocked`，未通过的截图连同原图一起丢弃。
+敏感区域在 Skill 侧的 `capture.demo.selectors` 中按 CSS 选择器声明（被采集项目无需改动；页面自带的
+`data-redact="<键>"` 等价），截图前替换为 `capture.demo.text` 配置的演示值，或由 Fixture 接口数据提供；
+截图后审计原始值是否仍出现在页面其他可见位置。浏览器内的非只读请求默认中止，只放行登记过的请求；
+页面有敏感区域时，没有 Fixture 也没有登记的数据读取同样不放行截图。门禁结论为 `passed / needs_fixture / blocked`，未通过的截图连同原图一起丢弃。
 配置、Fixture 写法与原因码排查见 [Demo Capture](docs/DEMO_CAPTURE.md)。
 
 表单控件里的手机号、邮箱、认证字段仍按文字内容计算矩形做精确遮罩（完全不透明的浅色合成马赛克，

@@ -18,6 +18,7 @@ const BLOCKABLE = [
   'completion-unbound', 'completion-before-final-step', 'step-title-missing', 'ui-name-mismatch', 'before-image-target-mismatch',
   'screenshots-missing', 'step-image-missing', 'step-image-caption-unreviewed', 'image-timing-mismatch', 'goal-coverage-unreviewed',
   'image-unannotated', 'image-heavily-redacted', 'page-instructions-missing', 'ui-term-not-observed', 'steps-not-executed',
+  'demo-evidence-legacy', 'demo-recapture-blocked',
 ];
 
 const codeOf = (warning) => String(warning).split(':')[0];
@@ -40,6 +41,11 @@ function packWarnings(pack) {
     const unseen = [...String(step.sentence || '').matchAll(/「([^」]+)」/g)].map((m) => m[1])
       .filter((term) => !observed.some((name) => name.includes(term) || term.includes(name)));
     if (unseen.length) warnings.push(`ui-term-not-observed:${step.id}`);
+  }
+  // Demo 截图状态（D-6）：采集于 Demo 模式之前的旧图（遮罩沿用旧版马赛克），或之后的重新采集被门禁阻断、仍在用旧图
+  for (const artifact of pack?.artifacts || []) {
+    if (artifact.privacy && !artifact.privacy.demo) warnings.push(`demo-evidence-legacy:${artifact.stepId || artifact.id}`);
+    if (artifact.demoRecapture) warnings.push(`demo-recapture-blocked:${artifact.stepId || artifact.id}（${(artifact.demoRecapture.reasons || []).join(', ')}）`);
   }
   const skipped = (pack?.steps || []).filter((step) => step.executed === false).length;
   if (skipped) warnings.push(`steps-not-executed:${skipped}`);

@@ -33,6 +33,7 @@ const { RuntimeError } = require('../runtime/errors');
 const { resolveScenario } = require('../scenarios/store');
 const { prepareScenarioData } = require('../scenarios/fixtures');
 const { mergeDemo } = require('../privacy/demo');
+const { subjectKey, recordGateFailure, clearGateFailure } = require('./demo-gate-log');
 
 const REASON_CODES = new Set(Object.values(REASON));
 
@@ -185,7 +186,7 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
   const work = async (provider) => {
     // Demo：网络守卫、Fixture 路由与演示值必须在打开页面之前安装；没有 Fixture 也要安装（写请求一律受控）
     if (provider.installDemoGuard) {
-      await provider.installDemoGuard({ routes: data.routes, baseUrl: config.project.baseUrl, demo: mergeDemo(config.capture?.demo, data.demo) });
+      await provider.installDemoGuard({ routes: data.routes, baseUrl: config.project.baseUrl, demo: mergeDemo(config.capture?.demo, data.demo), dataMode: data.mode });
     } else if (data.routes.length) {
       throw new RuntimeError('capability-missing', '当前 Browser Provider 不支持请求拦截（routeMocking），不能使用 mock Fixture。');
     }
@@ -291,6 +292,8 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
     }
   } catch (e) {
     captureStore.abort(staging);
+    // Demo 门禁失败没有 Capture 记录可留：单独记下原因码，generate 据此提示"重新采集被阻断、仍在用旧图"
+    recordGateFailure(stateDirAbs, subjectKey(['page', pageId, scenario.id]), e);
     if (e.code === 'browser-crashed' || e.code === 'session-closed') throw e;
     const normalized = e instanceof CaptureError
       ? e
@@ -356,6 +359,7 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
     });
     // Scenario 变体的采集不替换页面默认截图
     captureStore.setLatest({ [isDefaultScenario ? `page:${pageId}` : `scenario:${scenario.id}`]: record.id });
+    clearGateFailure(stateDirAbs, subjectKey(['page', pageId, scenario.id]));
   } catch (e) {
     captureStore.abort(staging);
     throw new RuntimeError(e.code || 'capture-commit-failed', `${e.code || 'capture-commit-failed'}: ${e.message}`);

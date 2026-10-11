@@ -88,17 +88,21 @@ function artifactsFor(root, config, target) {
       const prepared = prepareVerify({ root, config, ...input });
       if (!prepared.ok) errors = prepared.errors;
       else {
-        try {
-          input.projectStore.commit({ base: input.base, kind: 'observation', changes: { tasks: [prepared.nextTask] } });
-        } catch (error) {
-          errors = [`${error.code || 'write-failed'}: 验证通过，但任务状态写入失败。${error.message}`];
-        }
         extra = { manual: input.manual, images: (input.facts.images || []).map((image) => image.artifactPath), warnings: prepared.warnings || [], annotationCoverage: require('../verify/artifacts').annotationCoverageForImages(root, config, input.facts.images || []), demo: demoSafetyForImages(root, config, input.facts.images || []) };
+        // Demo 结果先判定：未通过时不能把任务状态写成"已验证"
+        errors = demoSafetyErrors(extra.demo);
+        if (!errors.length) {
+          try {
+            input.projectStore.commit({ base: input.base, kind: 'observation', changes: { tasks: [prepared.nextTask] } });
+          } catch (error) {
+            errors = [`${error.code || 'write-failed'}: 验证通过，但任务状态写入失败。${error.message}`];
+          }
+        }
       }
     }
   }
   // Demo 结果与标注覆盖率分开报告：demo_privacy（截图是否都过了 Demo 门禁）、write_safety（采集期间写请求）
-  if (!errors.length && extra.demo) errors = demoSafetyErrors(extra.demo);
+  if (!errors.length && extra.demo && target.type === 'page') errors = demoSafetyErrors(extra.demo);
   const release = releases.readCurrentRelease(state, manualId);
   const checks = checksFromErrors(errors);
   const report = {

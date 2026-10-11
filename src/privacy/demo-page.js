@@ -3,7 +3,11 @@
 /*
  * 在页面内执行的 Demo 函数（由 Playwright page.evaluate 序列化执行，必须自包含，不能引用外部变量）。
  *
- * applyDemoInPage：把页面用 data-redact="<键>" 声明的敏感区域替换为演示值。幂等：
+ * 敏感区域 = 带 data-redact="<键>" 的元素 + capture.demo.selectors 中按 CSS 选择器命中的元素（Skill 侧声明，
+ *   不需要改被采集项目）。两种来源等价，只处理最外层：嵌套在敏感区域内的元素随外层一起处理。
+ *   选择器每次调用都重新查询，SPA 重渲染换掉元素后依然命中；不往页面 DOM 写入任何声明属性。
+ *
+ * applyDemoInPage：把敏感区域替换为演示值。幂等：
  *   已替换且未被页面改回的元素不再触碰；页面重渲染后再次调用会重新替换。
  *   被替换下来的原始值只保存在页面内存（window.__manualDemo），用于残留检查，不回传、不落盘。
  * auditDemoInPage：只读审计，截图之后调用。返回：
@@ -11,11 +15,13 @@
  *   leaks      原始值仍出现在可见文本 / 表单值 / 空输入框占位符 / 加载失败图片的 alt 中（会进入截图）
  *   contacts   data-redact 之外可见文本里的手机号 / 邮箱（只回传给门禁计数，不写入记录）
  *   hidden     原始值出现在 title / aria-* / 页面标题等截图中不渲染的位置（只记数量）
- *   surfaces   无法审计的可见区域：跨域 iframe、canvas（只记数量）
+ *   surfaces   无法审计的可见区域：跨域 iframe、canvas、shadow DOM（只记数量）
+ *   invalidSelectors  capture.demo.selectors 中无法解析的选择器键
+ *   realValues 本页被替换下来的原始值个数（真实数据曾进入浏览器；只记数量）
  *   generation 审计时刻的 DOM 变更计数，用来确认审计与截图属于同一时刻
  */
 
-function applyDemoInPage({ text = {}, images = {}, known = [] }) {
+function applyDemoInPage({ text = {}, images = {}, known = [], selectors = {} }) {
   const state = window.__manualDemo || (window.__manualDemo = { originals: [] });
   const remember = (value) => {
     const v = String(value || '').trim();
@@ -37,15 +43,24 @@ function applyDemoInPage({ text = {}, images = {}, known = [] }) {
       : `<rect width="64" height="64" fill="#DCE3EE"/><text x="32" y="33" font-family="sans-serif" font-size="28" fill="#4A5568" text-anchor="middle" dominant-baseline="central">${initial(key).replace(/[<>&"']/g, '')}</text>`;
     return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">${body}</svg>`)}`;
   };
-  const out = { replaced: {}, images: {}, unconfigured: [], imageUnconfigured: [], unreplaceable: [] };
+  // 敏感区域：data-redact 与选择器命中的元素，只取最外层；键名优先取 data-redact，其次取选择器键
+  const regionKeys = new Map();
+  const invalidSelectors = [];
+  for (const el of document.querySelectorAll('[data-redact]')) regionKeys.set(el, el.getAttribute('data-redact') || '*');
+  for (const [key, selector] of Object.entries(selectors || {})) {
+    let found = [];
+    try { found = document.querySelectorAll(selector); } catch (_) { invalidSelectors.push(key); continue; }
+    for (const el of found) if (!regionKeys.has(el)) regionKeys.set(el, key);
+  }
+  const inRegion = (el) => { for (let node = el; node; node = node.parentElement) if (regionKeys.has(node)) return true; return false; };
+  const regions = [...regionKeys.keys()].filter((el) => !el.parentElement || !inRegion(el.parentElement));
+  const out = { replaced: {}, images: {}, unconfigured: [], imageUnconfigured: [], unreplaceable: [], invalidSelectors };
   const counters = {};
   const unreplaceable = new Set(['canvas', 'video', 'iframe', 'object', 'embed', 'svg', 'picture']);
-  // 只处理最外层的 data-redact：嵌套的内层随外层一起替换
-  const elements = [...document.querySelectorAll('[data-redact]')].filter((el) => !el.parentElement?.closest('[data-redact]'));
-  for (const el of elements) {
+  for (const el of regions) {
     if (!rendered(el)) continue;
     // 没写键名的 data-redact 用 * 配置演示值
-    const key = el.getAttribute('data-redact') || '*';
+    const key = regionKeys.get(el);
     const tag = el.localName;
     const background = getComputedStyle(el).backgroundImage;
     const hasBackground = background && background !== 'none' && /url\(/.test(background);
@@ -83,7 +98,7 @@ function applyDemoInPage({ text = {}, images = {}, known = [] }) {
   return out;
 }
 
-function auditDemoInPage({ text = {}, images = {}, known = [] } = {}) {
+function auditDemoInPage({ text = {}, images = {}, known = [], selectors = {} } = {}) {
   const state = window.__manualDemo || { originals: [] };
   const checkable = (value) => {
     const t = String(value || '').trim();
@@ -93,16 +108,28 @@ function auditDemoInPage({ text = {}, images = {}, known = [] } = {}) {
   };
   const originals = state.originals.filter(checkable);
   const visible = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
-  const inRedact = (el) => !!el?.closest('[data-redact]');
+  // 敏感区域（与 applyDemoInPage 相同的判定）：data-redact 与选择器命中的元素，只取最外层；键名优先取 data-redact，其次取选择器键
+  const regionKeys = new Map();
+  const invalidSelectors = [];
+  for (const el of document.querySelectorAll('[data-redact]')) regionKeys.set(el, el.getAttribute('data-redact') || '*');
+  for (const [key, selector] of Object.entries(selectors || {})) {
+    let found = [];
+    try { found = document.querySelectorAll(selector); } catch (_) { invalidSelectors.push(key); continue; }
+    for (const el of found) if (!regionKeys.has(el)) regionKeys.set(el, key);
+  }
+  const inRegion = (el) => { for (let node = el; node; node = node.parentElement) if (regionKeys.has(node)) return true; return false; };
+  const regions = [...regionKeys.keys()].filter((el) => !el.parentElement || !inRegion(el.parentElement));
+  const inRedact = (el) => !!el && inRegion(el);
   const contains = (value) => originals.some((original) => String(value || '').includes(original));
-  const out = { replaced: {}, images: {}, unconfigured: [], imageUnconfigured: [], unreplaceable: [], reverted: 0, leaks: [], contacts: [], hidden: 0, surfaces: { iframe: 0, canvas: 0 } };
+  const out = { replaced: {}, images: {}, unconfigured: [], imageUnconfigured: [], unreplaceable: [], reverted: 0, leaks: [], contacts: [], hidden: 0,
+    surfaces: { iframe: 0, canvas: 0, shadow: 0 }, invalidSelectors, realValues: state.originals.length };
   const unreplaceable = new Set(['canvas', 'video', 'iframe', 'object', 'embed', 'svg', 'picture']);
 
-  // 以截图时刻为准重新核对每个 data-redact 区域：替换后才出现、或被页面改回的区域都不能算已替换
-  for (const el of document.querySelectorAll('[data-redact]')) {
-    if (el.parentElement?.closest('[data-redact]') || !visible(el)) continue;
+  // 以截图时刻为准重新核对每个敏感区域：替换后才出现、或被页面改回的区域都不能算已替换
+  for (const el of regions) {
+    if (!visible(el)) continue;
     // 没写键名的 data-redact 用 * 配置演示值
-    const key = el.getAttribute('data-redact') || '*';
+    const key = regionKeys.get(el);
     const marker = el.getAttribute('data-manual-demo');
     const tag = el.localName;
     const background = getComputedStyle(el).backgroundImage;
@@ -155,6 +182,8 @@ function auditDemoInPage({ text = {}, images = {}, known = [] } = {}) {
     if (!readable) out.surfaces.iframe++;
   }
   for (const canvas of document.querySelectorAll('canvas')) if (visible(canvas) && !inRedact(canvas)) out.surfaces.canvas++;
+  // shadow DOM 里的文本不在上面的遍历范围内：只记数量，由门禁决定是否需要登记
+  for (const el of document.querySelectorAll('*')) if (el.shadowRoot && visible(el) && !inRedact(el)) out.surfaces.shadow++;
   out.generation = window.__manualMutation ? window.__manualMutation.generation : null;
   return out;
 }

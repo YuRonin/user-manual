@@ -34,6 +34,7 @@ const { reconcileDocument } = require('./manual-store');
 const { checkedSections } = require('../model/links');
 const { pageInventory } = require('../annotations/coverage');
 const { qualityGate, qualitySummary } = require('./quality-summary');
+const { subjectKey, recaptureBlocked } = require('../evidence/demo-gate-log');
 
 function failure(code, errors, extra = {}) {
   const list = Array.isArray(errors) ? errors : [errors];
@@ -77,7 +78,7 @@ function publishedFromRecord({ projectRoot, stateDirAbs, captureId, sourceRevisi
   }
   const integrity = verifyCaptureRecord(projectRoot, record, { kinds: ['published'] });
   if (!integrity.ok) return { ok: false, errors: describeProblems(integrity.problems) };
-  return { ok: true, artifactPath: artifact.path, sha256: artifact.sha256, privacy: record.privacy, captureId: record.id };
+  return { ok: true, artifactPath: artifact.path, sha256: artifact.sha256, privacy: record.privacy, captureId: record.id, observedAt: record.observedAt || null, scenarioId: record.scenarioId || null };
 }
 
 /**
@@ -137,6 +138,9 @@ function draftPage({ projectRoot, config, pageId, noScreenshot = false }) {
       privacy: source.privacy,
       ...(source.captureId ? { captureId: source.captureId } : {}),
     };
+    // 这张图之后页面的重新采集被 Demo 门禁阻断：手册仍在用旧图，必须提示
+    const demoRecapture = source.captureId ? recaptureBlocked(stateDirAbs, subjectKey(['page', page.id, source.scenarioId || `page-${page.id}`]), source.observedAt) : null;
+    if (demoRecapture) image.demoRecapture = demoRecapture;
     const draftWarnings = [];
     const issues = validateArtifact(image, { projectRoot, config, stage: 'draft', warnings: draftWarnings });
     for (const warning of formatIssues(draftWarnings)) process.stderr.write(`[manual gate] ${warning}\n`);

@@ -1,6 +1,6 @@
 # Living User Manual：统一 Demo 截图模式实施方案
 
-> 状态：待审计、待落地（不代表仓库当前已实现）  
+> 状态：已落地（核心 `54490cd` / `96e9f7b`，缺口补齐见第 11 节）；NeoAgent 真实站点前后对比待现场验证  
 > 适用对象：Codex / Claude Code / 其他编码 Agent  
 > 核心原则：**仅对外提供 Demo Capture；使用真实浏览器和真实 UI；通过浏览器侧 Mock / Fixture / 精确替换构造演示数据；保留隐私与副作用安全校验；不侵入被采集项目。**
 
@@ -332,17 +332,17 @@ Playwright 进程通常无法绝对防护通过目标前端之外的后台定时
 
 只有同时满足以下条件才宣布完成：
 
-- [ ] 完成 P0 只读审计，记录现有实现与复用依据。
-- [ ] 对外只有统一 Demo Capture 工作模式，旧配置已兼容/迁移并测试。
-- [ ] 默认不修改被采集项目的任何源码、配置、数据库或数据。
-- [ ] 已与已有 Scenario/Fixture 管线复用，无无谓重复系统。
-- [ ] 请求安全策略在导航前生效；未授权写入及不确定数据入口 fail-closed。
-- [ ] 隐私检查在正式截图与标注之前完成，失败不能出现在正式产物中。
-- [ ] 在安全验证通过的页面，不再无意义地大面积打码。
-- [ ] 不会因关闭马赛克而泄露真实对话、订单、学生资料或账号信息。
-- [ ] 保持抽屉/遮罩/菜单/按钮及锚点标注的视觉正确性。
-- [ ] 自动化测试和 CI 回归通过，并提供可复核的结果、风险和剩余限制。
-- [ ] 文档中给出如何为新项目添加安全 Fixture、如何排查 `needs_fixture` 的说明。
+- [x] 完成 P0 只读审计，记录现有实现与复用依据。（`docs/audit/2026-10-11-demo-capture-audit.md`）
+- [x] 对外只有统一 Demo Capture 工作模式，旧配置已兼容/迁移并测试。
+- [x] 默认不修改被采集项目的任何源码、配置、数据库或数据。（敏感区域可在 Skill 侧用 `capture.demo.selectors` 声明，不再需要项目加 `data-redact`）
+- [x] 已与已有 Scenario/Fixture 管线复用，无无谓重复系统。
+- [x] 请求安全策略在导航前生效；未授权写入及不确定数据入口 fail-closed。（有敏感区域时，未覆盖的数据读取、SSE、跨域读取、无法审计区域均 needs_fixture）
+- [x] 隐私检查在正式截图与标注之前完成，失败不能出现在正式产物中。（任务不派生发布图的截图也过门禁）
+- [x] 在安全验证通过的页面，不再无意义地大面积打码。（测试站基线：历史会话 2.54% → 0）
+- [x] 不会因关闭马赛克而泄露真实对话、订单、学生资料或账号信息。（以审计覆盖范围为限，见审计报告「剩余限制」）
+- [x] 保持抽屉/遮罩/菜单/按钮及锚点标注的视觉正确性。
+- [ ] 自动化测试和 CI 回归通过，并提供可复核的结果、风险和剩余限制。（本地 macOS unit / browser 全部通过；Linux / Windows CI 实跑待确认）
+- [x] 文档中给出如何为新项目添加安全 Fixture、如何排查 `needs_fixture` 的说明。（`docs/DEMO_CAPTURE.md`）
 
 ---
 
@@ -364,3 +364,24 @@ Playwright 进程通常无法绝对防护通过目标前端之外的后台定时
 **质量优先级：数据安全与无副作用 > 截图准确/功能标注准确 > 自动化覆盖 > 视觉美观。**
 
 > 如果当前环境仅允许提出计划、不允许修改代码：先交付 P0 审计报告及 P1–P5 的仓库定制任务清单；不要冒充已完成实施。
+
+---
+
+## 11. 实施记录（2026-10-11）
+
+| 阶段 | 状态 | 证据 |
+|---|---|---|
+| P0 审计与基线 | 完成 | `docs/audit/2026-10-11-demo-capture-audit.md`；`test/tools/demo-baseline.js`（改造前后同页对比） |
+| P1 数据契约 | 完成 | 来源 `public / fixture / api_mock / dom_replace / blocked`（`privacy.demo.kinds`）；规则 ID 与命中（`mock.routes` / `mock.unhit`）；`realDataInBrowser` |
+| P2 注入与隔离 | 完成 | `capture.demo.selectors`；Fixture 跨域 `origin`、`shape` 校验、列表 id 唯一；Service Worker 注册明确失败 |
+| P3 写入保护与门禁 | 完成 | 未覆盖读取 `demo-unmocked-read`、GraphQL `operationName`、`demo-surface-unaudited`；任务非发布截图也过门禁 |
+| P4 生成链路 | 完成 | `demo-evidence-legacy` / `demo-recapture-blocked` 进入质量提示（可 `quality.blockOn`）；verify 先判 Demo 再写任务状态 |
+| P5 测试与文档 | 部分 | `demo-capture.test.js` 24 项、`demo-contract.test.js` 21 项，本地全部通过；Linux / Windows CI 实跑待确认 |
+
+**偏离方案之处（如实记录）**
+
+- SSR：没有对首屏 HTML 单独阻断。进入画面的真实值由替换与残留检查覆盖；记录以 `realDataInBrowser` 标明真实数据曾进入浏览器，不宣称"未读取真实数据"。
+- `persist_raw_screenshots: false` 未实现：私有原图是重新派生与标注修复的输入；原图在 `.manual/artifacts/raw`（不入库、不发布）。
+- 选择器只支持 CSS，不支持按角色 / 可访问名称声明。
+
+**待现场验证**：NeoAgent 测试站的代表页面前后对比、通过率与原因分布（`manual verify` 的 `demo.metrics`）。

@@ -53,7 +53,10 @@ function buildPrivacyRecord({ redactions = [], config, demo = null }) {
     unresolved,
     maskStyles,
     // Demo 门禁结论（只有通过的截图才会走到这里）：数据来源、无法审计的区域数量；不含任何页面文本
-    ...(demo ? { demo: { status: demo.status, sources: demo.sources, network: demo.network || null, surfaces: demo.surfaces || null, hiddenMatches: demo.hiddenMatches || 0 } } : {}),
+    ...(demo ? { demo: {
+      status: demo.status, sources: demo.sources, kinds: demo.kinds || null, realDataInBrowser: !!demo.realDataInBrowser,
+      network: demo.network || null, mock: demo.mock || null, surfaces: demo.surfaces || null, hiddenMatches: demo.hiddenMatches || 0,
+    } } : {}),
   };
 }
 

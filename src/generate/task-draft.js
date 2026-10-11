@@ -9,6 +9,7 @@ const { buildTaskFactPack } = require('./fact-pack');
 const { renderTask } = require('./render');
 const { createCaptureStore } = require('../evidence/store');
 const { verifyCaptureRecord, describeProblems } = require('../evidence/integrity');
+const { subjectKey, recaptureBlocked } = require('../evidence/demo-gate-log');
 
 function publishedFromCapture(projectRoot, stateDir, captureId, artifactPath, expected = null) {
   let captureRecord;
@@ -28,7 +29,7 @@ function publishedFromCapture(projectRoot, stateDir, captureId, artifactPath, ex
     : `证据清单与 Capture ${captureId} 的发布图不一致。` };
   const integrity = verifyCaptureRecord(projectRoot, captureRecord, { kinds: ['published'] });
   if (!integrity.ok) return { ok: false, error: describeProblems(integrity.problems).join('；') };
-  return { ok: true, sha256: artifact.sha256, privacy: captureRecord.privacy };
+  return { ok: true, sha256: artifact.sha256, privacy: captureRecord.privacy, observedAt: captureRecord.observedAt || null, timing: captureRecord.subject?.timing || null };
 }
 
 /** 任务每张截图记录里观察到的可访问名称（弹窗、菜单等动态状态都在对应步骤的截图里）。 */
@@ -76,14 +77,17 @@ function buildTaskDraft(task, evidence, context = {}) {
       // 旧 manifest（无 captureId）退回为按当前文件计算 hash。
       let sha256 = fileSha256(artifactFile);
       let privacy = shot.privacy || null;
+      let demoRecapture = null;
       if (shot.captureId && context.stateDir) {
         const fromRecord = publishedFromCapture(projectRoot, context.stateDir, shot.captureId, artifactPath, { taskId: task.id, stepId: record.id });
         if (!fromRecord.ok) { errors.push(`步骤 ${record.id}: ${fromRecord.error}`); continue; }
         ({ sha256, privacy } = fromRecord);
+        // 这张图之后同一步骤的重新采集被 Demo 门禁阻断：手册仍在用旧图，必须提示
+        demoRecapture = recaptureBlocked(context.stateDir, subjectKey(['task', task.id, record.id, fromRecord.timing || shot.timing]), fromRecord.observedAt);
       }
       const markdownHref = toMarkdownHref({ manualFile: finalPath, artifactFile });
       // sha256 固定草稿时的图片内容；privacy 只能来自采集时实际执行的检测记录，缺失即 unknown。
-      images.push({ artifactPath, markdownHref, sha256, privacy, ...(shot.timing ? { timing: shot.timing } : {}), ...(step?.capture?.readerCaption ? { readerCaption: step.capture.readerCaption } : {}), ...(shot.captureId ? { captureId: shot.captureId } : {}), stepId: record.id });
+      images.push({ artifactPath, markdownHref, sha256, privacy, ...(shot.timing ? { timing: shot.timing } : {}), ...(step?.capture?.readerCaption ? { readerCaption: step.capture.readerCaption } : {}), ...(shot.captureId ? { captureId: shot.captureId } : {}), ...(demoRecapture ? { demoRecapture } : {}), stepId: record.id });
     }
   }
   if (images.length === 0) errors.push('任务指南至少需要一张 annotated 关键状态截图。');

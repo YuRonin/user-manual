@@ -4,8 +4,9 @@ const fs = require('fs');
 const path = require('path');
 const { writeText } = require('../util/fsx');
 const { sha256Hex } = require('../util/hash');
-const { captureStable, derivePublished, confirmTargetsShown } = require('../evidence/capture-safe');
+const { captureStable, derivePublished, confirmTargetsShown, demoGate } = require('../evidence/capture-safe');
 const { createCaptureStore, sanitizeUrl } = require('../evidence/store');
+const { subjectKey, recordGateFailure, clearGateFailure } = require('../evidence/demo-gate-log');
 const { revisionOf } = require('../util/hash');
 const { validateNavigation, validateWithReload, runAssertions, isUrlOnly, DEFAULT_ASSERTION_TIMEOUT_MS } = require('../evidence/validate-page');
 const { DEFAULT_WAITS } = require('../config/waits');
@@ -30,7 +31,7 @@ function joinUrl(baseUrl, route) {
 /** Demo 网络守卫、Fixture 路由与演示值：每次打开页面之前安装（见 privacy/demo.js）。 */
 async function installGuard(provider, options, baseUrl) {
   if (provider.installDemoGuard) {
-    await provider.installDemoGuard({ routes: options.routes || [], baseUrl, demo: options.demo || null });
+    await provider.installDemoGuard({ routes: options.routes || [], baseUrl, demo: options.demo || null, dataMode: options.provenanceMode || 'live' });
   } else if (options.routes?.length) {
     throw Object.assign(new Error('当前 Browser Provider 不支持请求拦截（routeMocking），不能使用 mock Fixture。'), { code: 'capability-missing' });
   }
@@ -46,8 +47,9 @@ async function diagnosticScreenshot(provider, stateDir, plan, step, cause) {
   if (provider.applyDemo) {
     await provider.applyDemo();
     const audit = provider.auditDemo ? await provider.auditDemo() : null;
-    // 只看画面内容；网络事件与截图内容无关
-    if (!audit || require('../privacy/demo').decide({ audit, guard: {}, demo: provider.demo || {} }).status !== 'passed') return null;
+    // 只看画面内容与数据来源；写请求事件与截图内容无关
+    const uncovered = provider.demoGuardState ? provider.demoGuardState()?.uncovered || [] : [];
+    if (!audit || require('../privacy/demo').decide({ audit, guard: { uncovered }, demo: provider.demo || {} }).status !== 'passed') return null;
   }
   const file = path.join(stateDir, 'artifacts', 'diagnostics', `${plan.taskId}--${step.id}--failure.png`);
   await provider.screenshot({ path: file, format: 'png' });
@@ -107,6 +109,8 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
     const stateRelative = path.relative(projectRoot, stateDir).replace(/\\/g, '/') || '.';
     const artifacts = [{ kind: 'raw', file: rawPath, dir: `${stateRelative}/artifacts/raw`, prefix }];
     let safe = null;
+    // 不派生发布图的截图同样先过 Demo 门禁：raw 会入库，未证明安全的画面不能留下
+    if (!publish) demoGate(captured);
     if (publish) {
       // 派生输入私有保存：隐私规则 / 主题变化时可从同一份 raw 重新派生，不必重新执行任务。
       fs.writeFileSync(staging.file('derivation.json'), derivationSidecar(captured));
@@ -161,6 +165,7 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
     });
     // 变体证据单独登记 latest，不覆盖默认 Scenario 的指针
     store.setLatest({ [options.variant ? `scenario:${plan.scenario.id}:${step.id}:${timing}` : `task:${plan.taskId}:${step.id}:${timing}`]: record.id });
+    clearGateFailure(stateDir, subjectKey(['task', plan.taskId, step.id, timing]));
     const artifactOf = (kind) => record.artifacts.find((a) => a.kind === kind) || null;
     const output = { captureId: record.id, raw: path.join(projectRoot, artifactOf('raw').path), timing, bytes: captured.shot.bytes,
       meta: { ...captured.shot.meta, url: sanitizeUrl(captured.shot.meta?.url) }, warnings: [...(captured.warnings || [])] };
@@ -183,6 +188,7 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
     return output;
   } catch (error) {
     store.abort(staging);
+    recordGateFailure(stateDir, subjectKey(['task', plan.taskId, step.id, timing]), error);
     throw error;
   }
 }

@@ -25,8 +25,13 @@
  *       - { path: /api/stats, method: GET, status: 200, json: { users: 0 } }
  *       - { path: /api/report, status: 500, bodyFile: data/error.html, contentType: text/html }
  *       - { path: /api/orders, method: GET, query: { page: '2' }, json: { items: [] } }   # query：这些参数必须完全相等
+ *       - { origin: 'https://api.example.com', path: /v1/me, json: { name: 演示教师 } }   # origin：拦截跨域接口（可含 *）
+ *       - path: /api/sessions                # shape：声明响应结构，登记时校验，结构不符拒绝使用（不返回残缺数据）
+ *         json: { items: [{ id: s1, title: 示例会话 }], total: 1 }
+ *         shape: { required: [items, total], items: { field: items, required: [id, title] } }
  *   demo:                               # 可选：本 Fixture 的演示值，覆盖 / 补充 config 的 capture.demo
  *     text: { account-name: 演示教师 }
+ *     selectors: { account-name: '.user-card .name' }
  *   # 或 kind: hook
  *   hook: { module: hooks/seed-orders.js, secrets: { token: env:FIXTURE_API_TOKEN } }
  */
@@ -53,6 +58,58 @@ function inside(root, file) {
   return rel && !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
+/** JSON 响应体：route.json，或 contentType 为 JSON 的 bodyFile / body。解析失败返回 { error }。 */
+function routeJson(route, dir) {
+  if (route.json !== undefined) return { value: route.json };
+  const json = /json/i.test(String(route.contentType || ''));
+  if (!json) return null;
+  try {
+    const raw = route.bodyFile ? fs.readFileSync(path.resolve(dir, route.bodyFile), 'utf8') : String(route.body ?? '');
+    return { value: JSON.parse(raw) };
+  } catch (error) { return { error: error.message }; }
+}
+
+/**
+ * 响应结构校验（D-4）：Mock 响应必须与真实接口结构一致，否则截图"看起来正常"但业务状态是错的。
+ * shape: { required?: [字段], items?: { field, required?: [字段] } }；列表元素带 id 时 id 必须唯一（分页结果可复现）。
+ */
+function validateShape(route, i, dir, errors) {
+  const parsed = routeJson(route, dir);
+  if (parsed?.error) { errors.push(`mock.routes[${i}] 的 JSON 响应体无法解析: ${parsed.error}`); return; }
+  const shape = route.shape;
+  if (shape === undefined) {
+    if (parsed && Array.isArray(parsed.value)) duplicateIds(parsed.value, `mock.routes[${i}]`, errors);
+    return;
+  }
+  if (!shape || typeof shape !== 'object' || Array.isArray(shape)) { errors.push(`mock.routes[${i}].shape 需要是对象。`); return; }
+  if (!parsed) { errors.push(`mock.routes[${i}].shape 只适用于 JSON 响应（json，或 contentType 为 JSON 的 body / bodyFile）。`); return; }
+  const value = parsed.value;
+  const isObject = (v) => v && typeof v === 'object' && !Array.isArray(v);
+  const listOf = (field, list) => (Array.isArray(list) ? list.filter((k) => typeof k === 'string') : []).filter((k) => !(k in field));
+  if (shape.required !== undefined) {
+    if (!Array.isArray(shape.required)) errors.push(`mock.routes[${i}].shape.required 需要是字段名数组。`);
+    else if (!isObject(value)) errors.push(`mock.routes[${i}] 的响应不是对象，缺少 ${shape.required.join(', ')}。`);
+    else { const missing = listOf(value, shape.required); if (missing.length) errors.push(`mock.routes[${i}] 的响应缺少字段: ${missing.join(', ')}。`); }
+  }
+  if (shape.items !== undefined) {
+    const field = shape.items?.field;
+    const list = field ? (isObject(value) ? value[field] : undefined) : value;
+    if (!Array.isArray(list)) { errors.push(`mock.routes[${i}] 的响应中 ${field || '(根)'} 不是数组。`); return; }
+    list.forEach((item, j) => {
+      if (!isObject(item)) { errors.push(`mock.routes[${i}] 的 ${field || '(根)'}[${j}] 不是对象。`); return; }
+      const missing = listOf(item, shape.items.required);
+      if (missing.length) errors.push(`mock.routes[${i}] 的 ${field || '(根)'}[${j}] 缺少字段: ${missing.join(', ')}。`);
+    });
+    duplicateIds(list, `mock.routes[${i}] 的 ${field || '(根)'}`, errors);
+  }
+}
+
+function duplicateIds(list, where, errors) {
+  const ids = list.filter((item) => item && typeof item === 'object' && item.id !== undefined).map((item) => String(item.id));
+  const dup = ids.filter((id, k) => ids.indexOf(id) !== k);
+  if (dup.length) errors.push(`${where} 中 id 重复: ${[...new Set(dup)].join(', ')}（演示数据需要稳定唯一的 ID）。`);
+}
+
 /** 校验 Fixture 定义；返回错误列表。 */
 function validateFixture(def, dir) {
   const errors = [];
@@ -71,12 +128,14 @@ function validateFixture(def, dir) {
       if (typeof route?.path !== 'string' || !route.path.startsWith('/')) errors.push(`mock.routes[${i}].path 需要是以 / 开头的路径（可含 *）。`);
       if (route?.status !== undefined && !(Number.isInteger(route.status) && route.status >= 100 && route.status < 600)) errors.push(`mock.routes[${i}].status 非法。`);
       if (route?.bodyFile !== undefined && (typeof route.bodyFile !== 'string' || !inside(dir, path.resolve(dir, route.bodyFile)))) errors.push(`mock.routes[${i}].bodyFile 必须位于 .manual/fixtures/ 内。`);
+      if (route?.origin !== undefined && (typeof route.origin !== 'string' || !/^https?:\/\/[^/]+$/.test(route.origin.replace(/\*/g, 'x')))) errors.push(`mock.routes[${i}].origin 需要是 http(s)://主机[:端口]（可含 *），不含路径。`);
+      if (route && typeof route === 'object' && (route.bodyFile === undefined || (typeof route.bodyFile === 'string' && inside(dir, path.resolve(dir, route.bodyFile))))) validateShape(route, i, dir, errors);
       if (route?.query !== undefined && (!route.query || typeof route.query !== 'object' || Array.isArray(route.query) || Object.values(route.query).some((v) => typeof v !== 'string' && typeof v !== 'number'))) errors.push(`mock.routes[${i}].query 需要是 { 参数名: 值 } 对象。`);
     });
   }
   if (def.demo !== undefined) {
     const { resolveDemoConfig } = require('../privacy/demo');
-    const checked = resolveDemoConfig({ demo: { text: def.demo?.text, images: def.demo?.images } });
+    const checked = resolveDemoConfig({ demo: { text: def.demo?.text, images: def.demo?.images, selectors: def.demo?.selectors } });
     if (!checked.ok) errors.push(...checked.errors.map((e) => e.replace('capture.demo', 'demo')));
     if (def.demo?.network !== undefined) errors.push('demo.network 只能在 config.yaml 的 capture.demo.network 中声明（网络放行属于项目级安全策略）。');
   }
@@ -134,7 +193,7 @@ function mockRoutes(fixture) {
     else if (route.bodyFile) body = fs.readFileSync(path.resolve(fixture.dir, route.bodyFile));
     else if (route.body !== undefined) body = String(route.body);
     const query = route.query ? Object.fromEntries(Object.entries(route.query).map(([k, v]) => [k, String(v)])) : null;
-    return { path: route.path, matcher: globToRegex(route.path), method: route.method ? String(route.method).toUpperCase() : null, query, status: route.status || 200, contentType: contentType || 'text/plain; charset=utf-8', body };
+    return { path: route.path, matcher: globToRegex(route.path), origin: route.origin ? globToRegex(route.origin) : null, originPattern: route.origin || null, method: route.method ? String(route.method).toUpperCase() : null, query, status: route.status || 200, contentType: contentType || 'text/plain; charset=utf-8', body };
   });
 }
 
@@ -207,7 +266,7 @@ function prepareScenarioData({ stateDirAbs, config, scenario, runId = null }) {
   const fixture = readFixture(stateDirAbs, scenario.data.fixture);
   checkFixtureAllowed({ fixture, scenario, config });
   const ref = { id: fixture.id, version: fixture.version, revision: fixtureRevision(fixture), kind: fixture.kind, dataset: fixture.dataset || null };
-  const demo = fixture.demo ? { text: fixture.demo.text || {}, images: fixture.demo.images || {} } : null;
+  const demo = fixture.demo ? { text: fixture.demo.text || {}, images: fixture.demo.images || {}, selectors: fixture.demo.selectors || {} } : null;
   if (fixture.kind === 'mock') return { mode: 'simulated', routes: mockRoutes(fixture), fixture: ref, demo };
   const state = runId ? readFixtureState(stateDirAbs, runId, fixture.id) : null;
   if (!state || state.status !== 'active') {

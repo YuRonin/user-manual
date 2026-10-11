@@ -28,11 +28,16 @@ manual migrate --rollback <迁移 id>             # 用完整备份恢复
 |---|---|---|
 | 新增 `capture.mode`，唯一取值 `demo` | 旧配置没有这一行时按 demo 读取；写成其他值会被拒绝并提示 | 无（`init` 新生成的配置会带上这一行） |
 | `data-redact` 区域不再打马赛克，改为替换成演示值 | 没有配置演示值的键会让截图停在 `needs_fixture`，不再"打码后照常发布" | 按报错列出的键补 `capture.demo.text` / `images`，或用 Fixture 提供数据 |
-| 正文里未声明的手机号 / 邮箱不再打码 | 门禁判为 `needs_fixture` | 用 Fixture 提供虚构数据，或在被采集项目中声明为 `data-redact` |
+| 正文里未声明的手机号 / 邮箱不再打码 | 门禁判为 `needs_fixture` | 把所在元素加进 `capture.demo.selectors`，或用 Fixture 提供虚构数据 |
 | 浏览器内非只读请求默认中止 | 打开即写的页面判为 `blocked`；只读步骤触发写请求时以 `demo-write-blocked` 失败 | 确认无副作用的请求登记到 `capture.demo.network.allow`；写操作用 `writeAuthorization` 或 Fixture 完整模拟 |
 | Service Worker 被屏蔽、未登记的 WebSocket 被关闭 | 依赖它们的页面可能表现不同 | 只读的 WebSocket 登记到 `capture.demo.network.websockets` |
 | 门禁失败不再写入 Capture 记录与原图 | 失败只出现在运行结果与原因码中 | 无 |
-| 旧 Capture（没有 `privacy.demo`）继续可用，重新派生时沿用旧遮罩规则 | — | 需要清晰演示截图时重新采集 |
+| 旧 Capture（没有 `privacy.demo`）继续可用，重新派生时沿用旧遮罩规则 | `generate` 提示 `demo-evidence-legacy` | 需要清晰演示截图时重新采集 |
+| 新增 `capture.demo.selectors`：敏感区域可在 Skill 侧按 CSS 选择器声明 | `data-redact` 不再是必需的；两种声明方式等价 | 不需要再改被采集项目；已有的 `data-redact` 照常生效 |
+| 页面声明了敏感区域时，没有 Fixture 也没有登记的数据读取（含跨域、SSE）判为 `needs_fixture`（`demo-unmocked-read`） | 之前这些读取直接放行且不记录；真实数据进入声明区域之外时无从发现 | 为接口写 Fixture；确认只返回公开数据或内容全部落在已声明区域后，登记到 `capture.demo.network.allow`（GET 也可以登记） |
+| 页面声明了敏感区域时，跨域 iframe / Canvas / Shadow DOM 判为 `needs_fixture`（`demo-surface-unaudited`） | 之前只记数量 | 确认其中没有真实数据后登记到 `capture.demo.surfaces` |
+| Fixture 的 JSON 响应体在登记时校验（可解析、可选 `shape`、列表 id 唯一） | 写坏的 Fixture 以 `fixture-invalid` 拒绝使用 | 按报错修正 Fixture |
+| Service Worker 的注册在 Demo Context 中明确失败 | 之前 `serviceWorkers: block` 在当前 Playwright 下仍可能注册成功 | 无 |
 
 ## 历史产物只留当前版本
 

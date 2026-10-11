@@ -29,7 +29,7 @@ test('init 生成的配置声明 capture.mode: demo，读回后带默认 demo �
     const loaded = loadConfig(root);
     assert.equal(loaded.ok, true, (loaded.errors || []).join('\n'));
     assert.equal(loaded.config.capture.mode, 'demo');
-    assert.deepEqual(loaded.config.capture.demo, { text: {}, images: {}, network: { allow: [], block: [], websockets: [] } });
+    assert.deepEqual(loaded.config.capture.demo, { text: {}, images: {}, selectors: {}, surfaces: [], network: { allow: [], block: [], websockets: [] } });
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -87,7 +87,10 @@ test('请求判定：只读放行、写请求默认阻断、登记放行、危�
   } } }).demo.network;
   const at = (p, origin = 'http://app.test') => new URL(p, origin);
   const c = (method, p, extra = {}) => demo.classifyRequest({ method, url: at(p), network, ...extra });
-  assert.equal(c('GET', '/api/sessions'), 'pass');
+  assert.equal(c('GET', '/api/sessions'), 'pass', '静态资源 / 文档请求');
+  assert.equal(c('GET', '/api/sessions', { resourceType: 'fetch' }), 'unverified', '没有 Fixture 的数据读取：放行但记录');
+  assert.equal(c('GET', '/stream', { resourceType: 'eventsource' }), 'unverified');
+  assert.equal(c('OPTIONS', '/api/sessions', { resourceType: 'fetch' }), 'pass', '预检请求不承载数据');
   assert.equal(c('POST', '/api/sessions'), 'block');
   assert.equal(c('DELETE', '/api/sessions/1'), 'block');
   assert.equal(c('PATCH', '/api/profile'), 'block');
@@ -102,7 +105,8 @@ test('请求判定：只读放行、写请求默认阻断、登记放行、危�
 test('门禁结论：passed / needs_fixture / blocked 与原因码', () => {
   const passed = demo.decide({ audit: { replaced: { 'account-name': 1 } }, guard: { mocked: ['GET /api/x'] } });
   assert.equal(passed.status, 'passed');
-  assert.deepEqual(passed.sources, { public: true, api_mock: 1, dom_replace: 1 });
+  assert.deepEqual(passed.sources, { public: true, fixture: 0, api_mock: 1, dom_replace: 1 });
+  assert.deepEqual(passed.kinds, ['public', 'api_mock', 'dom_replace']);
 
   const needs = demo.decide({ audit: { unconfigured: ['session-title', 'session-title'] }, guard: {} });
   assert.equal(needs.status, 'needs_fixture');
@@ -206,4 +210,145 @@ test('verify 判错：只有记录显示门禁失败或写请求被中止才失�
   assert.match(demoSafetyErrors(failed).join('\n'), /demo-privacy-failed: 1 张图/);
   const writes = summarizeDemoSafety([{ privacy: { demo: { status: 'passed', network: { blocked: 2 } } } }]);
   assert.match(demoSafetyErrors(writes).join('\n'), /write-safety-failed: 采集期间有 2 个写请求/);
+});
+
+test('数据读取：登记的只读接口放行；GraphQL 按 operationName 精确登记', () => {
+  const network = demo.resolveDemoConfig({ demo: { network: {
+    allow: [{ method: 'GET', path: '/api/announcements' }, { method: 'POST', path: '/graphql', operationName: 'ListCourses' }],
+  } } }).demo.network;
+  const at = (p) => new URL(p, 'http://app.test');
+  assert.equal(demo.classifyRequest({ method: 'GET', url: at('/api/announcements'), resourceType: 'fetch', network }), 'allow');
+  assert.equal(demo.classifyRequest({ method: 'POST', url: at('/graphql'), resourceType: 'fetch', network, operationName: 'ListCourses' }), 'allow');
+  assert.equal(demo.classifyRequest({ method: 'POST', url: at('/graphql'), resourceType: 'fetch', network, operationName: 'DeleteCourse' }), 'block', '同一路径的其它操作仍按写请求阻断');
+  assert.equal(demo.operationNameOf(at('/graphql'), JSON.stringify({ operationName: 'ListCourses', variables: { secret: 'x' } })), 'ListCourses');
+  assert.equal(demo.operationNameOf(at('/graphql?operationName=Q1'), null), 'Q1');
+  assert.equal(demo.operationNameOf(at('/graphql'), 'not json'), null);
+  assert.equal(demo.resolveDemoConfig({ demo: { network: { allow: [{ path: '/graphql', operationName: '' }] } } }).ok, false);
+});
+
+test('未覆盖的数据读取：页面有敏感区域 → needs_fixture（demo-unmocked-read）；没有敏感区域只记录', () => {
+  const uncovered = [{ method: 'GET', path: '/api/profile', kind: 'same-origin' }, { method: 'GET', path: 'https://cdn.example.com/me', kind: 'cross-origin' }];
+  const withRegions = demo.decide({ audit: { replaced: { 'account-name': 1 }, realValues: 1 }, guard: { uncovered } });
+  assert.equal(withRegions.status, 'needs_fixture');
+  const reason = withRegions.reasons.find((r) => r.code === 'demo-unmocked-read');
+  assert.match(reason.detail, /GET \/api\/profile/);
+  assert.match(reason.detail, /cross-origin/);
+  assert.match(reason.hint, /capture\.demo\.network\.allow/);
+  const publicPage = demo.decide({ audit: {}, guard: { uncovered } });
+  assert.equal(publicPage.status, 'passed', '没有声明敏感区域的公开页面不因读取接口而阻断');
+  assert.equal(publicPage.network.uncovered, 2);
+  assert.equal(publicPage.realDataInBrowser, true, '真实数据进入过浏览器必须如实记录');
+  assert.equal(demo.decide({ audit: { replaced: { a: 1 } }, guard: { mocked: ['GET /x'] } }).realDataInBrowser, false);
+});
+
+test('无法审计的区域：有敏感区域时 iframe / canvas / shadow → needs_fixture；登记 surfaces 后通过', () => {
+  const audit = { replaced: { a: 1 }, surfaces: { iframe: 1, canvas: 0, shadow: 2 } };
+  const r = demo.decide({ audit, guard: {} });
+  assert.equal(r.status, 'needs_fixture');
+  assert.equal(r.reasons[0].code, 'demo-surface-unaudited');
+  assert.equal(r.reasons[0].detail, 'iframe × 1, shadow × 2');
+  const config = demo.resolveDemoConfig({ demo: { surfaces: ['iframe', 'shadow'] } }).demo;
+  assert.equal(demo.decide({ audit, guard: {}, demo: config }).status, 'passed');
+  assert.equal(demo.resolveDemoConfig({ demo: { surfaces: ['video'] } }).ok, false);
+  assert.equal(demo.decide({ audit: { surfaces: { canvas: 3 } }, guard: {} }).status, 'passed', '公开页面的图表不阻断');
+});
+
+test('选择器声明：校验键名与选择器；无法解析的选择器 → needs_fixture；Fixture 可补充选择器', () => {
+  const ok = demo.resolveDemoConfig({ demo: { selectors: { 'account-name': '.user .name' }, text: { 'account-name': '演示教师' } } });
+  assert.equal(ok.ok, true, (ok.errors || []).join('\n'));
+  assert.deepEqual(ok.demo.selectors, { 'account-name': '.user .name' });
+  const bad = demo.resolveDemoConfig({ demo: { selectors: { '*': '.x', name: '' } } });
+  assert.equal(bad.ok, false);
+  assert.match(bad.errors.join('\n'), /键名非法: \*/);
+  assert.match(bad.errors.join('\n'), /name 需要是非空的 CSS 选择器/);
+  const r = demo.decide({ audit: { invalidSelectors: ['name'] }, guard: {} });
+  assert.equal(r.reasons[0].code, 'demo-selector-invalid');
+  const merged = demo.mergeDemo(ok.demo, { selectors: { 'session-title': 'li.t' } });
+  assert.deepEqual(merged.selectors, { 'account-name': '.user .name', 'session-title': 'li.t' });
+});
+
+test('数据来源记录：Fixture 路由命中与未命中、hook Fixture、被阻断时的 blocked 类别', () => {
+  const guard = { mocked: ['GET /api/a'], routes: [{ rule: 'GET /api/a', hits: 1 }, { rule: '* /api/old', hits: 0 }] };
+  const r = demo.decide({ audit: {}, guard, demo: { dataMode: 'fixture' } });
+  assert.deepEqual(r.mock, { routes: [{ rule: 'GET /api/a', hits: 1 }, { rule: '* /api/old', hits: 0 }], unhit: ['* /api/old'] });
+  assert.equal(r.sources.fixture, 1);
+  assert.deepEqual(r.kinds, ['public', 'fixture', 'api_mock']);
+  assert.deepEqual(demo.decide({ guard: { blocked: [{ method: 'POST', path: '/x' }] } }).kinds, ['public', 'blocked']);
+});
+
+test('Fixture 响应结构：shape 校验字段、列表元素与唯一 id；JSON 无法解析被拒绝；跨域路由需要合法 origin', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'manual-demo-shape-'));
+  try {
+    const state = path.join(root, '.manual');
+    const dir = fixtures.fixturesDirFor(state);
+    fs.mkdirSync(dir, { recursive: true });
+    const base = { schemaVersion: 1, id: 'list-demo', version: 1, kind: 'mock', environments: ['local'], sideEffectClass: 'none' };
+    const write = (routes) => fs.writeFileSync(path.join(dir, 'list-demo.yaml'), yaml.dump({ ...base, mock: { routes } }));
+    const shape = { required: ['items', 'total'], items: { field: 'items', required: ['id', 'title'] } };
+    write([{ path: '/api/list', json: { items: [{ id: 1, title: '示例' }, { id: 2, title: '示例 2' }], total: 2 }, shape }]);
+    assert.equal(fixtures.readFixture(state, 'list-demo').id, 'list-demo');
+    write([{ path: '/api/list', json: { items: [{ id: 1 }, { id: 1, title: 'x' }] }, shape }]);
+    assert.throws(() => fixtures.readFixture(state, 'list-demo'), (e) => /缺少字段: total/.test(e.message) && /items\[0\] 缺少字段: title/.test(e.message) && /id 重复: 1/.test(e.message));
+    write([{ path: '/api/list', body: '{bad', contentType: 'application/json' }]);
+    assert.throws(() => fixtures.readFixture(state, 'list-demo'), /JSON 响应体无法解析/);
+    write([{ path: '/v1/me', origin: 'https://api.example.com/v1', json: {} }]);
+    assert.throws(() => fixtures.readFixture(state, 'list-demo'), /origin 需要是 http\(s\):\/\/主机/);
+    write([{ path: '/v1/me', origin: 'https://*.example.com', json: { name: '演示教师' } }]);
+    const routes = fixtures.mockRoutes(fixtures.readFixture(state, 'list-demo'));
+    assert.ok(routes[0].origin.test('https://api.example.com'));
+    assert.ok(!routes[0].origin.test('https://example.org'));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('门禁失败记录：只存原因码；之后的重新采集被阻断才算 recapture-blocked；采集成功即清除', () => {
+  const log = require('../src/evidence/demo-gate-log');
+  const state = fs.mkdtempSync(path.join(os.tmpdir(), 'manual-demo-gate-'));
+  try {
+    const key = log.subjectKey(['page', 'chat', 'page-chat']);
+    assert.equal(key, 'page--chat--page-chat');
+    assert.equal(log.recordGateFailure(state, key, new Error('普通错误')), null, '不是 Demo 门禁错误不记录');
+    const error = demo.demoGateError(demo.decide({ audit: { replaced: { a: 1 } }, guard: { uncovered: [{ method: 'GET', path: '/api/me', kind: 'same-origin' }] } }));
+    const entry = log.recordGateFailure(state, key, error);
+    assert.deepEqual({ status: entry.status, reasons: entry.reasons }, { status: 'needs_fixture', reasons: ['demo-unmocked-read'] });
+    assert.doesNotMatch(fs.readFileSync(path.join(state, 'evidence', 'demo-gate', `${key}.json`), 'utf8'), /\/api\/me/, '不写 detail');
+    assert.equal(log.recaptureBlocked(state, key, '2000-01-01T00:00:00.000Z').reasons[0], 'demo-unmocked-read');
+    assert.equal(log.recaptureBlocked(state, key, '2999-01-01T00:00:00.000Z'), null, '失败早于手册引用的截图：不提示');
+    log.clearGateFailure(state, key);
+    assert.equal(log.readGateFailure(state, key), null);
+  } finally { fs.rmSync(state, { recursive: true, force: true }); }
+});
+
+test('generate 质量提示：旧证据 demo-evidence-legacy、重新采集被阻断 demo-recapture-blocked，可由 quality.blockOn 升级为阻断', () => {
+  const { packWarnings, qualityGate, validateQualityConfig } = require('../src/generate/quality-summary');
+  const pack = { kind: 'page', artifacts: [
+    { id: 'img-1', privacy: { status: 'passed' } },
+    { id: 'img-2', privacy: { status: 'passed', demo: { status: 'passed' } }, demoRecapture: { reasons: ['demo-unmocked-read'] } },
+    { id: 'img-3', privacy: { status: 'passed', demo: { status: 'passed' } } },
+  ] };
+  const warnings = packWarnings(pack);
+  assert.ok(warnings.includes('demo-evidence-legacy:img-1'));
+  assert.ok(warnings.some((w) => w.startsWith('demo-recapture-blocked:img-2（demo-unmocked-read）')));
+  assert.equal(warnings.filter((w) => /img-3/.test(w)).length, 0);
+  assert.deepEqual(qualityGate(pack, {}), []);
+  const errors = [];
+  validateQualityConfig({ blockOn: ['demo-recapture-blocked'] }, errors);
+  assert.deepEqual(errors, []);
+  assert.equal(qualityGate(pack, { quality: { blockOn: ['demo-recapture-blocked'] } })[0].code, 'quality-blocked');
+});
+
+test('verify 的 Demo 指标：遮罩面积、Fixture 命中、未覆盖读取、真实数据进入浏览器、门禁失败分布', () => {
+  const { summarizeDemoSafety } = require('../src/verify/demo-safety');
+  const shot = (extra) => ({ quality: { maskedAreaUpperBound: 0 }, privacy: { demo: { status: 'passed', network: { uncovered: 0 }, mock: { routes: [], unhit: [] }, ...extra } } });
+  const records = [
+    shot({ mock: { routes: [{ rule: 'GET /a', hits: 2 }, { rule: 'GET /b', hits: 0 }], unhit: ['GET /b'] } }),
+    shot({ realDataInBrowser: true, network: { uncovered: 1 } }),
+    { quality: { maskedAreaUpperBound: 0.3 }, privacy: { status: 'passed' } },
+  ];
+  const failures = [{ status: 'needs_fixture', reasons: ['demo-unmocked-read'] }, { status: 'blocked', reasons: ['original-value-leaked', 'demo-unmocked-read'] }];
+  const { metrics } = summarizeDemoSafety(records, { gateFailures: failures });
+  assert.deepEqual(metrics.maskedArea, { mean: 0.1, max: 0.3, heavilyRedacted: 1 });
+  assert.deepEqual(metrics.mock, { rules: 2, hits: 2, unhit: ['GET /b'] });
+  assert.equal(metrics.uncoveredReads, 1);
+  assert.equal(metrics.realDataInBrowser, 1);
+  assert.deepEqual(metrics.gateFailures, { total: 2, blocked: 1, needsFixture: 1, reasons: { 'demo-unmocked-read': 2, 'original-value-leaked': 1 } });
 });

@@ -5,6 +5,8 @@
  *   页面采集：演示值替换（无马赛克）、Fixture 数据即演示数据、原始值残留、非模式化私人文本、
  *             重渲染改回、WebSocket、图片类敏感区域、浏览器信标、加载即写、正常 UI 蒙层、可复现、项目源码不变
  *   任务采集：误标为只读的删除动作被中止（服务端写计数为 0）；Fixture 完整模拟写操作后步骤正常完成
+ *   补充（D-2 ~ D-8）：未登记的数据读取、Skill 侧选择器、漏网数据来源、跨域接口、SSE、GraphQL 操作名、
+ *             Service Worker、分页与刷新、公开公告原样保留、演示页面上的标注位置
  * 门禁失败时不产出截图，也不留下原图 / 派生图。
  */
 
@@ -91,9 +93,43 @@ async function pixels(file) {
     return root;
   }
   const capture = (root, page) => runCli(['capture', 'chat', '--project-root', root, '--url', `${server.baseUrl}${page}`, '--json']);
-  const HISTORY_DEMO = { text: { 'account-name': '演示教师', 'account-phone': '138****0000', 'session-title': ['七年级数学：一元一次方程复习', '八年级物理：浮力实验设计'] } };
+  // 会话列表接口的内容全部落在 data-redact 区域（已审阅）：登记为允许读取
+  const HISTORY_READ = { allow: [{ method: 'GET', path: '/api/demo/conversations' }], block: [], websockets: [] };
+  const HISTORY_DEMO = { text: { 'account-name': '演示教师', 'account-phone': '138****0000', 'session-title': ['七年级数学：一元一次方程复习', '八年级物理：浮力实验设计'] }, network: HISTORY_READ };
+  /** 在项目里登记一个 mock Fixture 与使用它的页面 Scenario（page-chat）。 */
+  function useFixture(root, def) {
+    const state = path.join(root, '.manual');
+    fs.mkdirSync(path.join(state, 'fixtures'), { recursive: true });
+    fs.writeFileSync(path.join(state, 'fixtures', `${def.id}.yaml`), yaml.dump({ schemaVersion: 1, version: 1, kind: 'mock', environments: ['local'], sideEffectClass: 'none', ...def }));
+    const page = yaml.load(fs.readFileSync(path.join(state, 'pages', 'chat.yaml'), 'utf8'));
+    fs.mkdirSync(path.join(state, 'scenarios'), { recursive: true });
+    fs.writeFileSync(path.join(state, 'scenarios', 'page-chat.yaml'), yaml.dump({
+      schemaVersion: 1, id: 'page-chat', userTaskId: null, environment: 'local', authProfile: 'anonymous',
+      data: { mode: 'fixture', fixture: def.id },
+      entry: { pageId: 'chat', routeBindingId: 'main', params: {} },
+      expected: { httpStatuses: [200], redirects: [], state: 'normal' }, setup: [],
+      checkpoints: [{ id: 'default', afterStepId: null, pageId: 'chat', assertions: [{ type: 'url', value: page.route }], capture: { mode: 'viewport', annotations: [] } }],
+    }));
+  }
+  const LOCAL_FIXTURES = { fixtures: { environments: { local: { origins: ['http://127.0.0.1:*'] } } } };
+  const recordOf = (root, r) => {
+    const state = path.join(root, '.manual');
+    const id = r.json?.record?.id || r.json?.captureId || JSON.parse(fs.readFileSync(path.join(state, 'evidence', 'latest.json'), 'utf8')).refs['scenario:page-chat'];
+    return JSON.parse(fs.readFileSync(path.join(state, 'evidence', 'captures', `${id}.json`), 'utf8'));
+  };
 
   try {
+    await test('历史会话：未登记的会话接口 → needs_fixture（demo-unmocked-read），只记方法与路径', async () => {
+      const root = await project({ text: HISTORY_DEMO.text });
+      const r = await capture(root, '/demo-history');
+      assert.strictEqual(r.json.reason, 'demo-needs-fixture');
+      assert.match(r.json.message, /demo-unmocked-read（GET \/api\/demo\/conversations）/);
+      assert.ok(!/王小明|李华/.test(r.stdout));
+      assert.deepStrictEqual(pngFiles(root), []);
+      const failure = JSON.parse(fs.readFileSync(path.join(root, '.manual', 'evidence', 'demo-gate', 'page--chat--page-chat.json'), 'utf8'));
+      assert.deepStrictEqual({ status: failure.status, reasons: failure.reasons }, { status: 'needs_fixture', reasons: ['demo-unmocked-read'] }, '门禁失败只留原因码');
+    });
+
     await test('历史会话：data-redact 区域替换为演示值，发布图无马赛克，门禁记录数据来源', async () => {
       const root = await project(HISTORY_DEMO);
       const before = sourceSnapshot(root);
@@ -102,7 +138,11 @@ async function pixels(file) {
       const out = r.json;
       assert.strictEqual(out.published.privacy.status, 'passed');
       assert.strictEqual(out.published.privacy.coverage, 'demo-gate');
-      assert.deepStrictEqual(out.published.privacy.demo.sources, { public: true, api_mock: 0, dom_replace: 4 });
+      assert.deepStrictEqual(out.published.privacy.demo.sources, { public: true, fixture: 0, api_mock: 0, dom_replace: 4 });
+      assert.deepStrictEqual(out.published.privacy.demo.kinds, ['public', 'dom_replace']);
+      assert.strictEqual(out.published.privacy.demo.realDataInBrowser, true, '真实数据进入过浏览器（已替换），如实记录');
+      assert.strictEqual(out.published.privacy.demo.network.allowedReads, 1);
+      assert.ok(!fs.existsSync(path.join(root, '.manual', 'evidence', 'demo-gate')) || fs.readdirSync(path.join(root, '.manual', 'evidence', 'demo-gate')).length === 0);
       assert.deepStrictEqual(out.redactions, [], '演示数据区域不再打码');
       assert.deepStrictEqual(out.published.privacy.maskStyles, []);
       for (const secret of ['王小明', '13912345678', '李华']) assert.ok(!r.stdout.includes(secret), `输出含真实数据 ${secret}`);
@@ -129,8 +169,7 @@ async function pixels(file) {
     });
 
     await test('Fixture 数据即演示数据：接口被 Mock 后会话标题无需再配置演示值', async () => {
-      const root = await project({ text: { 'account-name': '演示教师', 'account-phone': '138****0000' } },
-        { fixtures: { environments: { local: { origins: ['http://127.0.0.1:*'] } } } });
+      const root = await project({ text: { 'account-name': '演示教师', 'account-phone': '138****0000' } }, LOCAL_FIXTURES);
       const state = path.join(root, '.manual');
       fs.mkdirSync(path.join(state, 'fixtures'), { recursive: true });
       fs.writeFileSync(path.join(state, 'fixtures', 'history-demo.yaml'), yaml.dump({
@@ -152,6 +191,7 @@ async function pixels(file) {
       assert.strictEqual(record.privacy.demo.status, 'passed');
       assert.strictEqual(record.privacy.demo.sources.api_mock, 1);
       assert.strictEqual(record.privacy.demo.sources.dom_replace, 4);
+      assert.deepStrictEqual(record.privacy.demo.mock, { routes: [{ rule: 'GET /api/demo/conversations', hits: 1 }], unhit: [] }, '规则 ID 与命中次数');
       assert.strictEqual(record.provenance.mode, 'simulated');
     });
 
@@ -243,7 +283,7 @@ async function pixels(file) {
     const taskOptions = (root, extra = {}) => ({
       baseUrl: server.baseUrl, stateDir: path.join(root, '.manual'), projectRoot: root, annotatedDir: 'docs/manual/images/annotated',
       theme: DEFAULT_THEME, redactionRules: { audience: 'public', rules: { redact: [], preserve: [] } }, assertionTimeoutMs: 3000,
-      demo: { text: HISTORY_DEMO.text, images: {}, network: { allow: [], block: [], websockets: [] } }, ...extra,
+      demo: { text: HISTORY_DEMO.text, images: {}, network: HISTORY_READ }, ...extra,
     });
     const deletePlan = () => ({
       taskId: 'delete-history', entry: { page: 'chat', route: '/demo-history', assertions: [] },
@@ -277,7 +317,7 @@ async function pixels(file) {
         projects.push(root);
         const p = provider();
         try {
-          await assert.rejects(executeCapturePlan(failingPlan(), p, taskOptions(root, { routes, assertionTimeoutMs: 500, demo: { text, images: {}, network: { allow: [], block: [], websockets: [] } } })));
+          await assert.rejects(executeCapturePlan(failingPlan(), p, taskOptions(root, { routes, assertionTimeoutMs: 500, demo: { text, images: {}, network: HISTORY_READ } })));
         } finally { await p.close(); }
         const diagnostics = pngFiles(root).filter((f) => /failure\.png$/.test(f));
         assert.strictEqual(diagnostics.length, saved ? 1 : 0, JSON.stringify(diagnostics));
@@ -298,6 +338,134 @@ async function pixels(file) {
       assert.strictEqual(shot.privacy.demo.sources.api_mock, 1);
       assert.ok(shot.annotated, '通过门禁的截图有发布图');
       assert.deepStrictEqual(server.writes, []);
+      // 演示页面上的操作标注：框落在真实「删除会话」按钮上（主区域 margin-left 300，按钮在标题下方），不受替换影响
+      const box = (shot.annotations || [])[0]?.target;
+      assert.ok(box && box.width > 0 && box.height > 0, JSON.stringify(shot.annotations));
+      assert.ok(box.x >= 290 && box.x < 420 && box.y > 60 && box.y < 260, `标注框位置: ${JSON.stringify(box)}`);
+    });
+
+    // ------------------------------------------------------------ D-2 ~ D-8 补充
+    await test('公开公告：没有敏感区域，公告原样保留（发布图与原图逐像素相同），读接口只记录不阻断', async () => {
+      const root = await project({});
+      const r = await capture(root, '/demo-announcement');
+      assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+      assert.deepStrictEqual(r.json.redactions, []);
+      assert.strictEqual(r.json.published.privacy.demo.network.uncovered, 1);
+      assert.deepStrictEqual(r.json.published.privacy.demo.kinds, ['public']);
+      const raw = await sharp(path.join(root, r.json.screenshot)).removeAlpha().raw().toBuffer();
+      const pub = await sharp(path.join(root, r.json.published.artifactPath)).removeAlpha().raw().toBuffer();
+      assert.ok(raw.equals(pub), '公开页面不能被任何遮罩改动');
+    });
+
+    await test('Skill 侧选择器：页面没有 data-redact，按 capture.demo.selectors 替换（含输入框），不打马赛克，项目源码不变', async () => {
+      const demo = {
+        selectors: { 'account-name': '.user-card .name', nickname: 'input.nickname', 'session-title': '.history .title' },
+        text: { 'account-name': '演示教师', nickname: '示例昵称', 'session-title': ['示例会话 {n}'] },
+      };
+      const root = await project(demo, { privacy: { audience: 'public', rules: { redact: [], preserve: [] } } });
+      const before = sourceSnapshot(root);
+      const r = await capture(root, '/demo-selectors');
+      assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+      assert.strictEqual(r.json.published.privacy.demo.sources.dom_replace, 4);
+      assert.deepStrictEqual(r.json.redactions, [], '已换成演示值的输入框不再按表单控件打码');
+      assert.deepStrictEqual(sourceSnapshot(root), before);
+      for (const secret of ['王小明', '星河老师', '李华']) assert.ok(!r.stdout.includes(secret));
+      const bad = await project({ ...demo, selectors: { ...demo.selectors, 'account-name': 'div[' } });
+      const rb = await capture(bad, '/demo-selectors');
+      assert.strictEqual(rb.json.reason, 'demo-needs-fixture');
+      assert.match(rb.json.message, /demo-selector-invalid（account-name）/);
+    });
+
+    await test('漏网数据来源：列表已 Mock、个人资料接口未 Mock → needs_fixture，报告剩余的数据来源', async () => {
+      const root = await project({ selectors: { 'account-name': '.name', 'session-title': '.title' }, text: { 'account-name': '演示教师' } }, LOCAL_FIXTURES);
+      useFixture(root, { id: 'list-only', mock: { routes: [{ path: '/api/demo/conversations', method: 'GET', json: { items: [{ id: 1, title: '示例会话：分数加减法' }] }, shape: { required: ['items'], items: { field: 'items', required: ['id', 'title'] } } }] } });
+      const r = await capture(root, '/demo-profile');
+      assert.strictEqual(r.json.reason, 'demo-needs-fixture');
+      assert.match(r.json.message, /demo-unmocked-read（GET \/api\/demo\/profile）/);
+      assert.doesNotMatch(r.json.message, /conversations/, '已 Mock 的列表不再列为缺口');
+      assert.ok(!r.stdout.includes('王小明'));
+    });
+
+    await test('跨域接口：未覆盖 → needs_fixture（cross-origin）；Fixture 用 origin 拦截跨域接口后通过', async () => {
+      let root = await project({ text: { 'account-name': '演示教师' } });
+      let r = await capture(root, '/demo-cross');
+      assert.strictEqual(r.json.reason, 'demo-needs-fixture');
+      assert.match(r.json.message, /http:\/\/localhost:\d+\/api\/demo\/profile（cross-origin）/);
+      root = await project({ text: { 'account-name': '演示教师' } }, LOCAL_FIXTURES);
+      useFixture(root, { id: 'cross-profile', mock: { routes: [{ origin: 'http://localhost:*', path: '/api/demo/profile', method: 'GET', json: { name: '演示教师' } }] } });
+      r = await capture(root, '/demo-cross');
+      assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+      const record = recordOf(root, r);
+      assert.strictEqual(record.privacy.demo.sources.api_mock, 1);
+      assert.strictEqual(record.privacy.demo.realDataInBrowser, false, '全部数据来自 Fixture');
+    });
+
+    await test('SSE：页面有敏感区域时，未覆盖的事件流 → needs_fixture（stream）', async () => {
+      const root = await project({ text: { 'account-name': '演示教师' } });
+      const r = await capture(root, '/demo-sse');
+      assert.strictEqual(r.json.reason, 'demo-needs-fixture');
+      assert.match(r.json.message, /GET \/api\/demo\/events（stream）/);
+    });
+
+    await test('GraphQL：默认按写请求中止（服务端 0 次写）；按 operationName 登记查询后通过', async () => {
+      server.writes.length = 0;
+      let root = await project({});
+      let r = await capture(root, '/demo-graphql');
+      assert.strictEqual(r.json.reason, 'demo-blocked');
+      assert.match(r.json.message, /write-blocked（POST \/api\/demo\/graphql）/);
+      assert.deepStrictEqual(server.writes, []);
+      root = await project({ network: { allow: [{ method: 'POST', path: '/api/demo/graphql', operationName: 'DeleteCourse' }] } });
+      r = await capture(root, '/demo-graphql');
+      assert.strictEqual(r.json.reason, 'demo-blocked', '登记了别的操作名不能放行这个查询');
+      root = await project({ network: { allow: [{ method: 'POST', path: '/api/demo/graphql', operationName: 'ListCourses' }] } });
+      r = await capture(root, '/demo-graphql');
+      assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+      assert.deepStrictEqual(server.writes, ['POST /api/demo/graphql']);
+      server.writes.length = 0;
+    });
+
+    await test('Service Worker：Demo Context 阻止注册（它的请求会绕过网络守卫）', async () => {
+      const p = provider();
+      try {
+        await p.installDemoGuard({ baseUrl: server.baseUrl, demo: {} });
+        await p.open(`${server.baseUrl}/demo-sw`, { timeout: 10000 });
+        let status = 'pending';
+        for (let i = 0; i < 30 && status === 'pending'; i++) {
+          status = await p.page.evaluate(() => document.getElementById('sw').textContent);
+          if (status === 'pending') await new Promise((done) => setTimeout(done, 100));
+        }
+        assert.notStrictEqual(status, 'registered', `Service Worker 不应注册成功: ${status}`);
+      } finally { await p.close(); }
+    });
+
+    await test('分页与刷新：Fixture 按 query 返回每页的虚构数据，翻页与刷新后演示数据稳定，未声明的规则单列为未命中', async () => {
+      const page = (n) => ({ path: '/api/demo/orders', matcher: /^\/api\/demo\/orders$/, method: 'GET', query: { page: String(n) }, status: 200, contentType: 'application/json', body: JSON.stringify({ items: [{ no: `DEMO-ORDER-${n}` }] }) });
+      const p = provider();
+      try {
+        await p.installDemoGuard({ routes: [page(1), page(2), page(9)], baseUrl: server.baseUrl, demo: { selectors: { 'order-no': '.order-no' } } });
+        const orders = async () => {
+          for (let i = 0; i < 30; i++) {
+            const text = await p.page.evaluate(() => document.getElementById('orders').textContent);
+            if (text) return text;
+            await new Promise((done) => setTimeout(done, 100));
+          }
+          return '';
+        };
+        await p.open(`${server.baseUrl}/demo-orders`, { timeout: 10000 });
+        assert.strictEqual(await orders(), 'DEMO-ORDER-1');
+        await p.page.click('#next');
+        await p.page.waitForFunction(() => document.getElementById('orders').textContent === 'DEMO-ORDER-2');
+        await p.page.reload();
+        assert.strictEqual(await orders(), 'DEMO-ORDER-1', '刷新后仍是同一份虚构数据');
+        await p.applyDemo();
+        const audit = await p.auditDemo();
+        const { decide } = require('../src/privacy/demo');
+        const decision = decide({ audit, guard: p.demoGuardState(), demo: p.demo });
+        assert.strictEqual(decision.status, 'passed', JSON.stringify(decision.reasons));
+        assert.strictEqual(decision.realDataInBrowser, false);
+        assert.strictEqual(decision.mock.routes.filter((r) => r.hits).length, 2);
+        assert.strictEqual(decision.mock.unhit.length, 1, 'page=9 的规则没有被请求过');
+      } finally { await p.close(); }
     });
   } finally {
     await server.close();

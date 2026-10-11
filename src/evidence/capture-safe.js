@@ -151,4 +151,4 @@ async function derivePublished({ captured, rawPath, sanitizedPath, publishedPath
   return { redactions: detection.redactions, annotations: layout.annotations, rendered, coverage, privacy, quality, derived, published: !!published };
 }
 
-module.exports = { captureStable, confirmTargetsShown, derivePublished, sameGeometry, MAX_ATTEMPTS };
+module.exports = { captureStable, confirmTargetsShown, derivePublished, demoGate, sameGeometry, MAX_ATTEMPTS };

@@ -192,6 +192,73 @@ const PAGES = {
   <p>付款人 <span data-redact="account-name">王小明</span></p>
 </div>`),
 
+  // ---- Demo Capture 补充（D-2 ~ D-8）
+  // 公开公告页：没有敏感区域；公告来自读接口（只记录，不阻断），画面原样保留
+  '/demo-announcement': html(`
+<h1>系统公告</h1>
+<p id="notice">公开公告：本周六 22:00 起系统维护两小时。</p>
+<p id="extra"></p>
+<script>fetch('/api/demo/announcements').then((r) => r.json()).then((d) => { document.getElementById('extra').textContent = d.text; });</script>`),
+  // 页面没有任何 data-redact：敏感区域只靠 Skill 侧的 capture.demo.selectors 声明
+  '/demo-selectors': html(`
+<div class="user-card" style="width:260px;float:left;background:#eef2f7;padding:12px">
+  <span class="name">王小明</span>
+  <label for="nick">昵称</label><input id="nick" class="nickname" value="星河老师" style="width:200px">
+  <ul class="history"><li class="title">期中成绩分析：李华</li><li class="title">家长沟通记录：张伟</li></ul>
+</div>
+<main style="margin-left:300px"><h1>历史会话</h1><button>新建会话</button></main>`),
+  // 会话列表与个人资料来自两个接口：只 Mock 列表时，资料接口仍是未覆盖的真实数据来源
+  '/demo-profile': html(`
+<aside><span class="name" id="name"></span><ul id="list"></ul></aside>
+<h1>历史会话</h1>
+<script>
+  fetch('/api/demo/profile').then((r) => r.json()).then((d) => { document.getElementById('name').textContent = d.name; });
+  fetch('/api/demo/conversations').then((r) => r.json()).then((d) => {
+    document.getElementById('list').innerHTML = d.items.map((i) => '<li class="title">' + i.title + '</li>').join('');
+  });
+</script>`),
+  // 分页列表：Fixture 按 query 返回每一页的虚构订单
+  '/demo-orders': html(`
+<h1>付款记录</h1>
+<ul id="orders"></ul>
+<button id="next">下一页</button>
+<script>
+  let page = 1;
+  const load = () => fetch('/api/demo/orders?page=' + page).then((r) => r.json()).then((d) => {
+    document.getElementById('orders').innerHTML = d.items.map((i) => '<li><span class="order-no">' + i.no + '</span></li>').join('');
+  });
+  document.getElementById('next').onclick = () => { page++; load(); };
+  load();
+</script>`),
+  '/demo-sse': html(`
+<p data-redact="account-name">王小明</p>
+<h1>实时通知</h1>
+<script>try { new EventSource('/api/demo/events'); } catch (_) {}</script>`),
+  // GraphQL：查询与修改走同一路径，只能按操作名区分
+  '/demo-graphql': html(`
+<h1>课程列表</h1>
+<p id="courses"></p>
+<script>
+  fetch('/api/demo/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ operationName: 'ListCourses', query: 'query ListCourses { courses { title } }' }) })
+    .then((r) => r.json()).then(() => { document.getElementById('courses').textContent = '七年级数学'; }).catch(() => {});
+</script>`),
+  // 跨域接口（localhost 与 127.0.0.1 不同源）：真实姓名经跨域读取进入声明区域
+  '/demo-cross': (req) => html(`
+<p data-redact="account-name" id="name">加载中</p>
+<h1>个人中心</h1>
+<script>
+  fetch('http://localhost:${String(req.headers.host || '').split(':')[1]}/api/demo/profile').then((r) => r.json()).then((d) => { document.getElementById('name').textContent = d.name; });
+</script>`),
+  // Service Worker 注册结果写在页面上：Demo Context 必须阻止注册（它的请求不经过网络守卫）
+  '/demo-sw': html(`
+<h1>离线缓存</h1>
+<p id="sw">pending</p>
+<script>
+  const el = document.getElementById('sw');
+  if (!('serviceWorker' in navigator)) el.textContent = 'unavailable';
+  else navigator.serviceWorker.register('/sw.js').then(() => { el.textContent = 'registered'; }, () => { el.textContent = 'rejected'; });
+</script>`),
+
   // 状态码 200，但内容是「页面不存在」：软 404
   '/soft-404': html('<h1>页面不存在</h1><p>你访问的页面已被移除。</p><a href="/">返回首页</a>'),
 
@@ -238,6 +305,30 @@ function startServer() {
         res.end('{"ok":true}');
         return;
       }
+      // 跨域读取（/demo-cross）需要 CORS
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      if (pathname === '/api/demo/profile') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ name: '王小明', phone: '13912345678' }));
+        return;
+      }
+      if (pathname === '/api/demo/announcements') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ text: '新版作业批改功能已上线。' }));
+        return;
+      }
+      if (pathname === '/api/demo/orders') {
+        const page = url.searchParams.get('page') || '1';
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ items: [{ no: `WX2024050${page}883921` }] }));
+        return;
+      }
+      if (pathname === '/api/demo/events') {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+        res.write('data: hello\n\n');
+        setTimeout(() => res.end(), 200);
+        return;
+      }
       if (pathname === '/api/demo/conversations') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ items: [{ title: '王小明的期中成绩分析' }, { title: '家长沟通记录：李华' }] }));
@@ -252,6 +343,11 @@ function startServer() {
     if (Object.prototype.hasOwnProperty.call(DYNAMIC, pathname)) {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(DYNAMIC[pathname](state));
+      return;
+    }
+    if (pathname === '/sw.js') {
+      res.writeHead(200, { 'Content-Type': 'application/javascript' });
+      res.end("self.addEventListener('fetch', () => {});");
       return;
     }
 
@@ -308,7 +404,7 @@ function startServer() {
 
     if (Object.prototype.hasOwnProperty.call(PAGES, pathname)) {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(PAGES[pathname]);
+      res.end(typeof PAGES[pathname] === 'function' ? PAGES[pathname](req) : PAGES[pathname]);
       return;
     }
 
