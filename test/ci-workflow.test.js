@@ -66,8 +66,10 @@ test('步骤：npm ci、固定 Chromium、Linux 中文字体、doctor、unit 与
   assert.match(runs, /npm run test:browser/);
   assert.strictEqual(pkg.scripts['test:unit'], 'node test/run.js --group unit');
   assert.strictEqual(pkg.scripts['test:browser'], 'node test/run.js --group browser');
-  // 认证缓存与浏览器放在 runner 临时目录
-  assert.match(job.env.MANUAL_AUTH_CACHE_DIR, /runner\.temp/);
+  // 认证缓存与浏览器放在 runner 临时目录；runner 上下文不能出现在 job 级 env（否则工作流校验失败、一个 job 都不跑）
+  assert.ok(!/runner\./.test(JSON.stringify(job.env || {})), 'job.env 不能引用 runner 上下文');
+  assert.match(runs, /MANUAL_AUTH_CACHE_DIR=\$RUNNER_TEMP\/manual-auth" >> "\$GITHUB_ENV"/);
+  assert.match(runs, /PLAYWRIGHT_BROWSERS_PATH=\$RUNNER_TEMP\/ms-playwright" >> "\$GITHUB_ENV"/);
 });
 
 test('产物：只上传 test-results/，短保留期；不上传原图 / trace / 认证缓存 / 项目状态', () => {

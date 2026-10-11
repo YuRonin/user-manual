@@ -31,13 +31,17 @@ jobs:
         node: ['20.19.0', '22.14.0']
     env:
       MANUAL_PERF_REPORT_DIR: test-results
-      # 认证缓存放在 runner 临时目录，不写用户目录，不进入产物
-      MANUAL_AUTH_CACHE_DIR: ${{ runner.temp }}/manual-auth
-      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
     defaults:
       run:
         shell: bash
     steps:
+      # runner 上下文不能用在 job 级 env（会让整个工作流校验失败、0 个 job 运行），在第一步里写入 GITHUB_ENV。
+      # 认证缓存与浏览器放在 runner 临时目录，不写用户目录，不进入产物。
+      - name: 临时目录（认证缓存 / 浏览器）
+        run: |
+          echo "MANUAL_AUTH_CACHE_DIR=$RUNNER_TEMP/manual-auth" >> "$GITHUB_ENV"
+          echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/ms-playwright" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
