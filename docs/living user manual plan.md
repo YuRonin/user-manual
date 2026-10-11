@@ -5,7 +5,7 @@
 > **适用仓库**：`E:\NeoStar\user-manual`（审计时 `living-manual` 0.1.0）  
 > **依据**：《Living User Manual Skill 七阶段优化进度审计报告》（2026-10-10；基线 `main@6da5bf7` + 审计时工作区未提交改动）  
 > **补充依据**：NeoAgent `demo/website/docs/manual-full-rerun-plan.md` 的“已知问题与对策”（2026-10-10）。该记录是一次测试环境运行快照；实施前仍须复核现状。  
-> **实施状态**：B0–B4 已完成，B5 基本完成（见第 15 节）；B6 待实施。未勾选的项目不代表已修改或验证通过。  
+> **实施状态**：B0–B4 已完成，B5、B6 基本完成（见第 15 节，遗留项逐条列出）；NeoAgent 测试站重跑与 CI 实跑待确认。未勾选的项目不代表已修改或验证通过。  
 > **维护方式**：每批次开始前重新核对最新仓库；完成后勾选任务、登记测试和变更证据。
 
 ---
@@ -408,28 +408,28 @@ Page.features [Feature ID + scope + source]
 
 ### B6 工作项
 
-- [ ] **B6-01｜统一质量模型**：一次运行输出 `inventoryReview / planCoverage / renderCoverage / documentationCoverage / executedSteps / verifiedClaims / privacy / freshness / warnings`，并保留旧 `executionCoverage` 的独立口径。
-- [ ] **B6-02｜质量门禁策略**：面向 public/正式发布采用 fail closed；开发观察模式允许 warning，但报告不能标记“已验证”。核心伪证据、隐私违规、确定虚构不允许静默放行。
-- [ ] **B6-03｜质量趋势与对比**：至少记录本次 vs 上次的 Required 缺失数、图文不一致数、Schema/Scenario 错误数；区分单次页面异常和系统性回归。
-- [ ] **B6-04｜补齐 CI 矩阵**：保持现有 Ubuntu + Windows × Node 版本测试；新增 macOS 前先验证环境支持与超时/浏览器依赖，失败需可定位。
-- [ ] **B6-05｜测试层级**：单元（Inventory、Coverage、Layout）、集成（Capture/Cache/Verify）、真实浏览器（Scenario/Full-page）、端到端（Generate→Validate→Publish→Update）。
-- [ ] **B6-06｜Golden Fixture 管理**：固定用于用户任务、复杂控件、隐私遮挡、跨语言、不同 DPR 的可重跑小型页面集，不依赖远程业务环境的偶然状态。
-- [ ] **B6-07｜CI 自动化模式**：审计提议的 `--analysis-default` 属于可选方案，先确认已有 `--copy-default` 能否满足无人值守；不要为了新 flag 重建第二套分析流程。
-- [ ] **B6-08｜跨机器验证**：在干净 clone / 不同 OS 测试：缺少忽略目录中的原图时行为明确、可校验的持久化 Capture 不丢、能按需重建派生产物。
-- [ ] **B6-09｜运行手册与故障处理**：为 `annotation-coverage-failed`、`scenario-mismatch`、`annotation-incomplete`、`ui-term-not-observed`、`geometry-scale-mismatch` 等提供定位命令/修复建议。
-- [ ] **B6-10｜收敛死字段/旧入口**：只清理被完整调用链和测试证实无消费方的字段；兼容已公开 CLI，弃用需先公告、再迁移、后删除。
-- [ ] **B6-11｜任务模型结构化修改**：复核 `approve-tasks` 对 YAML 长文本的格式重写；工具和运行手册中的后续修改按解析后的字段进行，不依赖原文字符串替换。格式改变不应静默漏掉授权、动作或说明更新。
-- [ ] **B6-12｜开发环境采集基线**：对本地 `next dev` 验证产物写入 `.manual/`、`docs/` 不会引起持续热更新；验证开发指示器不进入发布截图。NeoAgent 侧的 Tailwind `@source not` 和 `devIndicators: false` 作为待确认的项目配置，不擅自修改产品配置。
-- [ ] **B6-13｜重跑数据与授权清单**：运行手册要求在切换测试站/本地站时核对 Scenario ID、进行中的活动、可用积分与资料；`view-billing` 等外部服务不可用时使用经声明的 Empty Fixture；写授权到期前检查有效期，续期后按现有审批规则重新批准，不让写步骤在运行中意外停下。
-- [ ] **B6-14｜产品绕法退出条件**：记录对话内产物二次编辑 409 的产品修复责任与跟踪位置；在修复前，`edit-export-artifact` 重采须准备新 v1 产物并按最新目标定位。产品修复合入后复测二次编辑，再删除该测试数据绕法。
+- [x] **B6-01｜统一质量模型**：一次运行输出 `inventoryReview / planCoverage / renderCoverage / documentationCoverage / executedSteps / verifiedClaims / privacy / freshness / warnings`，并保留旧 `executionCoverage` 的独立口径。（`qualitySummary` 增加 inventoryReview / planCoverage / renderCoverage / documentationCoverage / executedSteps / verifiedClaims / privacy / freshness，来自 Capture 记录与正文；仓库中没有旧 `executionCoverage` 字段可保留）
+- [x] **B6-02｜质量门禁策略**：面向 public/正式发布采用 fail closed；开发观察模式允许 warning，但报告不能标记“已验证”。核心伪证据、隐私违规、确定虚构不允许静默放行。（`quality.mode: strict | observe`，public 默认 strict；observe 结果 `verified: false`；claim-failed、隐私、伪证据在任何模式下阻断）
+- [x] **B6-03｜质量趋势与对比**：至少记录本次 vs 上次的 Required 缺失数、图文不一致数、Schema/Scenario 错误数；区分单次页面异常和系统性回归。（`.manual/quality/<manualId>.json` 最近 20 次计数；generate 输出“质量 vs 上次”与 `qualityTrend`，标出回退）
+- [ ] **B6-04｜补齐 CI 矩阵**：保持现有 Ubuntu + Windows × Node 版本测试；新增 macOS 前先验证环境支持与超时/浏览器依赖，失败需可定位。（现有 ubuntu + windows × Node 20.19 / 22.14 保持不变；macOS 未加入，本地 macOS 全量通过但没有 CI 实跑证据）
+- [x] **B6-05｜测试层级**：单元（Inventory、Coverage、Layout）、集成（Capture/Cache/Verify）、真实浏览器（Scenario/Full-page）、端到端（Generate→Validate→Publish→Update）。（`test/run.js` 新增 e2e / golden 分组，均为 browser 组子集，CI 仍跑全部）
+- [x] **B6-06｜Golden Fixture 管理**：固定用于用户任务、复杂控件、隐私遮挡、跨语言、不同 DPR 的可重跑小型页面集，不依赖远程业务环境的偶然状态。（golden 组：annotation-golden、demo-capture、scenario-states、image-pipeline、target-obscured，全部用本地测试站；几何断言，不做跨平台逐像素比对）
+- [x] **B6-07｜CI 自动化模式**：审计提议的 `--analysis-default` 属于可选方案，先确认已有 `--copy-default` 能否满足无人值守；不要为了新 flag 重建第二套分析流程。（沿用 `--copy-default`，未新增 flag；它只免去文案改写，未完成源码分析的页面仍停在 analyze 等待输入，规划期给出 `analysis-required` 提示；未做确定性的标题 / 用途兜底，避免编造页面用途）
+- [x] **B6-08｜跨机器验证**：在干净 clone / 不同 OS 测试：缺少忽略目录中的原图时行为明确、可校验的持久化 Capture 不丢、能按需重建派生产物。（AC-16 端到端里删除 `.manual/artifacts` 后 `verify` 仍通过；删掉入库发布图时明确报错并点名文件；跨 OS 实跑未做）
+- [x] **B6-09｜运行手册与故障处理**：为 `annotation-coverage-failed`、`scenario-mismatch`、`annotation-incomplete`、`ui-term-not-observed`、`geometry-scale-mismatch` 等提供定位命令/修复建议。（RUNTIME §9 补齐 B4–B6 与 Demo 新错误码；`scenario-mismatch` 在代码中不存在，改为记录实际的 `scenario-state-lost` / `scenario-setup-failed`）
+- [x] **B6-10｜收敛死字段/旧入口**：只清理被完整调用链和测试证实无消费方的字段；兼容已公开 CLI，弃用需先公告、再迁移、后删除。（只做“先公告”：MIGRATION 列出仍被接受但无执行语义的字段；未删除、未加运行时提示）
+- [x] **B6-11｜任务模型结构化修改**：复核 `approve-tasks` 对 YAML 长文本的格式重写；工具和运行手册中的后续修改按解析后的字段进行，不依赖原文字符串替换。格式改变不应静默漏掉授权、动作或说明更新。（approve-tasks 写回后回读核对定义，变化时提示 `task-rewrite-drift`；未构造触发折叠改写的负例测试）
+- [x] **B6-12｜开发环境采集基线**：对本地 `next dev` 验证产物写入 `.manual/`、`docs/` 不会引起持续热更新；验证开发指示器不进入发布截图。NeoAgent 侧的 Tailwind `@source not` 和 `devIndicators: false` 作为待确认的项目配置，不擅自修改产品配置。（截图时隐藏 `nextjs-portal`；doctor 检查 `devIndicators` 并提示项目侧配置，不改项目）
+- [x] **B6-13｜重跑数据与授权清单**：运行手册要求在切换测试站/本地站时核对 Scenario ID、进行中的活动、可用积分与资料；`view-billing` 等外部服务不可用时使用经声明的 Empty Fixture；写授权到期前检查有效期，续期后按现有审批规则重新批准，不让写步骤在运行中意外停下。（规划期 `write-authorization-expiring / expired` 提示；RUNTIME §10 重跑检查清单）
+- [x] **B6-14｜产品绕法退出条件**：记录对话内产物二次编辑 409 的产品修复责任与跟踪位置；在修复前，`edit-export-artifact` 重采须准备新 v1 产物并按最新目标定位。产品修复合入后复测二次编辑，再删除该测试数据绕法。（RUNTIME §11 记录 409 绕法、责任方与退出条件）
 
 ### B6 验收
 
-- [ ] 所有 P0/P1 关键负例进入 CI 且稳定执行。
-- [ ] Release 前能生成机器可读的质量报告，并对失败门禁给出责任 feature/section/scenario。
-- [ ] 跨平台/跨机器核心证据校验行为一致，不能因 clone 丢失 `.manual/artifacts` 就把历史手册误判通过或不可解释地失败。
-- [ ] 正常流程可无人值守完成非交互部分；审批、登录和有副作用步骤仍尊重明确的人机边界。
-- [ ] 本地全量重跑中，长 `aria-label` 不污染读者动作句；授权过期、Scenario ID 失效、一次性数据已消费、付款服务缺配置均给出可操作诊断；产品 409 绕法和退出条件有记录。
+- [ ] 所有 P0/P1 关键负例进入 CI 且稳定执行。（已进入 test/run.js 与 CI 工作流；本地 macOS 全部通过，CI 实跑结果待确认）
+- [x] Release 前能生成机器可读的质量报告，并对失败门禁给出责任 feature/section/scenario。
+- [ ] 跨平台/跨机器核心证据校验行为一致，不能因 clone 丢失 `.manual/artifacts` 就把历史手册误判通过或不可解释地失败。（干净 clone 已有测试；跨 OS 待 CI）
+- [x] 正常流程可无人值守完成非交互部分；审批、登录和有副作用步骤仍尊重明确的人机边界。
+- [ ] （待 NeoAgent 测试站重跑）本地全量重跑中，长 `aria-label` 不污染读者动作句；授权过期、Scenario ID 失效、一次性数据已消费、付款服务缺配置均给出可操作诊断；产品 409 绕法和退出条件有记录。
 
 ---
 
@@ -595,7 +595,7 @@ Page.features [Feature ID + scope + source]
 | B3 | 完成 | `c842c38` | 待提交 | unit / browser 全部通过；新增 grounding、quality-summary 测试，model-handoff 文案改为有依据的内容，runtime-runner 增补 quality 断言 | 真实性检查是规则级（控件 / 结果表达），只给 review-required 不自动证明语义；名称与 locator 逐项关联、步骤级 result 引用、严格 / 观察模式区分未做 |
 | B4 | 完成 | `50e7c6a` | 与 B5 同一提交（改动交织在同一批文件） | unit / browser 全部通过；新增 annotation-layout（8 项）、annotation-golden（DPR 1/1.5/2 × 视口/整页 + AC-16 端到端），drift-report 增补 AC-19 与主题变化用例 | 任务截图的在线视觉比较未做；拆图后 `PROOF_VERSION` 未升级（`part` 为可选字段，旧证明兼容）；页面配色变体的 golden 未做 |
 | B5 | 基本完成 | `50e7c6a` | 与 B4 同一提交 | unit / browser 全部通过；新增 scenario-states（10 项真实浏览器）、runtime-planner 定向修复与损坏 Scenario、impact-analysis 的 B5-07 / B5-09 用例；gate3 改为断言 live-drift 回流 | B5-06 手册引用变体截图未做；按 auth profile 配置身份断言未做；修复预算不可配置；派生 Scenario 的死字段未加弃用提示 |
-| B6 | 未开始 | 待填 | 待填 | 待填 | 待填 |
+| B6 | 基本完成 | `08068e4` | 见本批提交 | unit / browser 全部通过；quality-summary 增补 B6-01/02/03/13，doctor 增补 B6-12，runtime-planner 增补 B6-07，annotation-golden 增补 B6-08 | macOS CI 未加；死字段只公告未加运行时提示；NeoAgent 全量重跑与 CI 实跑结果待确认 |
 
 **建议立即执行的第一条命令不是修改代码，而是检查最新仓库状态并做 B0-01 的差异核对。** 审计报告已有一批在并发开发中被修复/变动的结论；以最新实现为准，计划不会要求重新造轮子。
 

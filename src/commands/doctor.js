@@ -157,7 +157,24 @@ function checkProject(projectRoot) {
   }
   const catalog = checkCatalog(projectRoot, loaded.config);
   if (catalog) results.push(catalog);
+  const indicator = checkNextDevIndicator(projectRoot);
+  if (indicator) results.push(indicator);
   return { loaded, checks: results };
+}
+
+/**
+ * next dev 的开发指示器（B6-12）：截图时已自动隐藏（nextjs-portal），但项目没关闭时仍给出提示，
+ * 由项目自己决定是否在 next.config 中设置 devIndicators: false；工具不改项目配置。
+ */
+function checkNextDevIndicator(projectRoot) {
+  const file = ['next.config.js', 'next.config.mjs', 'next.config.cjs', 'next.config.ts'].map((name) => path.join(projectRoot, name)).find((f) => fs.existsSync(f));
+  if (!file) return null;
+  let text = '';
+  try { text = fs.readFileSync(file, 'utf8'); } catch (_) { return null; }
+  if (/devIndicators\s*:\s*false/.test(text)) return check('nextjs:dev-indicators', 'ok', 'Next.js 开发指示器已关闭。');
+  return check('nextjs:dev-indicators', 'warn', 'Next.js 开发指示器未关闭：截图时会自动隐藏，但 next dev 下的热更新提示仍可能干扰采集。', {
+    hint: '如需关闭，由项目在 next.config 中设置 devIndicators: false；另确认 .manual/ 与 docs/ 的写入不会触发热更新（例如 Tailwind 的 @source not）。',
+  });
 }
 
 /** docs.catalog 引用的手册是否都已发布；未配置分组时不出这一项。 */
@@ -318,4 +335,4 @@ async function run(argv) {
   return report.ok ? 0 : 1;
 }
 
-module.exports = { run, HELP, KNOWN_FLAGS, collectChecks, checkBaseUrlRedirect, versionAtLeast, checkAuthPermissions, checkFonts, checkCatalog };
+module.exports = { run, HELP, KNOWN_FLAGS, collectChecks, checkBaseUrlRedirect, versionAtLeast, checkAuthPermissions, checkFonts, checkCatalog, checkNextDevIndicator };

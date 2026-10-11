@@ -191,6 +191,11 @@ try {
     assert.strictEqual(profile.tasks.find((t) => t.id === 'analyze').reason, 'analysis-missing');
     const chat = planFor(root, ['page:chat']).plan;
     assert.ok(!chat.tasks.some((t) => t.kind === 'analyze'));
+    // B6-07 无人值守（--copy-default）不会等待模型：未分析的页面在规划期就报错
+    const unattended = planFor(root, ['page:profile'], { copy: { mode: 'default' } });
+    assert.match(unattended.plan.summary.warnings.join('\n'), /^analysis-required: 页面 profile/m, '规划时就提示会停在等待输入');
+    assert.ok(unattended.plan.tasks.some((t) => t.kind === 'analyze'), '仍按原流程等待输入，describe 后可 resume');
+    assert.ok(!planFor(root, ['page:chat'], { copy: { mode: 'default' } }).plan.summary.warnings.some((w) => w.startsWith('analysis-required')));
   });
 
   test('标注覆盖失败或未知的采集不作为缓存命中：capture-required:annotation-incomplete（按类别定向修复）', () => {

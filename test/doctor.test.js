@@ -199,6 +199,20 @@ async function main() {
     assert.strictEqual(checkFonts({ platform: 'linux', execFileSyncImpl: () => { throw new Error('ENOENT'); } }).status, 'warn');
   });
 
+  await test('B6-12 Next.js 开发指示器：未关闭时 warn 并给出项目侧建议（工具不改项目配置）；已关闭 ok；非 Next 项目不出这一项', () => {
+    const { checkNextDevIndicator } = require('../src/commands/doctor');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'manual-next-'));
+    try {
+      assert.strictEqual(checkNextDevIndicator(dir), null);
+      fs.writeFileSync(path.join(dir, 'next.config.js'), 'module.exports = {};\n');
+      const warn = checkNextDevIndicator(dir);
+      assert.strictEqual(warn.status, 'warn');
+      assert.match(warn.hint, /devIndicators: false/);
+      fs.writeFileSync(path.join(dir, 'next.config.js'), 'module.exports = { devIndicators: false };\n');
+      assert.strictEqual(checkNextDevIndicator(dir).status, 'ok');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
   process.stdout.write(`\n${passed} passed, ${failures.length} failed\n`);
   if (failures.length > 0) process.exitCode = 1;
 }

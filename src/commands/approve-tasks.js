@@ -149,7 +149,22 @@ function run(argv) {
     return fail(`${error.code || 'model-commit-failed'}: ${error.message}`, json);
   }
 
-  const output = { ok: true, approved: approved.map((task) => task.id), rejected };
+  // 结构化重写的回读核对（B6-11）：任务文件按字段重新渲染后再解析，审批字段以外的定义必须保持不变；
+  // 长文本被改写为折叠格式等导致解析结果不同时明确提示，不能静默漏掉授权、动作或说明的变化
+  const warnings = [];
+  try {
+    const { definitionRevision } = require('../model/revision');
+    const reread = projectStore.load().model.tasks;
+    for (const task of approved) {
+      const saved = reread.find((item) => item.id === task.id);
+      const strip = (t) => ({ ...t, approval: null, status: null });
+      if (!saved || definitionRevision('userTask', strip(saved)) !== definitionRevision('userTask', strip(task))) {
+        warnings.push(`task-rewrite-drift: 任务 ${task.id} 写回后重新读取的定义与审批时不同；检查 .manual/tasks/${task.id}.yaml 的长文本、授权与动作字段。`);
+      }
+    }
+  } catch (error) { warnings.push(`task-rewrite-check-failed: ${error.message}`); }
+  for (const warning of warnings) process.stderr.write(`[manual approve-tasks] ${warning}\n`);
+  const output = { ok: true, approved: approved.map((task) => task.id), rejected, ...(warnings.length ? { warnings } : {}) };
   if (json) process.stdout.write(JSON.stringify(output, null, 2) + '\n');
   else process.stdout.write(`[manual approve-tasks] 已批准 ${approved.length} 个，拒绝 ${rejected.length} 个候选任务。\n`);
   return 0;

@@ -120,7 +120,7 @@ const TARGETS = [
     }
 
     // ------------------------------------------------------------ AC-16 端到端：7 个标注、单图上限 5 → 两张图进入手册
-    await test('AC-16 端到端：7 个 guide 目标拆成两张发布图（1–5、6–7），手册按顺序引用两张图，编号与正文一致', async () => {
+    await test('AC-16 端到端：7 个 guide 目标拆成两张发布图（1–5、6–7），手册按顺序引用两张图；B6-08 删掉 .manual/artifacts 后离线验证仍可核对，缺发布图明确报错', async () => {
       const project = fx.captureFixture();
       try {
         fx.writeFile(project, 'app/layout-dense/page.tsx');
@@ -146,6 +146,21 @@ const TARGETS = [
         assert.strictEqual(images.length, 2, doc);
         assert.ok(path.basename(images[0]) === path.basename(parts[0].path) && path.basename(images[1]) === path.basename(parts[1].path));
         assert.ok(out, 'generate 有输出');
+
+        // B6-08 干净 clone：不入库的 .manual/artifacts（原图、sidecar、派生中间件）全部缺失时，
+        // 离线验证仍能靠入库的精简证明核对；入库的发布图缺失时明确报错，而不是误判通过
+        fs.rmSync(path.join(project, '.manual', 'artifacts'), { recursive: true, force: true });
+        const verified = await expectExit(project, ['verify', 'page:layout-dense'], 0, env);
+        assert.strictEqual(verified.status, 'artifact-verified');
+        fs.rmSync(path.join(project, parts[1].path));
+        const failed = await new Promise((resolve) => {
+          const child = spawn(process.execPath, [CLI, 'verify', 'page:layout-dense', '--project-root', project, '--json'], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } });
+          let stdout = '';
+          child.stdout.on('data', (d) => { stdout += d; });
+          child.on('close', (status) => resolve({ status, json: JSON.parse(stdout || '{}') }));
+        });
+        assert.notStrictEqual(failed.status, 0);
+        assert.match(JSON.stringify(failed.json.errors), /part-2/, '缺失的拆分图被点名');
       } finally { fx.cleanup(project); }
     });
   } finally {

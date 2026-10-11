@@ -45,6 +45,13 @@ function printRun({ json, result, label = 'generate', projectRoot = null, docsOu
   const { runId, summary, plan } = result;
   const code = exitCodeForRun(summary);
   const documents = publishedDocuments(plan, summary, projectRoot, docsOutputDir);
+  // 质量趋势（B6-03）：本次发布的手册与上次相比
+  const trend = projectRoot ? documents.map((document) => {
+    const manualId = String(document.subject || '').replace(':', '-');
+    const { readTrend, compareTrend, trendLine } = require('../generate/quality-trend');
+    const entries = readTrend(require('path').join(projectRoot, '.manual'), manualId);
+    return { manualId, diff: compareTrend(entries), line: trendLine(manualId, entries) };
+  }).filter((item) => item.diff) : [];
   const warnings = [...(plan?.summary?.warnings || []), ...(summary.warnings || [])];
   if (json) {
     process.stdout.write(JSON.stringify({
@@ -62,6 +69,7 @@ function printRun({ json, result, label = 'generate', projectRoot = null, docsOu
       documents,
       warnings,
       quality: summary.quality || {},
+      qualityTrend: trend.map(({ manualId, diff }) => ({ manualId, ...diff })),
       ...extra,
     }, null, 2) + '\n');
     return code;
@@ -72,6 +80,7 @@ function printRun({ json, result, label = 'generate', projectRoot = null, docsOu
   }
   if (summary.succeeded.length) L.push(`  已完成: ${summary.succeeded.join(', ')}`);
   for (const document of documents) L.push(`  文档 ${document.subject}: ${document.path}`);
+  for (const item of trend) L.push(`  质量 vs 上次 ${item.line}`);
   for (const warning of warnings) L.push(`  提示: ${warning}`);
   for (const w of summary.waiting) L.push(`  等待 ${w.id}（${w.code}）: ${w.message}`, `    → ${waitingHint(runId, w, plan)}`);
   for (const f of summary.failed) L.push(`  失败 ${f.id}（${f.code}）: ${f.message}`);

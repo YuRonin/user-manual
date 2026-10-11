@@ -164,8 +164,20 @@ function taskInputs({ task, model, config, scenario }) {
     boundaries,
     executesWrites: built.ok && built.plan.steps.some(s => s.risk === 'write' && s.willExecute),
     stepCount: (task.steps || []).length,
-    qualityWarnings: taskQuality(task).warnings.filter((warning) => warning.startsWith('completion-')),
+    qualityWarnings: [...taskQuality(task).warnings.filter((warning) => warning.startsWith('completion-')), ...writeAuthorizationWarnings(task)],
   };
+}
+
+/**
+ * 写授权临近到期（B6-13）：运行预算内就会过期时提前提示，避免写步骤运行到一半停下。
+ * 只提示，不改变授权本身（续期仍走审批）。
+ */
+function writeAuthorizationWarnings(task, { now = Date.now(), withinMs = 2 * 60 * 60 * 1000 } = {}) {
+  const expiresAt = Date.parse(task.writeAuthorization?.expiresAt || '');
+  if (!Number.isFinite(expiresAt)) return [];
+  if (expiresAt <= now) return [`write-authorization-expired: 写授权已于 ${task.writeAuthorization.expiresAt} 到期，写步骤不会执行；按审批规则续期后重新批准。`];
+  if (expiresAt - now <= withinMs) return [`write-authorization-expiring: 写授权将于 ${task.writeAuthorization.expiresAt} 到期（${Math.round((expiresAt - now) / 60000)} 分钟后）；长时间运行前先续期。`];
+  return [];
 }
 
 function pageInputs({ page }) {
@@ -408,6 +420,10 @@ function plan(snapshot, policy) {
     // ---- 文档：(analyze) → draft → (rewrite) → validate → publish
     // 源码语义分析（标题、用途）只影响文档，不阻塞采集。
     const draftDeps = [derived || captureId];
+    if (subject.type === 'page' && s.analysis !== ANALYSIS.COMPLETED && copy.mode === 'default') {
+      // 无人值守（--copy-default）只免去文案改写，页面标题与用途仍要分析：规划时就说清楚，Run 会停在 waiting_input（B6-07）
+      summary.warnings.push(`analysis-required: 页面 ${subject.id} 还没有标题与用途；--copy-default 不会补写它们，Run 将停在 analyze 等待输入。无人值守前先运行 manual describe --input <文件>。`);
+    }
     if (subject.type === 'page' && s.analysis !== ANALYSIS.COMPLETED) {
       draftDeps.push(add({
         id: idOf('analyze', index), kind: 'analyze', dependsOn: [],
@@ -496,4 +512,4 @@ function checkDag(nodes) {
   return { order: [...new Set(order)], errors };
 }
 
-module.exports = { PLAN_VERSION, collectPlanningInputs, plan, checkDag, captureKeyFields, imageInputsOf, subjectKey, parseAnnotationFailures };
+module.exports = { PLAN_VERSION, collectPlanningInputs, plan, checkDag, captureKeyFields, imageInputsOf, subjectKey, parseAnnotationFailures, writeAuthorizationWarnings };

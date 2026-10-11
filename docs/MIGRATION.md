@@ -52,6 +52,17 @@ manual migrate --rollback <迁移 id>             # 用完整备份恢复
 | 标注失败按类别定向修复 | 同一失败反复出现时不再无限重拍：清单 / 计划问题与"图像输入没变的绘制失败"直接要求审核，连续两次修复失败报 `annotation-unrepairable` | 按提示修正定义或主题后 `generate --refresh` |
 | 发布记录新增 `definitionViews` / `stateRevisions` | `update` 能区分"只改文案"与"需要重采"；旧发布记录按 `model-changed:definition` 保守处理 | 无 |
 
+## 质量治理（B6）
+
+| 变化 | 影响 | 需要做什么 |
+|---|---|---|
+| 新增 `quality.mode: strict / observe`（public 默认 strict） | strict 下 `demo-recapture-blocked` 阻断发布；observe 只提示且结果 `verified: false` | 需要放宽时显式写 `quality.mode: observe`，伪证据与隐私问题仍然阻断 |
+| `--copy-default` 遇到未完成源码分析的页面时规划提示 `analysis-required` | 行为不变（仍停在 waiting_input），只是提前说明 | 无人值守前先 `manual describe` |
+| 每次发布写 `.manual/quality/<manualId>.json` | 本机产物，记录最近 20 次的质量计数 | 无 |
+| `approve-tasks` 写回后回读核对 | 写回导致定义变化时提示 `task-rewrite-drift` | 按提示检查任务文件 |
+
+**仍被接受但没有执行语义的字段**（B6-10，后续版本先提示再移除）：Scenario 的 `entry.routeBindingId`、`data.revision`、检查点的 `state`（派生 Scenario 内部使用）；任务的 `capturePlan`（只读兼容）。新写的定义不要依赖它们。
+
 ## 历史产物只留当前版本
 
 早期版本把每次模型提交的完整快照、每次发布的记录和每次验证的报告都留在 `.manual/` 并入库，

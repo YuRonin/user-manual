@@ -36,6 +36,7 @@ const { pageInventory } = require('../annotations/coverage');
 const { qualityGate, qualitySummary } = require('./quality-summary');
 const { subjectKey, recaptureBlocked } = require('../evidence/demo-gate-log');
 const { definitionViews } = require('../update/model-changes');
+const { recordQuality } = require('./quality-trend');
 
 function failure(code, errors, extra = {}) {
   const list = Array.isArray(errors) ? errors : [errors];
@@ -275,7 +276,13 @@ function preparePageFinal({ projectRoot, config, pageId, copy = null, markdown =
   if (qualityErrors.length) throw failure(qualityErrors[0].code, formatIssues(qualityErrors));
   const gateWarnings = formatIssues(gate.warnings || []);
   return { page, body, generated, merge, finalPath, draftPath, draftFacts, factCheck: result.ok ? 'passed' : 'failed-used-draft', violations: result.violations,
-    gateWarnings, quality: qualitySummary(draftFacts.factPack, { gateWarnings }) };
+    gateWarnings, quality: qualitySummary(draftFacts.factPack, { gateWarnings, records: recordsOf(projectRoot, stateDirAbs, draftFacts.images || []), markdown: body, config }) };
+}
+
+/** 手册引用的 Capture 记录（统一质量模型用）；读不到的记录跳过，由发布门禁负责报错。 */
+function recordsOf(projectRoot, stateDirAbs, images = []) {
+  const store = createCaptureStore({ projectRoot, stateDirAbs });
+  return [...new Set(images.map((image) => image.captureId).filter(Boolean))].map((id) => { try { return store.read(id); } catch (_) { return null; } }).filter(Boolean);
 }
 
 /** 发布事务；原子替换失败（如文件被占用）时旧文档保持不变。 */
@@ -304,6 +311,7 @@ function publishPageFinal({ projectRoot, config, prepared, force = false, runId 
       acceptedEdits: merge.acceptedEdits || [],
       sections: linked.sections,
     });
+    recordQuality(stateDirAbs, manualIdFor('page', page.id), { releaseId: published.release?.id || null, quality: prepared.quality });
     return { finalPath, release: published.release };
   } catch (error) {
     const hint = error.transactionId && !['file-busy', 'write-failed'].includes(error.code)

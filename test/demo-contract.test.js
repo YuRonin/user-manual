@@ -329,7 +329,8 @@ test('generate 质量提示：旧证据 demo-evidence-legacy、重新采集被�
   assert.ok(warnings.includes('demo-evidence-legacy:img-1'));
   assert.ok(warnings.some((w) => w.startsWith('demo-recapture-blocked:img-2（demo-unmocked-read）')));
   assert.equal(warnings.filter((w) => /img-3/.test(w)).length, 0);
-  assert.deepEqual(qualityGate(pack, {}), []);
+  assert.deepEqual(qualityGate(pack, { privacy: { audience: 'internal' } }), [], 'observe 模式只提示');
+  assert.equal(qualityGate(pack, {})[0].code, 'quality-blocked', 'public 默认 strict：重新采集被阻断时不能继续用旧图发布');
   const errors = [];
   validateQualityConfig({ blockOn: ['demo-recapture-blocked'] }, errors);
   assert.deepEqual(errors, []);

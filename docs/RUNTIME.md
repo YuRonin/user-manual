@@ -38,6 +38,19 @@ Run 的节点：`(fixture-setup) → capture | derive-image → (analyze) → dr
 缓存命中的采集报告 `cache-hit` 与当时的 `observedAt`（历史观察，未在线确认）。
 成功的 `publish` 节点会在结果的 `documents` 中列出正式文档绝对路径；规划提醒和执行期提示（缓存在执行前失效、标注覆盖失败、未生成发布图、截图时网络未空闲等，形如 `<节点>：<提示>`）都随 `warnings` 返回，`manual status` 同样展示。结构化的 `quality`（按节点：步骤执行数、完成声明验证状态、界面名称来源、质量提示、文案待确认项、门禁提示）也一并返回。正文里未实际执行的步骤带“未验证”标识。发布成功仍需审阅手册内容与截图。
 
+**统一质量结果**（每个 validate 节点的 `quality`）：
+
+| 字段 | 含义 |
+|---|---|
+| `mode` / `verified` | `quality.mode`：`strict`（public 默认）或 `observe`（internal 默认）。observe 只提示，`verified` 恒为 false；strict 下另外阻断 `demo-recapture-blocked`。伪证据、隐私违规、断言失败的完成声明在任何模式下都阻断 |
+| `inventoryReview` | 待确认的功能与页面候选数量；有记录缺覆盖结论时为 `unknown` |
+| `planCoverage` / `renderCoverage` / `documentationCoverage` | 已确认 Required 进入计划、画出且可见、正文有说明的比例；没有 Required 时是 `null`（N/A），不是 100% |
+| `executedSteps` / `verifiedClaims` | 实际执行的步骤数、断言通过的完成声明数（任务） |
+| `privacy` / `freshness` | 截图隐私与 Demo 门禁通过数、旧证据数；最早一张截图的观察时间 |
+| `warnings` / `gate` | 质量提示与发布门槛提示 |
+
+每次发布后，关键计数记到 `.manual/quality/<manualId>.json`（最近 20 次）。`generate` 的结果列出"质量 vs 上次"（JSON 为 `qualityTrend`），某项计数变多时标为"有回退"，用来区分单个页面的偶发问题和整体回归。
+
 ### 等待输入（Run 状态 waiting_input）
 
 Run 停在 `waiting_input` 时退出码为 3；其中人工修改冲突（`merge-conflict`）与已发布文档缺失（`document-missing`）
@@ -199,7 +212,8 @@ manual gc --apply --expect <planHash>          # 项目锁内重新核对后删�
 | 一直 `cache-hit` 但页面已变 | 缓存只证明输入没变；用 `verify --live` 检查线上，或 `generate --refresh` 重新采集。`generate` 执行前会重扫源码指纹，源码改动会显示为 `capture-required:input-changed(sourceHash)` |
 | `review-required`（`ui-term-not-observed` / `unsupported-result`） | 文案写了页面上没观察到的控件，或事实里没有依据的结果（“会生成 PDF”“发送到邮箱”）；改成事实里有的内容，确认属实才加 `--accept-review` |
 | `claim-failed` | 完成声明引用的断言在采集时实际失败：先查界面是否真的达成目标，修正任务定义或页面状态后重新采集，不能配置放行 |
-| `quality-blocked` | 质量提示命中了 `quality.blockOn`；按 `quality.warnings` 里的代码补齐任务定义或截图 |
+| `quality-blocked` | 质量提示命中了 `quality.blockOn`（或 strict 模式的默认阻断项）；按 `quality.warnings` 里的代码补齐任务定义或截图 |
+| `analysis-required`（`--copy-default`，warnings） | `--copy-default` 不会补写页面标题与用途，Run 会停在 analyze 等待输入：无人值守前先 `manual describe --input`，或补齐后 `resume` |
 | `capture-required:annotation-incomplete` | 上次采集标注覆盖失败、没有发布图，或是没有覆盖记录的旧证据：不会复用，按提示修正 guide / 功能目标后重新采集 |
 | `source-freshness-unknown`（warnings） | 生成前重扫源码失败，按上次 inspect 的指纹规划；先 `manual inspect` 确认扫描正常 |
 | `geometry-unstable` | 截图前页面一直在变（回复仍在输出、轮询刷新）；确认步骤断言等到了真正的完成状态，必要时放宽 `capture.waits.stabilityMs` |

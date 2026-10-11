@@ -247,6 +247,8 @@ npm test               # 全部测试文件（node test/run.js）
 npm run test:unit      # 不启动浏览器的测试（秒级到数十秒）
 npm run test:browser   # 真实 Chromium + 本地测试服务器的集成测试
 node test/run.js --list --group browser   # 查看分组
+node test/run.js --group golden   # 固定小页面集：标注几何（DPR 1/1.5/2 × 视口/整页）、Demo 截图、Scenario 状态
+node test/run.js --group e2e      # 端到端：init → capture → generate → publish → update / verify
 ```
 
 全程真实：真 spawn CLI、真 HTTP 服务器、真 Chromium、真 PNG。测试服务器提供运行态开关（按钮改名、权限收回、

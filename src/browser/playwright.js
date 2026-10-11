@@ -92,6 +92,8 @@ const FREEZE_CSS = `
   scroll-behavior: auto !important;
   caret-color: transparent !important;
 }
+/* Next.js 开发指示器（next dev 的角标与构建提示）不是产品界面，不能进入截图（B6-12） */
+nextjs-portal { display: none !important; }
 `;
 const LOGIN_PATH_RE = /\/(login|signin|sign-in|sign_in|auth|sso|account\/login)(\/|$|\?)/i;
 

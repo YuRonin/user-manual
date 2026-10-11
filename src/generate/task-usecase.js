@@ -29,6 +29,8 @@ const { reconcileDocument } = require('./manual-store');
 const { checkedSections, validateTaskFeatureCoverage } = require('../model/links');
 const { qualityGate, qualitySummary } = require('./quality-summary');
 const { definitionViews, stateRevisions } = require('../update/model-changes');
+const { createCaptureStore } = require('../evidence/store');
+const { recordQuality } = require('./quality-trend');
 
 function failure(code, errors, extra = {}) {
   const list = Array.isArray(errors) ? errors : [errors];
@@ -181,7 +183,14 @@ function prepareTaskFinal({ projectRoot, config, taskId, copy = null, markdown =
   const gateWarnings = formatIssues(gate.warnings || []);
   // 定稿可以重复执行（重新生成已发布文档）；status 只记录最近完成的操作。
   return { final, generated, facts, manualFile, accepted: review.accepted || [], merge: reconciled, gateWarnings,
-    quality: qualitySummary(facts.factPack, { gateWarnings, review: review.accepted || [] }) };
+    quality: qualitySummary(facts.factPack, { gateWarnings, review: review.accepted || [], config, markdown: final,
+      records: recordsOf(projectRoot, path.join(projectRoot, config.artifacts.stateDir), facts.images || []) }) };
+}
+
+/** 手册引用的 Capture 记录（统一质量模型用）；读不到的记录跳过，由发布门禁负责报错。 */
+function recordsOf(projectRoot, stateDirAbs, images = []) {
+  const store = createCaptureStore({ projectRoot, stateDirAbs });
+  return [...new Set(images.map((image) => image.captureId).filter(Boolean))].map((id) => { try { return store.read(id); } catch (_) { return null; } }).filter(Boolean);
 }
 
 /**
@@ -232,6 +241,7 @@ function publishTaskFinal({ projectRoot, config, taskId, prepared, force = false
       release: published.release,
     });
   }
+  recordQuality(path.join(projectRoot, config.artifacts.stateDir), manualIdFor('task', task.id), { releaseId: published.release?.id || null, quality: prepared.quality });
   return { manualFile, release: published.release };
 }
 
