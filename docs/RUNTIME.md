@@ -7,7 +7,7 @@
 
 ```bash
 npm ci                              # 依赖版本以 package-lock.json 为准
-npx playwright install chromium     # Linux CI 用 --with-deps；中文截图需要 CJK 字体（fonts-noto-cjk）
+npx playwright install chromium     # Linux 用 --with-deps；中文截图需要 CJK 字体（fonts-noto-cjk）
 node bin/manual.js doctor --json    # 只读：Node / 依赖 / Chromium / 字体 / 配置 / 认证缓存
 ```
 

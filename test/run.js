@@ -98,7 +98,7 @@ const FILES = [
   'drift-report.test.js',
   'scenario-fixtures.test.js',
   'demo-capture.test.js',
-  'ci-workflow.test.js',
+  'test-groups.test.js',
   'install-smoke.test.js',
   'performance.test.js',
   'retention.test.js',
@@ -110,7 +110,7 @@ const FILES = [
   'gate3.test.js',
 ];
 
-// 启动真实 Chromium 或测试服务器的文件；其余为 unit。新增浏览器测试时加到这里（ci-workflow.test 会核对）。
+// 启动真实 Chromium 或测试服务器的文件；其余为 unit。新增浏览器测试时加到这里（test-groups.test 会核对）。
 const BROWSER = new Set([
   'auth-identity.test.js', 'browser-session.test.js', 'cache-policy.test.js', 'capture.test.js', 'drift-report.test.js',
   'gate0.test.js', 'gate1.test.js', 'gate2.test.js', 'gate3.test.js', 'generate.test.js', 'image-pipeline.test.js',
@@ -120,7 +120,7 @@ const BROWSER = new Set([
   'task-first-e2e.test.js', 'task-rerun.test.js', 'retention.test.js', 'target-obscured.test.js', 'demo-capture.test.js', 'annotation-golden.test.js', 'scenario-states.test.js',
 ]);
 
-// 端到端与 Golden 是 browser 组的子集，单独列出便于按层级运行（CI 仍按 unit / browser 两组跑全部）
+// 端到端与 Golden 是 browser 组的子集，单独列出便于按层级运行（npm test 仍按 unit / browser 两组跑全部）
 const E2E = new Set(['gate0.test.js', 'gate1.test.js', 'gate2.test.js', 'gate3.test.js', 'task-first-e2e.test.js', 'drift-report.test.js', 'incremental-update.test.js', 'install-smoke.test.js']);
 const GOLDEN = new Set(['annotation-golden.test.js', 'demo-capture.test.js', 'scenario-states.test.js', 'image-pipeline.test.js', 'target-obscured.test.js']);
 

@@ -341,7 +341,7 @@ Playwright 进程通常无法绝对防护通过目标前端之外的后台定时
 - [x] 在安全验证通过的页面，不再无意义地大面积打码。（测试站基线：历史会话 2.54% → 0）
 - [x] 不会因关闭马赛克而泄露真实对话、订单、学生资料或账号信息。（以审计覆盖范围为限，见审计报告「剩余限制」）
 - [x] 保持抽屉/遮罩/菜单/按钮及锚点标注的视觉正确性。
-- [ ] 自动化测试和 CI 回归通过，并提供可复核的结果、风险和剩余限制。（本地 macOS unit / browser 全部通过；Linux / Windows CI 实跑待确认）
+- [ ] 自动化测试和 CI 回归通过，并提供可复核的结果、风险和剩余限制。（本地 macOS unit / browser 全部通过；项目已移除 GitHub Actions，Linux / Windows 需在对应机器本地运行 `npm test`）
 - [x] 文档中给出如何为新项目添加安全 Fixture、如何排查 `needs_fixture` 的说明。（`docs/DEMO_CAPTURE.md`）
 
 ---
@@ -376,7 +376,7 @@ Playwright 进程通常无法绝对防护通过目标前端之外的后台定时
 | P2 注入与隔离 | 完成 | `capture.demo.selectors`；Fixture 跨域 `origin`、`shape` 校验、列表 id 唯一；Service Worker 注册明确失败 |
 | P3 写入保护与门禁 | 完成 | 未覆盖读取 `demo-unmocked-read`、GraphQL `operationName`、`demo-surface-unaudited`；任务非发布截图也过门禁 |
 | P4 生成链路 | 完成 | `demo-evidence-legacy` / `demo-recapture-blocked` 进入质量提示（可 `quality.blockOn`）；verify 先判 Demo 再写任务状态 |
-| P5 测试与文档 | 部分 | `demo-capture.test.js` 24 项、`demo-contract.test.js` 21 项，本地全部通过；Linux / Windows CI 实跑待确认 |
+| P5 测试与文档 | 部分 | `demo-capture.test.js` 24 项、`demo-contract.test.js` 21 项，本地全部通过；项目已移除 GitHub Actions，Linux / Windows 未验证 |
 
 **偏离方案之处（如实记录）**
 

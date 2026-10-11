@@ -262,10 +262,8 @@ node test/run.js --group e2e      # 端到端：init → capture → generate �
 
 ### CI
 
-`.github/workflows/manual-tests.yml`：Ubuntu 与 Windows × Node 20.19.0 / 22.14.0（精确固定），`npm ci` 后安装固定版本的
-Chromium（Linux 另装 `fonts-noto-cjk`），先跑 doctor，再依次跑 unit 与 browser 两组。
-只上传 `test-results/`（测试日志、doctor 与性能报告，已去敏，保留 7 天）；原图、trace 与认证缓存留在 runner 临时目录，
-从不上传；工作流只有只读权限，不使用 secrets，不部署、不合并、不自动接受视觉基线。
+本仓库不配置 GitHub Actions，测试在本地运行（`npm test`）。需要在其他平台验证时，在对应机器上执行
+`npm ci && npx playwright install chromium`（Linux 加 `--with-deps` 并安装 `fonts-noto-cjk`）后运行 `npm test`。
 
 ## 设计
 
