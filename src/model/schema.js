@@ -370,8 +370,22 @@ function validateUserTask(task, context = {}) {
       else if (stepIds.has(step.id)) c.error(`${where}.id`, 'duplicate-id', `stepId 重复: ${step.id}`);
       else stepIds.add(step.id);
       if (!nonEmpty(step.instruction)) c.error(`${where}.instruction`, 'required', 'instruction 需要是非空字符串。');
-      validateStepTitle(c, step.title, `${where}.title`);
       const pageId = step.pageId ?? step.page;
+      validateStepTitle(c, step.title, `${where}.title`);
+      if (step.result !== undefined) {
+        const result = step.result;
+        if (!isObject(result) || !nonEmpty(result.text) || !Array.isArray(result.assertionRefs) || !result.assertionRefs.length || result.assertionRefs.some((ref) => !isAssertionRef(ref)) || new Set(result.assertionRefs).size !== result.assertionRefs.length || Object.keys(result).some((key) => !['text', 'assertionRefs'].includes(key))) {
+          c.error(`${where}.result`, 'invalid-result', 'result 需要 { text, assertionRefs }，引用非空且不重复。');
+        } else if (pagesById) {
+          const nextPage = task.steps[index + 1]?.pageId ?? task.steps[index + 1]?.page;
+          const afterPageId = step.pageAfter || (!step.stateAfter && step.action?.type === 'click' && nextPage && nextPage !== pageId ? nextPage : pageId);
+          const afterState = step.stateAfter || (afterPageId !== pageId ? 'default' : step.stateBefore || 'default');
+          const page = pagesById.get(afterPageId);
+          const assertions = page?.states?.[afterState]?.assertions || (afterState === 'default' && page ? [{ type: 'url', value: page.route }] : []);
+          const ids = new Set(assertions.flatMap((a, i) => [a.id, `${page?.id}:${afterState}#${i}`]).filter(Boolean));
+          for (const ref of result.assertionRefs) if (!ids.has(ref)) c.error(`${where}.result.assertionRefs`, 'invalid-result', `结果必须引用本步骤 after 状态的断言: ${ref}`);
+        }
+      }
       if (!nonEmpty(pageId)) c.error(`${where}.page`, 'required', '步骤需要所属页面。');
       validateAction(c, step.action, `${where}.action`);
       if (step.risk !== undefined && !RISKS.includes(step.risk)) c.error(`${where}.risk`, 'invalid-risk', `risk 需要是 ${RISKS.join(' / ')} 之一。`);
@@ -448,6 +462,7 @@ function validateUserTask(task, context = {}) {
       const seen = new Set();
       claims.forEach((claim, index) => {
         const where = `${claimsPath}[${index}]`;
+        if ((task.steps || []).some((step) => step.result && claim?.id === `step-result-${step.id}`)) c.error(`${where}.id`, 'invalid-result', '完成声明 id 与步骤结果冲突。');
         if (!isObject(claim)) { c.error(where, 'invalid-claim', '需要是对象。'); return; }
         if (!isSafeId(claim.id)) c.error(`${where}.id`, 'invalid-id', `claim id 只能使用小写字母、数字和连字符: ${claim.id}`);
         else if (seen.has(claim.id)) c.error(`${where}.id`, 'duplicate-id', `claim id 重复: ${claim.id}`);

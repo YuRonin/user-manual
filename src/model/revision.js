@@ -26,7 +26,7 @@ const DEFINITION_FIELDS = {
 };
 
 const STEP_FIELDS = [
-  'id', 'feature_id', 'title', 'instruction', 'page', 'pageId', 'stateBefore', 'stateAfter', 'pageAfter', 'requires', 'assertionTimeoutMs', 'action', 'risk', 'replay', 'capture', 'valueRef',
+  'id', 'feature_id', 'title', 'instruction', 'page', 'pageId', 'stateBefore', 'stateAfter', 'pageAfter', 'requires', 'assertionTimeoutMs', 'action', 'risk', 'replay', 'capture', 'valueRef', 'result',
 ];
 
 /** 规范化 JSON 值的 revision。undefined / NaN / 循环引用等抛 invalid-json-value。 */

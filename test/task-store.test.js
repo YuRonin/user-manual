@@ -197,5 +197,45 @@ test('批准和拒绝后同步重建任务索引', (root) => {
   assert.strictEqual(taskForward['view-school-benefits'], undefined);
 });
 
+test('R8 result 审批实际拒绝不属于本步骤 after 的引用，不写审批', (root) => {
+  init(root); writePageModel(root);
+  const state = path.join(root, '.manual'); const t = task();
+  t.steps[0].result = { text: '面板已打开。', assertionRefs: ['other-step-assertion'] };
+  const store = require('../src/tasks/store'); store.writeTask(state, t);
+  const result = runApprove(root, { decisions: [{ id: t.id, decision: 'approve' }] });
+  assert.notStrictEqual(result.status, 0);
+  assert.match(result.stdout, /invalid-result/);
+  assert.strictEqual(store.readTask(state, t.id).approval, null);
+});
+
+test('R9 approve-tasks 真实重写漂移：长文本连续空格改变解析结果并提示', (root) => {
+  init(root); writePageModel(root);
+  const state = path.join(root, '.manual');
+  const original = task();
+  original.steps[0].instruction = '打开目标面板。' + 'word  spacing '.repeat(12);
+  // 用标准 YAML 保存原始文本，避免被待测 emitter 提前归一化。
+  fs.mkdirSync(path.join(state, 'tasks'), { recursive: true });
+  fs.writeFileSync(path.join(state, 'tasks', original.id + '.yaml'), yaml.dump(original));
+  const before = require('../src/tasks/store').readTask(state, original.id);
+  const result = runApprove(root, { decisions: [{ id: original.id, decision: 'approve' }] });
+  assert.strictEqual(result.status, 0, result.stderr);
+  assert.ok(JSON.parse(result.stdout).warnings.some(w => w.startsWith('task-rewrite-drift:')));
+  const after = require('../src/tasks/store').readTask(state, original.id);
+  assert.notStrictEqual(after.steps[0].instruction.trim(), before.steps[0].instruction.trim());
+  assert.strictEqual(after.steps[0].instruction, before.steps[0].instruction.trim().replace(/\s+/g, ' '));
+});
+
+test('R9 approve-tasks 无漂移正例：长文本正常空格保持解析值', (root) => {
+  init(root); writePageModel(root);
+  const state = path.join(root, '.manual'); const original = task();
+  original.steps[0].instruction = ('normal spacing '.repeat(12)).trim();
+  fs.mkdirSync(path.join(state, 'tasks'), { recursive: true });
+  fs.writeFileSync(path.join(state, 'tasks', original.id + '.yaml'), yaml.dump(original));
+  const result = runApprove(root, { decisions: [{ id: original.id, decision: 'approve' }] });
+  assert.strictEqual(result.status, 0, result.stderr);
+  assert.ok(!(JSON.parse(result.stdout).warnings || []).some(w => w.startsWith('task-rewrite-drift:')));
+  assert.strictEqual(require('../src/tasks/store').readTask(state, original.id).steps[0].instruction, original.steps[0].instruction);
+});
+
 process.stdout.write(`\n${passed} passed, ${failures.length} failed\n`);
 if (failures.length > 0) process.exitCode = 1;

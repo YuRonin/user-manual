@@ -14,8 +14,10 @@ const CLAIM_STATUSES = ['verified', 'simulated', 'failed', 'not_run', 'legacy-un
 /** 任务里的 claims；旧任务只有 description/verification 时转为未绑定证据的 legacy claim。 */
 function claimsOf(task) {
   const completion = task.completion || {};
-  if (Array.isArray(completion.claims) && completion.claims.length > 0) return completion.claims;
-  return [{ id: 'completion', text: completion.description, assertionRefs: [], legacy: true }];
+  const results = (task.steps || []).filter((step) => step.result).map((step) => ({ ...step.result, id: `step-result-${step.id}`, checkpoint: step.id, stepId: step.id }));
+  const completionClaims = Array.isArray(completion.claims) && completion.claims.length > 0 ? completion.claims
+    : [{ id: 'completion', text: completion.description, assertionRefs: [], legacy: true }];
+  return [...results, ...completionClaims];
 }
 
 /** 证据中所有可以支撑 claim 的验证记录（入口身份 + 各步骤 after 阶段）。 */
@@ -38,22 +40,23 @@ function collectValidations(evidence) {
 function computeClaims(task, evidence) {
   const validations = collectValidations(evidence);
   // 断言所在步骤的截图（优先"操作后"）：完成声明能追溯到看得见的证据（B3-07）
-  const captureOf = (stepId) => {
+  const captureOf = (stepId, afterOnly = false) => {
     const shots = (evidence?.steps || []).find((step) => step.id === stepId)?.screenshots || [];
-    return (shots.find((shot) => shot.timing === 'after') || shots[shots.length - 1])?.captureId || null;
+    return (shots.find((shot) => shot.timing === 'after') || (!afterOnly ? shots[shots.length - 1] : null))?.captureId || null;
   };
   return claimsOf(task).map((claim) => {
     const refs = Array.isArray(claim.assertionRefs) ? claim.assertionRefs : [];
-    const base = { id: claim.id, text: claim.text, assertionRefs: refs, checkpoint: claim.checkpoint || null };
+    const base = { id: claim.id, text: claim.text, assertionRefs: refs, checkpoint: claim.checkpoint || null, ...(claim.stepId ? { stepId: claim.stepId } : {}) };
     if (claim.legacy || refs.length === 0) return { ...base, status: 'legacy-unbound', evidence: [] };
+    if (claim.stepId && !(evidence?.steps || []).some((step) => step.id === claim.stepId && ['verified', 'observed', 'executed', 'failed'].includes(step.status))) return { ...base, status: 'not_run', evidence: [] };
     const matched = [];
     let failed = false;
     let missing = false;
     for (const ref of refs) {
-      const candidates = validations.filter((v) => v.assertionId === ref && (!claim.checkpoint || v.stepId === claim.checkpoint));
+      const candidates = validations.filter((v) => v.assertionId === ref && (!claim.checkpoint || v.stepId === claim.checkpoint) && (!claim.stepId || v.phase === 'after'));
       if (candidates.some((v) => v.outcome === 'failed')) failed = true;
       const hit = candidates.find((v) => v.outcome === 'passed');
-      if (hit) matched.push({ assertionId: ref, stepId: hit.stepId, scope: hit.scope, checkedAt: hit.checkedAt, ...(captureOf(hit.stepId) ? { captureId: captureOf(hit.stepId) } : {}) });
+      if (hit) matched.push({ assertionId: ref, stepId: hit.stepId, scope: hit.scope, checkedAt: hit.checkedAt, ...(captureOf(hit.stepId, Boolean(claim.stepId)) ? { captureId: captureOf(hit.stepId, Boolean(claim.stepId)) } : {}) });
       else missing = true;
     }
     let status = failed ? 'failed' : (missing ? 'not_run' : 'verified');

@@ -51,6 +51,26 @@ Run 的节点：`(fixture-setup) → capture | derive-image → (analyze) → dr
 
 每次发布后，关键计数记到 `.manual/quality/<manualId>.json`（最近 20 次）。`generate` 的结果列出"质量 vs 上次"（JSON 为 `qualityTrend`），某项计数变多时标为"有回退"，用来区分单个页面的偶发问题和整体回归。
 
+### 步骤结果与 after 断言（B3-07）
+
+任务可选声明：
+
+```yaml
+steps:
+  - id: open-editor
+    page: profile
+    instruction: 点击「编辑资料」。
+    action: { type: click, target: { role: button, name: 编辑资料 } }
+    stateAfter: editor
+    result:
+      text: 编辑面板已打开。
+      assertionRefs: [editor-visible]  # profile.states.editor.assertions 中的 id
+```
+
+`result` 只接受非空 `text / assertionRefs`，引用必须属于本步骤 after 状态。复用 `computeClaims` 生成 `step-result-<stepId>`，进入 FactPack.claims、步骤章节 `claimRefs / captureRefs` 和统一质量门禁。只有本步骤实际执行，且所有引用的 after 断言通过，才显示“完成标志”；其他步骤、before、入口断言、未执行或失败记录均不能支持已验证结果。结果引用截图时只选择本步骤 after Capture，不用 before 图替代。
+
+Fixture 仍为 `simulated`，显示“预期结果”，不证明真实后端完成；失败结果沿用 `claim-failed` 阻断。`verify --live` 保留真实执行状态并重新计算步骤结果；completion 章节只汇总自己引用的声明，不用其他步骤结果替代。未声明 result 的旧任务维持原行为；result 定义改变参与 revision、审批范围与 update。请使用显式 stateAfter / pageAfter 明确结果所属状态。
+
 ### 等待输入（Run 状态 waiting_input）
 
 Run 停在 `waiting_input` 时退出码为 3；其中人工修改冲突（`merge-conflict`）与已发布文档缺失（`document-missing`）

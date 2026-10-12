@@ -260,7 +260,7 @@ test('选择器声明：校验键名与选择器；无法解析的选择器 → 
   const bad = demo.resolveDemoConfig({ demo: { selectors: { '*': '.x', name: '' } } });
   assert.equal(bad.ok, false);
   assert.match(bad.errors.join('\n'), /键名非法: \*/);
-  assert.match(bad.errors.join('\n'), /name 需要是非空的 CSS 选择器/);
+  assert.match(bad.errors.join('\n'), /name 需要是非空 CSS 或/);
   const r = demo.decide({ audit: { invalidSelectors: ['name'] }, guard: {} });
   assert.equal(r.reasons[0].code, 'demo-selector-invalid');
   const merged = demo.mergeDemo(ok.demo, { selectors: { 'session-title': 'li.t' } });

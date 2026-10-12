@@ -88,6 +88,29 @@ process.stdout.write('\ncompletion claims\n');
     assert.match(result.errors.join('\n'), /text/);
   });
 
+  await test('R8 result 只接受本步骤 after；未执行、其他步骤、before、失败不能冒充', () => {
+    const t = task(CLAIMS); t.steps[0].result = { text: '编辑面板已打开。', assertionRefs: ['editor-visible'] };
+    const status = (e) => computeClaims(t, e).find(c => c.stepId === 'open-editor').status;
+    assert.strictEqual(status(evidence()), 'verified');
+    assert.strictEqual(status({ ...evidence(), provenance: 'simulated' }), 'simulated');
+    const skipped = evidence(); skipped.steps[0].status = 'not-executed'; assert.strictEqual(status(skipped), 'not_run');
+    const before = evidence(); before.steps[0].validations[1].phase = 'before'; assert.strictEqual(status(before), 'not_run');
+    const other = evidence(); other.steps[1].validations = other.steps[0].validations; other.steps[0].validations = []; assert.strictEqual(status(other), 'not_run');
+    const failed = evidence(); failed.steps[0].validations[1].outcome = 'failed'; assert.strictEqual(status(failed), 'failed');
+    const entry = evidence(); entry.steps[0].validations = []; entry.validations.push({ assertionId: 'editor-visible', outcome: 'passed', phase: 'after' }); assert.strictEqual(status(entry), 'not_run');
+  });
+
+  await test('R8 result 配置校验绑定本步骤 after 状态，非法结构和其他状态引用被拒绝', () => {
+    const t = task(CLAIMS); t.steps[0].stateAfter = 'editor'; t.steps[0].result = { text: '编辑面板已打开。', assertionRefs: ['editor-visible'] };
+    assert.strictEqual(validateTask(t).ok, true);
+    const schema = require('../src/model/schema');
+    const pages = [{ id: 'profile', states: { editor: { assertions: [{ id: 'editor-visible', type: 'visible', target: { role: 'dialog', name: '编辑资料' } }] } } }];
+    assert.ok(!schema.validateUserTask(t, { pages }).errors.some(e => e.code === 'invalid-result'));
+    t.steps[0].result.assertionRefs = ['profile-saved-toast'];
+    assert.ok(schema.validateUserTask(t, { pages }).errors.some(e => e.code === 'invalid-result'));
+    t.steps[0].result = { text: 'x', assertionRefs: [] }; assert.strictEqual(validateTask(t).ok, false);
+  });
+
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'manual-claims-'));
   try {
     fs.mkdirSync(path.join(root, 'docs/manual/images/annotated'), { recursive: true });
@@ -119,6 +142,24 @@ process.stdout.write('\ncompletion claims\n');
 
       const legacyPhrase = draft.markdown + '\n已验证结果：全部完成。\n';
       assert.strictEqual(validateTaskFinal(legacyPhrase, draft.facts).ok, false);
+    });
+
+    await test('R8 result 经 FactPack、步骤章节、渲染和定稿门禁；Fixture 不提升等级', () => {
+      const t = task(CLAIMS); t.steps[0].result = { text: '编辑面板已打开。', assertionRefs: ['editor-visible'] };
+      const e = evidence(); e.steps[0].screenshots[0].captureId = 'cap-after'; e.steps[0].screenshots[0].timing = 'after';
+      const draft = buildTaskDraft(t, e, ctx); assert.strictEqual(draft.ok, true, draft.errors?.join('\n'));
+      assert.match(draft.markdown, /<!-- claim:step-result-open-editor -->\n完成标志：编辑面板已打开。/);
+      assert.strictEqual(validateTaskFinal(draft.markdown, draft.facts).ok, true);
+      const sections = require('../src/generate/manual-model').taskSections(draft.pack);
+      assert.ok(sections.find(s => s.id === 'step.open-editor').claimRefs.includes('step-result-open-editor'));
+      assert.ok(sections.find(s => s.id === 'step.open-editor').captureRefs.includes('cap-after'));
+      assert.ok(!sections.find(s => s.id === 'completion').claimRefs.includes('step-result-open-editor'));
+      const simulated = buildTaskDraft(t, { ...e, provenance: 'simulated' }, ctx);
+      assert.match(simulated.markdown, /<!-- claim:step-result-open-editor -->\n预期结果：/);
+      assert.strictEqual(validateTaskFinal(simulated.markdown.replace(/(<!-- claim:step-result-open-editor -->\n)预期结果：/, '$1完成标志：'), simulated.facts).ok, false);
+      const bad = evidence(); bad.steps[0].validations[1].outcome = 'failed';
+      const badDraft = buildTaskDraft(t, bad, ctx);
+      assert.ok(require('../src/generate/quality-summary').qualityGate(badDraft.pack).some(e => e.code === 'claim-failed'));
     });
 
     await test('旧版 facts（只有 completionVerification）要求重新生成', () => {

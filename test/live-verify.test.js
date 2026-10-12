@@ -68,8 +68,8 @@ async function prepare(root, server, env) {
     id: 'edit-profile', title: '修改个人资料', goal: '更新手机号', entryPage: 'task-profile', preconditions: ['已登录'], risk: 'read',
     steps: [
       { id: 'open-editor', instruction: '点击「编辑资料」', page: 'task-profile', stateBefore: 'default', stateAfter: 'editor',
-        action: { type: 'click', target: { role: 'button', name: '编辑资料' } }, capture: { timing: 'after' } },
-      { id: 'save', instruction: '点击「保存修改」', page: 'task-profile', stateBefore: 'editor', risk: 'write', action: { type: 'click', target: { role: 'button', name: '保存修改' } } },
+        result: { text: '编辑面板已打开。', assertionRefs: ['editor-visible'] }, action: { type: 'click', target: { role: 'button', name: '编辑资料' } }, capture: { timing: 'after' } },
+      { id: 'save', instruction: '点击「保存修改」', page: 'task-profile', stateBefore: 'editor', result: { text: '编辑状态已确认。', assertionRefs: ['editor-visible'] }, risk: 'write', action: { type: 'click', target: { role: 'button', name: '保存修改' } } },
     ],
     completion: { description: '编辑面板打开', claims: [
       { id: 'editor-opened', text: '编辑资料面板已打开。', assertionRefs: ['editor-visible'] },
@@ -109,6 +109,8 @@ async function prepare(root, server, env) {
       const report = out.reports[0];
       assert.strictEqual(report.result, 'passed');
       assert.deepStrictEqual(report.claims.map((c) => [c.id, c.releaseStatus, c.liveStatus, c.outcome]), [
+        ['step-result-open-editor', 'verified', 'verified', 'passed'],
+        ['step-result-save', 'not_run', 'not_run', 'not_run'],
         ['editor-opened', 'verified', 'verified', 'passed'],
         ['saved', 'not_run', 'not_run', 'not_run'],
       ]);
@@ -138,6 +140,19 @@ async function prepare(root, server, env) {
         assert.strictEqual(report.drift.baselineAccepted, false);
         assert.strictEqual(captures(), before);
       } finally { server.reset(); }
+    });
+
+    await step('R8 result live：本步骤实际动作后断言失败，不展示完成；恢复后可验证', async () => {
+      server.set({ suppressEditor: true });
+      try {
+        const out = await expectExit(root, ['verify', 'task:edit-profile', '--live'], 4, env);
+        const report = out.reports[0];
+        const result = report.claims.find(c => c.id === 'step-result-open-editor');
+        assert.strictEqual(result.liveStatus, 'failed'); assert.strictEqual(result.outcome, 'failed');
+        assert.strictEqual(report.claims.find(c => c.id === 'step-result-save').liveStatus, 'not_run');
+      } finally { server.reset(); }
+      const out = await expectExit(root, ['verify', 'task:edit-profile', '--live'], 0, env);
+      assert.strictEqual(out.reports[0].claims.find(c => c.id === 'step-result-open-editor').outcome, 'passed');
     });
 
     await step('重复 live：每次真实导航、生成新报告，旧报告不变', async () => {

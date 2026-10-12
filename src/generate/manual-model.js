@@ -54,15 +54,16 @@ function taskSections(pack, proofs = new Map()) {
     section('steps', 'heading', { taskRefs }),
   ];
   for (const step of pack.steps) {
-    const captureRefs = step.artifactRefs.map((ref) => captureOf.get(ref)).filter(Boolean);
+    const results = pack.claims.filter((c) => c.stepId === step.id);
+    const captureRefs = unique([...step.artifactRefs.map((ref) => captureOf.get(ref)), ...results.flatMap((c) => c.evidence.map((e) => e.captureId))]);
     const refs = captureRefs.map((id) => annotationRefsOf(id, proofs.get(id)));
-    out.push(section(`step.${step.id}`, 'step', { taskRefs, pageRefs: [step.pageId], captureRefs, annotationRefs: refs.flatMap((r) => r.annotationRefs), featureRefs: refs.flatMap((r) => r.featureRefs) }));
+    out.push(section(`step.${step.id}`, 'step', { taskRefs, pageRefs: [step.pageId], claimRefs: results.map((c) => c.id), captureRefs, annotationRefs: refs.flatMap((r) => r.annotationRefs), featureRefs: refs.flatMap((r) => r.featureRefs) }));
   }
   out.push(section('completion', 'completion', {
     taskRefs,
     pageRefs: pages,
-    claimRefs: pack.claims.map((c) => c.id),
-    captureRefs: pack.claims.flatMap((c) => (c.evidence || []).map((e) => e?.captureId)),
+    claimRefs: pack.claims.filter((c) => !c.stepId).map((c) => c.id),
+    captureRefs: pack.claims.filter((c) => !c.stepId).flatMap((c) => (c.evidence || []).map((e) => e?.captureId)),
   }));
   if (pack.branches.length) out.push(section('branches', 'branches', { taskRefs }));
   if (pack.relatedTasks.length) out.push(section('related', 'related', { taskRefs: [pack.manualId, ...pack.relatedTasks] }));

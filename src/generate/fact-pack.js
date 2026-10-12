@@ -94,7 +94,7 @@ function buildTaskFactPack({ task, evidence, images, claims, language, entryPage
     entry: entryPage ? { title: entryPage.title, route: entryPage.route } : null,
     preconditions: task.readerPreconditions || task.preconditions || [],
     steps,
-    claims: claims.map(({ id, text, status, assertionRefs, checkpoint, evidence: refs }) => ({ id, text, status, assertionRefs, checkpoint: checkpoint ?? null, evidence: refs })),
+    claims: claims.map(({ id, text, status, assertionRefs, checkpoint, stepId, evidence: refs }) => ({ id, text, status, assertionRefs, checkpoint: checkpoint ?? null, ...(stepId ? { stepId } : {}), evidence: refs })),
     readerChecks: task.completion?.readerChecks || [],
     artifacts: artifacts.map(({ stepId, ...rest }) => ({ ...rest, stepId })),
     quality: require('./quality').taskQuality(task, evidence, { entryPage }),

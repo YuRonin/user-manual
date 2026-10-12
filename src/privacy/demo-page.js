@@ -3,7 +3,7 @@
 /*
  * 在页面内执行的 Demo 函数（由 Playwright page.evaluate 序列化执行，必须自包含，不能引用外部变量）。
  *
- * 敏感区域 = 带 data-redact="<键>" 的元素 + capture.demo.selectors 中按 CSS 选择器命中的元素（Skill 侧声明，
+ * 敏感区域 = 带 data-redact="<键>" 的元素 + capture.demo.selectors 中按 CSS 或 Node 侧角色标记命中的元素（Skill 侧声明，
  *   不需要改被采集项目）。两种来源等价，只处理最外层：嵌套在敏感区域内的元素随外层一起处理。
  *   选择器每次调用都重新查询，SPA 重渲染换掉元素后依然命中；不往页面 DOM 写入任何声明属性。
  *
@@ -21,7 +21,7 @@
  *   generation 审计时刻的 DOM 变更计数，用来确认审计与截图属于同一时刻
  */
 
-function applyDemoInPage({ text = {}, images = {}, known = [], selectors = {} }) {
+function applyDemoInPage({ text = {}, images = {}, known = [], selectors = {}, roleSelectors = {}, missingSelectors = [], invalidRoleSelectors = [] }) {
   const state = window.__manualDemo || (window.__manualDemo = { originals: [] });
   const remember = (value) => {
     const v = String(value || '').trim();
@@ -45,7 +45,7 @@ function applyDemoInPage({ text = {}, images = {}, known = [], selectors = {} })
   };
   // 敏感区域：data-redact 与选择器命中的元素，只取最外层；键名优先取 data-redact，其次取选择器键
   const regionKeys = new Map();
-  const invalidSelectors = [];
+  const invalidSelectors = [...invalidRoleSelectors];
   for (const el of document.querySelectorAll('[data-redact]')) regionKeys.set(el, el.getAttribute('data-redact') || '*');
   for (const [key, selector] of Object.entries(selectors || {})) {
     let found = [];
@@ -54,7 +54,7 @@ function applyDemoInPage({ text = {}, images = {}, known = [], selectors = {} })
   }
   const inRegion = (el) => { for (let node = el; node; node = node.parentElement) if (regionKeys.has(node)) return true; return false; };
   const regions = [...regionKeys.keys()].filter((el) => !el.parentElement || !inRegion(el.parentElement));
-  const out = { replaced: {}, images: {}, unconfigured: [], imageUnconfigured: [], unreplaceable: [], invalidSelectors };
+  const out = { replaced: {}, images: {}, unconfigured: [], imageUnconfigured: [], unreplaceable: [], invalidSelectors, missingSelectors };
   const counters = {};
   const unreplaceable = new Set(['canvas', 'video', 'iframe', 'object', 'embed', 'svg', 'picture']);
   for (const el of regions) {
@@ -98,7 +98,7 @@ function applyDemoInPage({ text = {}, images = {}, known = [], selectors = {} })
   return out;
 }
 
-function auditDemoInPage({ text = {}, images = {}, known = [], selectors = {} } = {}) {
+function auditDemoInPage({ text = {}, images = {}, known = [], selectors = {}, roleSelectors = {}, missingSelectors = [], invalidRoleSelectors = [] } = {}) {
   const state = window.__manualDemo || { originals: [] };
   const checkable = (value) => {
     const t = String(value || '').trim();
@@ -110,7 +110,7 @@ function auditDemoInPage({ text = {}, images = {}, known = [], selectors = {} } 
   const visible = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
   // 敏感区域（与 applyDemoInPage 相同的判定）：data-redact 与选择器命中的元素，只取最外层；键名优先取 data-redact，其次取选择器键
   const regionKeys = new Map();
-  const invalidSelectors = [];
+  const invalidSelectors = [...invalidRoleSelectors];
   for (const el of document.querySelectorAll('[data-redact]')) regionKeys.set(el, el.getAttribute('data-redact') || '*');
   for (const [key, selector] of Object.entries(selectors || {})) {
     let found = [];
@@ -122,8 +122,14 @@ function auditDemoInPage({ text = {}, images = {}, known = [], selectors = {} } 
   const inRedact = (el) => !!el && inRegion(el);
   const contains = (value) => originals.some((original) => String(value || '').includes(original));
   const out = { replaced: {}, images: {}, unconfigured: [], imageUnconfigured: [], unreplaceable: [], reverted: 0, leaks: [], contacts: [], hidden: 0,
-    surfaces: { iframe: 0, canvas: 0, shadow: 0 }, invalidSelectors, realValues: state.originals.length };
+    surfaces: { iframe: 0, canvas: 0, shadow: 0 }, invalidSelectors, missingSelectors, realValues: state.originals.length };
   const unreplaceable = new Set(['canvas', 'video', 'iframe', 'object', 'embed', 'svg', 'picture']);
+
+  for (const [key, { attr }] of Object.entries(roleSelectors)) {
+    const targets = state.roleTargets?.[attr];
+    if (!targets?.length && !missingSelectors.includes(key)) out.reverted++;
+    else for (const el of targets || []) if (!el.isConnected || !el.hasAttribute(attr) || !regionKeys.has(el)) out.reverted++;
+  }
 
   // 以截图时刻为准重新核对每个敏感区域：替换后才出现、或被页面改回的区域都不能算已替换
   for (const el of regions) {

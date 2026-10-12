@@ -38,14 +38,14 @@ const VIEW_FIELDS = {
   userTask: {
     capture: (t) => ({
       entryPage: t.entryPage, environment: t.environment, fixtures: t.fixtures, writeAuthorization: t.writeAuthorization, risk: t.risk,
-      steps: (t.steps || []).map(({ id, feature_id, page, pageId, stateBefore, stateAfter, pageAfter, requires, assertionTimeoutMs, action, risk, replay, capture, valueRef }) =>
-        ({ id, feature_id, page, pageId, stateBefore, stateAfter, pageAfter, requires, assertionTimeoutMs, action, risk, replay, capture, valueRef })),
+      steps: (t.steps || []).map(({ id, feature_id, page, pageId, stateBefore, stateAfter, pageAfter, requires, assertionTimeoutMs, action, risk, replay, capture, valueRef, result }) =>
+        ({ id, feature_id, page, pageId, stateBefore, stateAfter, pageAfter, requires, assertionTimeoutMs, action, risk, replay, capture, valueRef, ...(result ? { result: { assertionRefs: result.assertionRefs } } : {}) })),
       completion: (t.completion?.claims || []).map((c) => ({ id: c.id, assertionRefs: c.assertionRefs ?? null })),
     }),
     docs: (t) => ({
       title: t.title, goal: t.goal, priority: t.priority, preconditions: t.preconditions, readerPreconditions: t.readerPreconditions,
       branches: t.branches, relatedTasks: t.relatedTasks,
-      steps: (t.steps || []).map((s) => ({ id: s.id, title: s.title ?? null, instruction: s.instruction ?? null })),
+      steps: (t.steps || []).map((s) => ({ id: s.id, title: s.title ?? null, instruction: s.instruction ?? null, ...(s.result ? { result: s.result.text } : {}) })),
       completion: { claims: (t.completion?.claims || []).map((c) => ({ id: c.id, text: c.text })), readerChecks: t.completion?.readerChecks ?? null },
     }),
   },

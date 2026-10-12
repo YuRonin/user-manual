@@ -420,7 +420,7 @@ async function verifyLive({ projectRoot, config, target, session, timeoutMs = DE
   if (target.type === 'task') {
     const evidence = {
       validations: checks.filter((c) => c.scope === 'page-identity' && c.assertionId).map((c) => ({ assertionId: c.assertionId, outcome: c.outcome === 'passed' ? 'passed' : 'failed', scope: c.scope, checkedAt: c.checkedAt })),
-      steps: steps.map((s) => ({ id: s.id, validations: s.validations })),
+      steps: steps.map((s) => ({ id: s.id, status: s.status, validations: s.validations })),
     };
     const live = computeClaims(entity, evidence);
     const published = new Map((release.facts?.claims || []).map((c) => [c.id, c.status]));
@@ -514,8 +514,9 @@ function sectionResults(release, target, checks, steps, claims) {
       const step = steps.find((s) => s.id === stepId);
       outcome = step?.status === 'not-executed' ? 'not_run' : summarize(related);
     } else if (section.kind === 'completion') {
-      outcome = claims.length ? overall([], claims.filter((c) => c.outcome !== 'not_run')) : 'not_run';
-      if (claims.length && claims.every((c) => c.outcome === 'not_run')) outcome = 'not_run';
+      const related = Array.isArray(section.claimRefs) ? claims.filter((c) => section.claimRefs.includes(c.id)) : claims;
+      outcome = related.length ? overall([], related.filter((c) => c.outcome !== 'not_run')) : 'not_run';
+      if (related.length && related.every((c) => c.outcome === 'not_run')) outcome = 'not_run';
     } else if (['overview', 'location'].includes(section.kind)) {
       outcome = summarize(identity);
     } else {

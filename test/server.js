@@ -47,7 +47,7 @@ ${body}
  *   exportLabel 仪表盘导出按钮名称
  *   missing     返回 404 的路径（页面被下线）
  */
-const DEFAULT_STATE = { editLabel: '编辑资料', canEdit: true, benefit: '教师版', clock: '09:00', shift: 0, exportLabel: '导出报表', missing: [], draftPending: true };
+const DEFAULT_STATE = { suppressEditor: false, editLabel: '编辑资料', canEdit: true, benefit: '教师版', clock: '09:00', shift: 0, exportLabel: '导出报表', missing: [], draftPending: true };
 
 const DYNAMIC = {
   // ---- B5 Scenario（test/scenario-states.test.js）：一次性前置数据（"待补充"会话被补完后消失）
@@ -56,7 +56,7 @@ const DYNAMIC = {
 ${state.draftPending ? '<p id="pending">待补充：七年级期中分析</p>' : '<p>没有待补充的会话</p>'}`),
   '/task-profile': (state) => html(`
 <h1>个人中心</h1>
-${state.canEdit ? `<button aria-label="${state.editLabel}" onclick="document.getElementById('editor').hidden=false">${state.editLabel}</button>` : ''}
+${state.canEdit ? `<button aria-label="${state.editLabel}" onclick="${state.suppressEditor ? '' : "document.getElementById('editor').hidden=false"}">${state.editLabel}</button>` : ''}
 <button aria-label="学校权益" onclick="document.getElementById('benefits').hidden=false">学校权益</button>
 <section id="editor" role="dialog" aria-label="编辑资料" style="margin-top:${Number(state.editorShift) || 0}px" hidden>
   <label for="nickname">昵称</label><input id="nickname" value="星河老师">
@@ -82,6 +82,9 @@ ${state.canEdit ? `<button aria-label="${state.editLabel}" onclick="document.get
 };
 
 const PAGES = {
+  '/role-demo': html(`<h1>演示目标</h1><button class="private">私人说明甲</button><button class="private">私人说明甲</button>
+<label>昵称<input aria-label="昵称" value="不应记录的值"></label><p>不应记录的正文</p>
+<button aria-label="联系 person@private.org">联系</button><button>唯一入口</button>`),
   '/': html('<h1>首页</h1><p>Home</p>'),
 
   // 典型页面：有异步内容、有慢图片、有无限动画——三样都是截图不稳定的来源

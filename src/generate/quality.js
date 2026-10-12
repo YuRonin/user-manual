@@ -15,6 +15,7 @@ function readerTexts(task) {
   (task.readerPreconditions||[]).forEach((t,i)=>out.push([`readerPreconditions[${i}]`,t]));
   for (const step of task.steps||[]) {
     out.push([`steps.${step.id}.instruction`,step.instruction]);
+    if (step.result?.text) out.push([`steps.${step.id}.result`,step.result.text]);
     if (step.capture?.readerCaption) out.push([`steps.${step.id}.readerCaption`,step.capture.readerCaption]);
   }
   for (const claim of task.completion?.claims||[]) out.push([`completion.${claim.id}`,claim.text]);

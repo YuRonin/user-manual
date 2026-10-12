@@ -97,3 +97,11 @@ manual migrate --rollback <迁移 id>             # 用完整备份恢复
 旧 schema 的读取器（v1 页面 / 任务 YAML、旧 manifest、没有 Capture 记录的页面投影、无 `sourceBaseline` / `generatedBlob` 的发布记录）
 继续保留。本阶段没有删除任何兼容实现：它们仍被兼容入口调用，删除需要先证明没有调用方且有等价替代。
 不会删除或改写任何已有的用户产物（文档、图片、发布记录）。
+
+## R7–R9 增量兼容（2026-10-12）
+
+- `capture.demo.selectors` 兼容 CSS 字符串，并接受精确 `{ role, name }`；重复命中全部替换，缺目标拒绝。临时标记只存在隔离浏览器 DOM，不修改被采集项目。截图后的审计不写 DOM；无法证明目标仍被覆盖时阻断。
+- 新语义摘要逐项带定位关联，歧义 / 已脱敏名称不生成 locator。旧摘要继续可读、可比较，不被提升为已具有关联证据。
+- 任务可选 `steps[].result: { text, assertionRefs }`；生成 `step-result-<stepId>`，与 completion claim ID 冲突时拒绝。仅本步骤执行后的断言可验证；无 result 的旧任务不改变正文。新结果参与定义与审批范围；更改结果需重新审阅审批。统一 claims 计数现在包含步骤结果。
+- Capture pipeline 升级为 `quality-4`，旧采集缓存失效以补齐逐项证据；历史 Capture / 发布记录保持可读，不改写旧验证结论。含写步骤仍遵守既有授权与重放限制；raw 为 null 的兼容路径不变。
+- `approve-tasks` 重写漂移告警的生产行为不变，新增真实 YAML 正负回归。长文本连续空格被折叠归一化会产生 `task-rewrite-drift`，应检查写回文件并重新确认定义；测试不会自动接受漂移后的审批范围。

@@ -49,6 +49,7 @@ const FILES = [
   'completion-claims.test.js',
   'scenario-model.test.js',
   'demo-contract.test.js',
+  'role-demo.test.js',
   'capture-store.test.js',
   'capture-task.test.js',
   'task-scenario-variant.test.js',
@@ -113,6 +114,7 @@ const FILES = [
 
 // 启动真实 Chromium 或测试服务器的文件；其余为 unit。新增浏览器测试时加到这里（test-groups.test 会核对）。
 const BROWSER = new Set([
+  'role-demo.test.js',
   'variant-manual.test.js',
   'auth-identity.test.js', 'browser-session.test.js', 'cache-policy.test.js', 'capture.test.js', 'drift-report.test.js',
   'gate0.test.js', 'gate1.test.js', 'gate2.test.js', 'gate3.test.js', 'generate.test.js', 'image-pipeline.test.js',

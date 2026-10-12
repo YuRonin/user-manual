@@ -43,6 +43,7 @@ function approvalScope(task, pages = []) {
       ...(step.pageAfter ? { pageAfter: step.pageAfter } : {}),
       ...(step.requires ? { requires: step.requires } : {}),
       ...(step.assertionTimeoutMs ? { assertionTimeoutMs: step.assertionTimeoutMs } : {}),
+      ...(step.result ? { result: step.result } : {}),
       action: step.action ?? null,
       valueRef: step.valueRef ?? step.action?.valueRef ?? null,
       risk: effectiveRisk(task, step) ?? null,

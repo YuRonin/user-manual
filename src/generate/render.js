@@ -209,6 +209,7 @@ function renderTask(pack, copy = {}) {
     }
     else { L.push(`${index + 1}. ${action}`); if (remainder) L.push('', `   ${remainder}`); }
     if (step.executed === false) L.push('', t.notExecuted);
+    for (const claim of pack.claims.filter((c) => c.stepId === step.id)) L.push('', `<!-- claim:${claim.id} -->`, `${claimLabel(claim.status, t)}${claim.text}`);
     for (const ref of step.artifactRefs) {
       const artifact = pack.artifacts.find((a) => a.id === ref);
       L.push(...figure(artifact, artifact?.readerCaption || t.stepAlt(index + 1, artifact?.timing), hrefOf.get(ref), '   '));
@@ -217,7 +218,7 @@ function renderTask(pack, copy = {}) {
   });
   if (pack.claims.length || pack.readerChecks?.length) {
     const completion = [`## ${t.completion}`, ''];
-    for (const claim of pack.claims) completion.push(`<!-- claim:${claim.id} -->`, `${claimLabel(claim.status, t)}${claim.text}`, '');
+    for (const claim of pack.claims.filter((c) => !c.stepId)) completion.push(`<!-- claim:${claim.id} -->`, `${claimLabel(claim.status, t)}${claim.text}`, '');
     if (pack.readerChecks?.length) completion.push(`### ${t.readerChecks}`, '', ...pack.readerChecks.map((item) => `- ${item}`), '');
     blocks.push(['completion', completion]);
   }

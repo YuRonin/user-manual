@@ -301,6 +301,9 @@ class PlaywrightBrowserProvider extends BrowserProvider {
     await this.launch();
     const { classifyRequest, websocketAllowed, mergeDemo, fixtureStrings, operationNameOf } = require('../privacy/demo');
     const origin = new URL(baseUrl).origin;
+    this.demoRoleSelectors = {};
+    this.demoSelectorMissing = [];
+    this.demoSelectorInvalid = [];
     this.demo = { ...mergeDemo(demo || {}, null), known: fixtureStrings(routes), dataMode };
     this.writeOrigin = null;
     this.mockedRequests = [];
@@ -379,6 +382,7 @@ class PlaywrightBrowserProvider extends BrowserProvider {
   async applyDemo() {
     if (!this.page) return null;
     const { applyDemoInPage } = require('../privacy/demo-page');
+    await this.prepareDemoSelectors();
     return this.page.evaluate(applyDemoInPage, this.demoPageArgs());
   }
 
@@ -386,11 +390,44 @@ class PlaywrightBrowserProvider extends BrowserProvider {
   async auditDemo() {
     if (!this.page) return null;
     const { auditDemoInPage } = require('../privacy/demo-page');
-    return this.page.evaluate(auditDemoInPage, this.demoPageArgs());
+    const audit = await this.page.evaluate(auditDemoInPage, this.demoPageArgs());
+    // 只读：新命中但没有临时标记的元素不能在截图后被净化或漏审。
+    for (const [key, target] of Object.entries(this.demo?.selectors || {})) {
+      if (typeof target === 'string') continue;
+      try {
+        audit.reverted += await this.locatorFor(target).evaluateAll((els, attr) => els.filter((el) => !el.hasAttribute(attr)).length, this.demoRoleSelectors[key].attr);
+      } catch (_) { audit.invalidSelectors.push(key); }
+    }
+    const generation = await this.page.evaluate(() => window.__manualMutation?.generation ?? null);
+    if (typeof audit.generation === 'number' && generation !== audit.generation) audit.reverted = Math.max(1, audit.reverted);
+    return audit;
+  }
+
+  async prepareDemoSelectors() {
+    this.demoRoleSelectors ||= {};
+    this.demoSelectorMissing = [];
+    this.demoSelectorInvalid = [];
+    for (const [key, target] of Object.entries(this.demo?.selectors || {})) {
+      if (typeof target === 'string') continue;
+      const entry = this.demoRoleSelectors[key] ||= { attr: `data-manual-sensitive-${require('crypto').randomBytes(8).toString('hex')}` };
+      try {
+        const count = await this.locatorFor(target).evaluateAll((els, attr) => {
+          const state = window.__manualDemo || (window.__manualDemo = { originals: [] });
+          state.roleTargets ||= {};
+          // 保留仍连接的旧目标：替换可能已改变 accessible name。
+          const targets = [...new Set([...(state.roleTargets[attr] || []).filter((el) => el.isConnected), ...els])];
+          state.roleTargets[attr] = targets;
+          for (const el of targets) el.setAttribute(attr, '');
+          return targets.length;
+        }, entry.attr);
+        if (!count) this.demoSelectorMissing.push(key);
+      } catch (_) { this.demoSelectorInvalid.push(key); }
+    }
   }
 
   demoPageArgs() {
-    return { text: this.demo?.text || {}, images: this.demo?.images || {}, known: this.demo?.known || [], selectors: this.demo?.selectors || {} };
+    return { text: this.demo?.text || {}, images: this.demo?.images || {}, known: this.demo?.known || [], selectors: Object.fromEntries(Object.entries(this.demo?.selectors || {}).map(([key, value]) => [key, typeof value === 'string' ? value : `[${this.demoRoleSelectors?.[key]?.attr || 'data-manual-unresolved'}]`])),
+      roleSelectors: this.demoRoleSelectors || {}, missingSelectors: this.demoSelectorMissing || [], invalidRoleSelectors: this.demoSelectorInvalid || [] };
   }
 
   /** 为本 Scenario 新建隔离的 Context：认证快照、视口、DPR、语言、时区、配色都在这里注入。 */
@@ -627,7 +664,26 @@ class PlaywrightBrowserProvider extends BrowserProvider {
     if (!this.page) return null;
     try {
       const { parseAriaSnapshot, semanticSummary } = require('../verify/semantic-diff');
-      return semanticSummary(parseAriaSnapshot(await this.page.locator('body').ariaSnapshot({ timeout: 5000 })));
+      const aria = await this.page.locator('body').ariaSnapshot({ timeout: 5000 });
+      // Demo 原始自由文本也可能残留在 aria-label；摘要只能保留处理后的名称。
+      const safeItems = await this.page.evaluate((items) => {
+        for (const item of items) for (const original of window.__manualDemo?.originals || []) {
+          // accessible name 会归一化空白；快照还可能转义反斜杠。两种形式都不能持久化。
+          const variants = [original, original.replace(/\s+/g, ' '), JSON.stringify(original).slice(1, -1).replace(/\\"/g, '"')];
+          for (const value of variants) if (value) item.name = item.name.split(value).join('[redacted]');
+        }
+        return items;
+      }, parseAriaSnapshot(aria));
+      const summary = semanticSummary(safeItems);
+      for (const item of summary.items) {
+        if (!item.name || item.name.includes('[redacted]')) { item.locator = null; item.resolution = 'redacted-or-unnamed'; continue; }
+        const target = { role: item.role, name: item.name, ...(item.level ? { level: item.level } : {}) };
+        const count = await this.locatorFor(target).count();
+        item.matchCount = count;
+        item.resolution = count === 1 ? 'unique' : count > 1 ? 'ambiguous' : 'missing';
+        item.locator = count === 1 ? target : null;
+      }
+      return summary;
     } catch (_) {
       return null;
     }
@@ -676,7 +732,7 @@ class PlaywrightBrowserProvider extends BrowserProvider {
     if (!this.page) throw new Error('定位元素之前必须先 open()。');
     if (!target || typeof target !== 'object') throw new Error('缺少语义目标。');
     const root = target.within ? this.locatorFor(target.within) : this.page;
-    if (target.role && target.name) return root.getByRole(target.role, { name: target.name, exact: target.exact !== false, includeHidden: target.includeHidden === true });
+    if (target.role && target.name) return root.getByRole(target.role, { name: target.name, exact: target.exact !== false, includeHidden: target.includeHidden === true, ...(target.level ? { level: target.level } : {}) });
     if (target.label) return root.getByLabel(target.label, { exact: target.exact !== false });
     if (target.text) return root.getByText(target.text, { exact: target.exact !== false });
     if (target.testId) return root.getByTestId(target.testId);

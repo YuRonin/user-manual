@@ -45,7 +45,7 @@ const { taskQuality } = require('../generate/quality');
 
 const PLAN_VERSION = 1;
 // 采集语义版本：标注覆盖规则变化（guide/隐式标注优先级、步骤级功能归属）后旧缓存不能复用
-const CAPTURE_PIPELINE_VERSION = 'quality-3';
+const CAPTURE_PIPELINE_VERSION = 'quality-4';
 // update 复用 generate 的节点（采集 → 草稿 → 文案 → 门槛 → 发布），目标集合由影响分析给出。
 const COMMANDS = ['generate', 'capture', 'update'];
 const CAPTURE_CAPABILITIES = ['capture', 'assertions', 'privacyGeometry'];

@@ -8,7 +8,7 @@
  *   api_mock     Fixture（.manual/fixtures/<id>.yaml，kind: mock）拦截接口返回的虚构数据
  *   fixture      hook Fixture 在隔离测试环境中准备的演示数据
  *   dom_replace  敏感区域截图前替换为 capture.demo.text 配置的虚构值。敏感区域有两种声明方式：
- *                capture.demo.selectors（Skill 侧按 CSS 选择器声明，被采集项目无需任何改动，推荐）
+ *                capture.demo.selectors（Skill 侧按 CSS 或角色 / 名称声明，被采集项目无需任何改动，推荐）
  *                或页面自带的 data-redact="<键>" 属性（项目愿意加标记时可用，二者等价）
  * 证明不了的一律不出发布图：
  *   needs_fixture  缺少演示数据（未配置的 data-redact 键、未声明的手机号/邮箱、未登记的 WebSocket）
@@ -43,7 +43,8 @@ const REASONS = {
   'demo-image-unconfigured': { status: 'needs_fixture', hint: '在 capture.demo.images 中为这些图片类 data-redact 键选择 initials 或 blank。' },
   'demo-surface-unreplaceable': { status: 'needs_fixture', hint: '该 data-redact 区域是 Canvas / 视频 / 嵌入框等无法替换的内容；用 Fixture 返回虚构数据，或把它拆到不截图的步骤。' },
   'undeclared-sensitive-text': { status: 'needs_fixture', hint: '页面上出现了未声明为 data-redact 的手机号 / 邮箱：用 Fixture 返回虚构数据，或改用 example.com 等保留域名的演示值。' },
-  'demo-selector-invalid': { status: 'needs_fixture', hint: 'capture.demo.selectors 中的选择器在页面里无法解析；改成合法的 CSS 选择器。' },
+  'demo-selector-missing': { status: 'needs_fixture', hint: '角色 / 可访问名称目标没有命中；核对页面状态和配置，或使用 Fixture。' },
+  'demo-selector-invalid': { status: 'needs_fixture', hint: 'capture.demo.selectors 中的选择器在页面里无法解析；改成合法的 CSS 或 { role, name }。' },
   'demo-unmocked-read': { status: 'needs_fixture', hint: '页面声明了敏感区域，但这些数据接口既没有 Fixture 也没有登记：真实数据可能出现在画面的其他位置。用 Fixture（kind: mock）返回虚构数据；确认接口只返回公开数据或其内容全部落在已声明区域时，登记到 capture.demo.network.allow。' },
   'demo-surface-unaudited': { status: 'needs_fixture', hint: '页面声明了敏感区域，同时含有无法审计内容的区域（跨域 iframe / canvas / shadow DOM）；确认其中没有真实数据后登记到 capture.demo.surfaces，或用 Fixture 替代。' },
   'websocket-unverified': { status: 'needs_fixture', hint: '页面建立了 WebSocket，其中的数据无法被拦截证明；确认只读后登记到 capture.demo.network.websockets，或用 Fixture 替代。' },
@@ -88,15 +89,19 @@ function validateText(text, field, errors) {
   return out;
 }
 
-/** demo.selectors：{ 键: CSS 选择器 }。命中的元素与 data-redact="<键>" 等价，演示值仍从 demo.text / demo.images 取。 */
+/** demo.selectors：{ 键: CSS 或 { role, name } }。命中的元素与 data-redact="<键>" 等价，演示值仍从 demo.text / demo.images 取。 */
 function validateSelectors(selectors, field, errors) {
   if (selectors === undefined) return {};
   if (!selectors || typeof selectors !== 'object' || Array.isArray(selectors)) { errors.push(`${field} 需要是 { 键: CSS 选择器 } 对象。`); return {}; }
   const out = {};
   for (const [key, selector] of Object.entries(selectors)) {
     if (!KEY.test(key) || key === '*') errors.push(`${field} 的键名非法: ${key}`);
-    else if (typeof selector !== 'string' || !selector.trim()) errors.push(`${field}.${key} 需要是非空的 CSS 选择器。`);
-    else out[key] = selector.trim();
+    else if (typeof selector === 'string' && selector.trim()) out[key] = selector.trim();
+    else if (selector && typeof selector === 'object' && !Array.isArray(selector) &&
+      Object.keys(selector).every((k) => ['role', 'name'].includes(k)) &&
+      typeof selector.role === 'string' && /^[a-z]+$/.test(selector.role) &&
+      typeof selector.name === 'string' && selector.name.trim()) out[key] = { role: selector.role, name: selector.name };
+    else errors.push(`${field}.${key} 需要是非空 CSS 或 { role, name }。`);
   }
   return out;
 }
@@ -268,6 +273,7 @@ function decide({ audit = {}, guard = {}, demo = {} }) {
   const unique = (list) => [...new Set(list)].sort();
   const sensitive = declaresSensitive(audit);
 
+  if (audit.missingSelectors?.length) add('demo-selector-missing', unique(audit.missingSelectors).join(', '));
   if (audit.invalidSelectors?.length) add('demo-selector-invalid', unique(audit.invalidSelectors).join(', '));
   if (audit.unconfigured?.length) add('demo-text-unconfigured', unique(audit.unconfigured).join(', '));
   if (audit.imageUnconfigured?.length) add('demo-image-unconfigured', unique(audit.imageUnconfigured).join(', '));

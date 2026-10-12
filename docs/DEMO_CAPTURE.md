@@ -11,9 +11,9 @@
 | `public` | 导航、按钮、公告、价格等公开内容 | 不需要声明，原样呈现 |
 | `fixture` | 隔离测试环境里准备好的演示账号与数据 | `.manual/fixtures/<id>.yaml`（`kind: hook`）+ 显式 Scenario |
 | `api_mock` | 列表、分页、订单、积分流水等结构化数据 | `.manual/fixtures/<id>.yaml`（`kind: mock`）+ 显式 Scenario |
-| `dom_replace` | 昵称、手机号、会话标题等显示文本，以及头像 | 在 `capture.demo.selectors` 中按 CSS 选择器声明区域（推荐，被采集项目无需任何改动），`capture.demo.text` / `images` 给出演示值 |
+| `dom_replace` | 昵称、手机号、会话标题等显示文本，以及头像 | 在 `capture.demo.selectors` 中按 CSS 或角色 / 可访问名称声明区域（推荐，被采集项目无需任何改动），`capture.demo.text` / `images` 给出演示值 |
 
-**被采集项目的源码不需要改。** 敏感区域在 Skill 侧的 `capture.demo.selectors` 里按 CSS 选择器声明即可；如果项目自己愿意在元素上加 `data-redact="<键>"`，效果完全相同，两种方式可以混用。Fixture、演示值和规则都放在 `.manual/` 下（Skill 的受控目录），不写进项目源码、配置或数据库。
+**被采集项目的源码不需要改。** 敏感区域在 Skill 侧的 `capture.demo.selectors` 里按 CSS 或角色 / 可访问名称声明即可；如果项目自己愿意在元素上加 `data-redact="<键>"`，效果完全相同，两种方式可以混用。Fixture、演示值和规则都放在 `.manual/` 下（Skill 的受控目录），不写进项目源码、配置或数据库。
 
 每张通过门禁的截图都在 Capture 记录的 `privacy.demo` 里写明：
 
@@ -62,8 +62,9 @@ capture:
 capture:
   mode: demo
   demo:
-    selectors:                    # 键 → CSS 选择器；命中的元素就是敏感区域（与 data-redact="<键>" 等价）
-      account-name: '.sidebar .user-name'
+    selectors:                    # 键 → CSS 或 { role, name }；命中的元素就是敏感区域（与 data-redact="<键>" 等价）
+      account-name: { role: button, name: 当前账号 }
+      # CSS 字符串仍可混用
       account-phone: '.profile-card .phone'
       session-title: '.history-list li .title'
       account-avatar: '.sidebar img.avatar'
@@ -78,7 +79,7 @@ capture:
       account-avatar: initials   # 浅色圆底加首字；blank 为纯色占位
 ```
 
-每个键都需要演示值（文本键在 `text`，图片键在 `images`），或者来自 Fixture 的数据（见下一节）。门禁报错会列出所有缺失的键。选择器只支持 CSS；写错的选择器会以 `demo-selector-invalid` 停在 needs_fixture。
+每个键都需要演示值（文本键在 `text`，图片键在 `images`），或者来自 Fixture 的数据（见下一节）。门禁报错会列出所有缺失的键。CSS 字符串与 `{ role, name }` 可以混用；角色名称采用精确匹配，全部重复命中都替换。对象只接受这两个非空字段。写错的选择器以 `demo-selector-invalid` 停在 needs_fixture；角色目标未命中以 `demo-selector-missing` 停止。
 
 不确定选择器时，在浏览器开发者工具里对目标元素"复制选择器"，再去掉其中随构建变化的部分（哈希类名、`nth-child` 序号）。
 
@@ -179,7 +180,8 @@ capture:
 | `demo-text-unconfigured` | needs_fixture | 为列出的键在 `capture.demo.text` 中配置演示值 |
 | `demo-image-unconfigured` | needs_fixture | 在 `capture.demo.images` 中选 `initials` 或 `blank` |
 | `demo-surface-unreplaceable` | needs_fixture | 区域是 Canvas、视频或嵌入框，无法替换：用 Fixture 提供数据，或把它拆到不截图的步骤 |
-| `demo-selector-invalid` | needs_fixture | `capture.demo.selectors` 中的选择器无法解析：改成合法的 CSS 选择器 |
+| `demo-selector-missing` | needs_fixture | 角色 / 可访问名称目标未命中：核对页面状态、名称或使用 Fixture |
+| `demo-selector-invalid` | needs_fixture | `capture.demo.selectors` 中的选择器无法解析：改成合法的 CSS 或 `{ role, name }` |
 | `undeclared-sensitive-text` | needs_fixture | 敏感区域之外出现了手机号或邮箱：把它所在的元素加进 `capture.demo.selectors`，或用 Fixture 提供虚构数据（`example.com` 这类保留域名视为虚构） |
 | `demo-unmocked-read` | needs_fixture | 列出的数据接口没有 Fixture 也没有登记：为它写 Fixture；确认只返回公开数据（或内容全部落在已声明区域）后登记到 `network.allow`。跨域接口标 `cross-origin`，事件流标 `stream` |
 | `demo-surface-unaudited` | needs_fixture | 页面有跨域 iframe、Canvas 或 Shadow DOM，内容无法审计：确认其中没有真实数据后登记到 `capture.demo.surfaces`，或用 Fixture 替代 |
@@ -198,6 +200,6 @@ capture:
 - 原始值残留检查覆盖可见文本、表单值、空输入框的占位符和加载失败图片的 alt。`title`、`aria-*` 属性和页面标题不会出现在截图里，只记数量（`hiddenMatches`）。跨域 iframe、Canvas 和 Shadow DOM 无法审计：页面声明了敏感区域时它们会让门禁停在 needs_fixture（`demo-surface-unaudited`），除非登记在 `capture.demo.surfaces`。
 - 长度小于 2 的值，以及少于 4 位数字的短数字，不参与残留检查（误报太多）。
 - 没有被声明（选择器或 `data-redact`）、也没有被 Fixture 覆盖的自由文本，无法自动识别是否为隐私。正则没有命中**不代表安全**。公开手册中，登录后才能看到的页面，应该在 `capture.demo.selectors` 中声明敏感区域，或者改用 Fixture。
-- 选择器只支持 CSS，不支持按角色 / 可访问名称声明。
+- 角色目标在 Node 侧复用 Playwright `locatorFor`，截图前加随机临时 DOM 属性，复用页面内替换与审计。名称因替换改变后，仍审计原元素；SPA 在下一轮截图前重新解析目标。截图后的审计只读，元素断开、临时标记丢失或出现未标记的新目标判为 `demo-replacement-reverted`，不会补做替换。Shadow DOM 等不可审计区域仍需 Fixture，角色定位不能绕过该限制。
 - 页面没有任何敏感区域声明时，未覆盖的数据读取只记录、不阻断（否则所有调用接口的公开页面都无法截图）。
 - 网络守卫只作用于浏览器发出的请求。后端自身的定时任务或副作用不在保护范围内，高风险业务请在隔离环境中验证。

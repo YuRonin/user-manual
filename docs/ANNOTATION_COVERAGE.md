@@ -72,3 +72,9 @@
 发布记录的章节带 `captureRefs`、`annotationRefs`（`<captureId>#<featureId>`）和 `featureRefs`，从章节出发只凭 ID 能走到截图上画出的那一项。`verify --artifacts` 核对已发布的冻结证据：截图之后定义变化只作提示（`annotation-plan-changed` 出现在 warnings），不改写历史截图的结论；重新发布前则必须重采。定义变化后重新派生（只换主题 / 隐私规则）也会被 `annotation-plan-changed` 拒绝。
 
 `verify --artifacts --json` 的 `annotationCoverage` 区分 `complete`、`not-applicable`（没有已确认 Required，也没有待确认项）、`pending-review`、`incomplete` 和 `legacy-unknown`；没有已确认 Required 时覆盖率百分比是 `null`（N/A），不是 100%。
+
+## 无障碍名称与定位证据（B3-03）
+
+页面、Scenario 与步骤 Capture 的 `semantic.items` 逐项保留 `role / name / level`，新增 `resolution / matchCount / locator`。复用 `locatorFor` 计数：唯一命中为 `unique`，locator 为精确 `{ role, name, level? }`；同名多命中为 `ambiguous`、locator 为 null，不用 `.first()` 猜测。同名摘要条目仍分别保留。未命中为 `missing`；空名称或已脱敏名称为 `redacted-or-unnamed`，无 locator。
+
+不保存控件值或正文；名称沿用语义摘要的 PII 处理，并移除 Demo 替换下来的原始自由文本（包括仍留在 aria-label 的文字、ARIA 归一化空白及快照转义形式）。旧摘要没有关联字段仍可比较；语义 hash 继续只根据角色、名称与层级计算，新增定位元数据不制造漂移。关联代表截图附近时刻的观察，不是永久身份，也不替代实际动作与标注时的唯一定位检查。
