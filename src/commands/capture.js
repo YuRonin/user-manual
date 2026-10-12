@@ -207,11 +207,16 @@ async function run(argv) {
   // 按默认规格采集的证据登记进缓存，之后 manual generate 可以复用；自定义地址 / 规格的采集不登记。
   if (overrides.length === 0) recordCapture({ projectRoot, subject: { type: 'page', id: page.id }, captureIds: [record.id], observedAt: record.observedAt });
 
-  // --out 只额外导出一份原图副本；权威产物是内容寻址安装的 Capture。
+  // 不保留原图时只导出经过安全处理的图；绝不从 staging 导出原图。
+  const exportedSource = screenshotRelative || record.artifacts.find((a) => a.kind === 'published')?.path || (safe?.privacy?.status === 'passed' ? record.artifacts.find((a) => a.kind === 'sanitized')?.path : null);
   const outPath = values.out ? path.resolve(projectRoot, values.out) : null;
+  if (outPath && !exportedSource) {
+    fail(['unsafe-capture-export: 未保留原图且没有通过隐私检查的安全图，不能导出。'], { json });
+    return 1;
+  }
   if (outPath) {
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
-    fs.copyFileSync(path.join(projectRoot, screenshotRelative), outPath);
+    fs.copyFileSync(path.join(projectRoot, exportedSource), outPath);
   }
 
   if (json) {
@@ -224,7 +229,8 @@ async function run(argv) {
           url: shot.meta.url,
           captureId: record.id,
           screenshot: screenshotRelative,
-          screenshotAbsolute: path.join(projectRoot, screenshotRelative),
+          screenshotAbsolute: screenshotRelative ? path.join(projectRoot, screenshotRelative) : null,
+          rawRetained: record.rawRetained,
           exported: outPath,
           bytes: shot.bytes,
           capturedAt,
@@ -250,7 +256,7 @@ async function run(argv) {
   } else {
     process.stdout.write(
       renderSummary({
-        page, url, outPath: path.join(projectRoot, screenshotRelative), shot, ready, projectRoot, profileId, profile,
+        page, url, outPath: exportedSource ? path.join(projectRoot, exportedSource) : path.join(projectRoot, config.artifacts.stateDir, 'evidence', 'captures', `${record.id}.json`), shot, ready, projectRoot, profileId, profile,
         provider: { id: providerId, type: shot.meta.providerType, headless: shot.meta.headless },
       }) + '\n'
     );

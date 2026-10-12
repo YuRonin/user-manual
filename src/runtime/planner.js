@@ -26,6 +26,8 @@ const { authDisabled, identityRevision, identityAssertionsFor } = require('../au
 const { policyRevision } = require('../publication/validate');
 const { RENDERER_VERSION } = require('../evidence/image-pipeline');
 const { repairDecision } = require('./repair');
+const { createCaptureStore } = require('../evidence/store');
+const { verifyCaptureRecord } = require('../evidence/integrity');
 
 /** 缓存里的标注失败（"<captureId>:<featureId>:<reason>"）→ { feature_id, reason }；"没有发布图"只是结果，不单独计。 */
 function parseAnnotationFailures(list = []) {
@@ -74,6 +76,7 @@ function captureKeyFields({ config, subject, scenario, sourceHash, captureMode, 
   const authProfile = scenario.authProfile || config.auth?.activeProfile;
   return {
     capturePipelineVersion: CAPTURE_PIPELINE_VERSION,
+    ...(config.capture.safety?.persistRaw === false ? { rawRetention: 'none' } : {}),
     projectId: config.project.id || config.auth?.cacheKey || config.project.name,
     environment: `${scenario.environment || 'local'}@${new URL(config.project.baseUrl).origin}`,
     deployedBuild: config.runtime?.deployedBuild,
@@ -235,7 +238,7 @@ function collectPlanningInputs({ projectRoot, config, base, targets, mode, cache
     if (subjects[key]) continue;
     const entry = scenarios.find((item) => item.subject.type === target.type && item.subject.id === target.id && !item.variant);
     const scenarioResult = variantEntry
-      ? (() => { const read = readScenario(stateDirAbs, variantEntry.id, { stepIds: variantEntry.stepIds }); return read.ok ? { ok: true, scenario: read.scenario, explicit: true } : read; })()
+      ? (() => { const read = readScenario(stateDirAbs, variantEntry.id, { stepIds: variantEntry.stepIds }); return read.ok ? { ...read, explicit: true } : read; })()
       : resolveScenario(stateDirAbs, entry.derived, { stepIds: entry.stepIds });
     if (!scenarioResult.ok) throw new RuntimeError('invalid-scenario', scenarioResult.errors.join('；'));
     const scenario = scenarioResult.scenario;
@@ -258,6 +261,14 @@ function collectPlanningInputs({ projectRoot, config, base, targets, mode, cache
         ? { hit: true, reusedFrom: found.reusedFrom, observedAt: found.observedAt, stale: found.stale, uncertainty: found.uncertainty, imageInputs: found.entry.meta?.imageInputs || null, outputRefs: found.outputRefs }
         : { hit: false, reason: found.reason || null, bypassed: found.bypassed || null, changedFields: found.changedFields || null,
           ...(found.reason === 'annotation-incomplete' ? { annotationFailures: found.failures || [], repairAttempts: found.repairAttempts || 0, failedImageInputs: found.imageInputs, failedOutputRefs: found.outputRefs, failedObservedAt: found.observedAt } : {}) };
+      if (found.outputRefs) {
+        const captureRefs = found.outputRefs.filter((ref) => ref.kind === 'capture');
+        const captures = createCaptureStore({ projectRoot, stateDirAbs });
+        cache.rederiveAvailable = captureRefs.length > 0 && captureRefs.every((ref) => {
+          const record = captures.read(ref.ref);
+          return record && record.rawRetained !== false && ['raw', 'derivation'].every((kind) => record.artifacts.some((a) => a.kind === kind)) && verifyCaptureRecord(projectRoot, record, { kinds: ['raw', 'derivation'] }).ok;
+        });
+      }
     }
     subjects[key] = {
       subject: { type: target.type, id: target.id, ...(variantEntry ? { scenarioId: variantEntry.id } : {}) },
@@ -269,17 +280,20 @@ function collectPlanningInputs({ projectRoot, config, base, targets, mode, cache
       captureUncertainty: keyInfo.uncertainty,
       cache,
       ...details,
+      qualityWarnings: [...(details.qualityWarnings || []), ...(scenarioResult.warnings || [])],
       planErrors: [...(details.planErrors || []), ...fixtureInfo.errors],
     };
   }
   return {
     version: PLAN_VERSION,
     invalidScenarios: scenarios.invalid || [],
+    warnings: base.warnings || [],
     modelRevision: base.modelRevision,
     capturePipelineVersion: CAPTURE_PIPELINE_VERSION,
     projectId: config.project.id || null,
     language: config.docs.language,
     templateVersion: TEMPLATE_VERSION,
+    repairAttempts: config.runtime?.repairAttempts ?? 2,
     imageInputs: imageInputsOf(config),
     capabilities: capabilitiesFor(provider, config.browser.activeProvider),
     auth: { enabled: config.auth?.enabled !== false, verifyPath: config.auth?.verifyPath || null,
@@ -307,7 +321,7 @@ function plan(snapshot, policy) {
   const copy = policy.copy || { mode: 'model' };
   const errors = [];
   const nodes = [];
-  const summary = { actions: [], browserScenarios: 0, riskBoundaries: [], cache: [], waitingFor: [], warnings: [] };
+  const summary = { actions: [], browserScenarios: 0, riskBoundaries: [], cache: [], waitingFor: [], warnings: [...(snapshot.warnings || [])] };
   for (const item of snapshot.invalidScenarios || []) summary.warnings.push(`scenario-invalid: .manual/scenarios/${item.id}.yaml 未参与规划（${item.reason}）`);
   const captureByKey = new Map();
   const variantDependencies = new Map();
@@ -372,13 +386,22 @@ function plan(snapshot, policy) {
     let captureId = captureByKey.get(s.captureKey);
     let derived = null;
     if (!captureId) {
-      const cache = s.cache;
+      const cache = s.cache ? { ...s.cache } : null;
       // 上次标注失败：按失败类别定向修复，而不是一律重拍（B5-15 ~ B5-17）
       const repair = cache && !cache.hit && cache.reason === 'annotation-incomplete'
-        ? repairDecision({ failures: parseAnnotationFailures(cache.annotationFailures), attempts: cache.repairAttempts, executesWrites: !!s.executesWrites,
+        ? repairDecision({ failures: parseAnnotationFailures(cache.annotationFailures), attempts: cache.repairAttempts, budget: snapshot.repairAttempts ?? 2, executesWrites: !!s.executesWrites,
           imageInputsChanged: !sameImageInputs(cache.failedImageInputs, snapshot.imageInputs) })
         : null;
       if (repair && ['review', 'unrepairable'].includes(repair.action)) { errors.push(repair.message); return; }
+      const needsDerive = repair?.action === 'derive' || (cache?.hit && !sameImageInputs(cache.imageInputs, snapshot.imageInputs));
+      if (needsDerive && cache.rederiveAvailable === false) {
+        const message = `rederive-unavailable: ${subjectKey(subject)} 未保留原图或派生输入，需要重新采集。`;
+        if (s.executesWrites) { errors.push(`${message} 任务包含写步骤，确认业务状态后用 --refresh 显式重采，不自动重放。`); return; }
+        summary.warnings.push(message);
+        cache.hit = false;
+        cache.reason = 'rederive-unavailable';
+        if (repair) { repair.action = 'relocate'; repair.message = 'annotation-repair: 原图或派生输入不可用，重新采集以修复绘制失败。'; }
+      }
       if (repair) summary.warnings.push(`${subjectKey(subject)}：${repair.message}`);
       const repairReuse = repair?.action === 'derive' && cache.failedOutputRefs
         ? { from: s.captureKey, observedAt: cache.failedObservedAt, stale: false, onlineChecked: false, repair: true } : null;

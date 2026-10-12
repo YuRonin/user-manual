@@ -369,7 +369,7 @@ Playwright 进程通常无法绝对防护通过目标前端之外的后台定时
 
 ## 11. 实施记录（2026-10-11）
 
-2026-10-12 后续批次（基线 `main@d4fad5c`）：R1 页面变体截图复用现有发布门禁，R2 任务步骤在线视觉比较复用 captureStable / derivePublished / 冻结计划，R3 档案级身份断言复用认证验证链路。三项完成；定向测试分别 5 / 10 / 17 项通过，全量 unit 564 项、browser 372 项通过，0 失败。旧变体缺 scenarioRevision 需重采，旧任务缺环境指纹时视觉不可比。不声明 variants 或 profiles 时兼容原行为。原图保留开关（R6）、角色 / 名称敏感区域（R7）尚待实施，下面的遗留说明仍有效。
+2026-10-12 后续批次（基线 `main@d4fad5c`）：R1 页面变体截图复用现有发布门禁，R2 任务步骤在线视觉比较复用 captureStable / derivePublished / 冻结计划，R3 档案级身份断言复用认证验证链路。三项完成于 815c402；定向测试分别 5 / 10 / 17 项通过，第一批全量 unit 564 项、browser 372 项通过，0 失败。旧变体缺 scenarioRevision 需重采，旧任务缺环境指纹时视觉不可比。不声明 variants 或 profiles 时兼容原行为。R6 在下面的第二批完成；R7 按用户要求暂缓。
 
 | 阶段 | 状态 | 证据 |
 |---|---|---|
@@ -378,12 +378,14 @@ Playwright 进程通常无法绝对防护通过目标前端之外的后台定时
 | P2 注入与隔离 | 完成 | `capture.demo.selectors`；Fixture 跨域 `origin`、`shape` 校验、列表 id 唯一；Service Worker 注册明确失败 |
 | P3 写入保护与门禁 | 完成 | 未覆盖读取 `demo-unmocked-read`、GraphQL `operationName`、`demo-surface-unaudited`；任务非发布截图也过门禁 |
 | P4 生成链路 | 完成 | `demo-evidence-legacy` / `demo-recapture-blocked` 进入质量提示（可 `quality.blockOn`）；verify 先判 Demo 再写任务状态 |
-| P5 测试与文档 | 部分 | `demo-capture.test.js` 24 项、`demo-contract.test.js` 21 项，本地全部通过；项目已移除 GitHub Actions，Linux / Windows 未验证 |
+| P5 测试与文档 | 部分 | demo-capture.test.js 26 项、demo-contract.test.js 21 项；最终 unit 566 / browser 378 全部通过；Linux / Windows 未复验 |
+
+R4–R6 后续批次完成：修复预算、显式死字段提示、`capture.safety.persistRaw: false`；最终全量 unit 566 / browser 378 通过，0 失败。`data.revision` 子项前提不成立，保留缓存失效语义；不保留 raw 不等于从不临时落盘，staging 成功 / 失败清理，强制中止由现有恢复 / GC 清理。旧原图不会自动删除，默认仍 true 兼容旧项目。2026-10-12 用户调整范围：R7–R9 暂不实施，角色 / 名称选择器等保持遗留。详见 [实施与回归记录](docs/handoff/2026-10-12-r1-r6-results.md)。
 
 **偏离方案之处（如实记录）**
 
 - SSR：没有对首屏 HTML 单独阻断。进入画面的真实值由替换与残留检查覆盖；记录以 `realDataInBrowser` 标明真实数据曾进入浏览器，不宣称"未读取真实数据"。
-- `persist_raw_screenshots: false` 未实现：私有原图是重新派生与标注修复的输入；原图在 `.manual/artifacts/raw`（不入库、不发布）。
+- [x] `capture.safety.persistRaw: false` 已实现并全量回归通过；默认 true 兼容旧项目。关闭后缺原图的重新派生转安全重采，写任务不自动重放；旧原图保留。
 - 选择器只支持 CSS，不支持按角色 / 可访问名称声明。
 
 **待现场验证**：NeoAgent 测试站的代表页面前后对比、通过率与原因分布（`manual verify` 的 `demo.metrics`）。

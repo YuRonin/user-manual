@@ -125,11 +125,13 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
   // 先定 Scenario 再拼地址：显式 Scenario 的 entry（params / path / query）决定打开哪条具体内容。
   let scenario = options.scenario || null;
   let explicitScenario = !!scenario;
+  let scenarioWarnings = [];
   if (!scenario) {
     const resolved = resolveScenario(stateDirAbs, derivePageScenario(page, config, { params }), { stepIds: [] });
     if (!resolved.ok) throw inputError('invalid-scenario', resolved.errors);
     scenario = resolved.scenario;
     explicitScenario = resolved.explicit;
+    scenarioWarnings = resolved.warnings || [];
   }
 
   // ---- 要打开的地址
@@ -208,7 +210,7 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
       validate: (observation) => validateNavigation({ requestedUrl: url, openResult, observation, expected }),
       enabled: waits.reloadOnStuckLoading, timeout: readyOptions.timeout,
     });
-    ready.warnings.push(...navigation.warnings);
+    ready.warnings.push(...navigation.warnings, ...scenarioWarnings, ...(base.warnings || []));
     // 页面身份：只有非 URL 断言能证明"打开的是这一页"；只有 URL 的旧模型记为 url-only。
     let identity = 'url-only';
     if (!options.url && identityAssertions.length > 0) {
@@ -339,7 +341,7 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
   let record;
   try {
     const artifacts = [
-      { kind: 'raw', file: stagedRaw, dir: config.artifacts.rawDir, prefix: pageId },
+      ...(config.capture.safety?.persistRaw === false ? [] : [{ kind: 'raw', file: stagedRaw, dir: config.artifacts.rawDir, prefix: pageId }]),
       { kind: 'sanitized', file: stagedSanitized, dir: `${config.artifacts.sanitizedDir}/pages`, prefix: pageId },
       { kind: 'derivation', file: stagedDerivation, dir: `${config.artifacts.stateDir}/artifacts/derivation`, prefix: pageId },
       { kind: 'annotations', file: stagedAnnotations, dir: `${config.artifacts.stateDir}/artifacts/annotations`, prefix: pageId },
@@ -348,6 +350,7 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
     record = captureStore.commit(staging, {
       record: {
         kind: 'page',
+        rawRetained: config.capture.safety?.persistRaw !== false,
         subject: { pageId },
         runId,
         scenarioId: scenario.id,
@@ -405,7 +408,7 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
   return {
     page, updatedPage, record, shot, ready, navigation, identity, safe, url, effectiveRoute,
     profileId, profile, providerId, capturedAt,
-    screenshotRelative: record.artifacts.find((a) => a.kind === 'raw').path,
+    screenshotRelative: record.artifacts.find((a) => a.kind === 'raw')?.path || null,
     published: updatedPage.browser?.published || null,
   };
 }
@@ -431,7 +434,7 @@ function pageProjection(page, record, { shotMeta = null, providerId = null, navi
       verified: true,
       latestCaptureId: record.id,
       lastCapture: record.observedAt,
-      screenshot: artifactOf('raw').path,
+      screenshot: artifactOf('raw')?.path || null,
       url: shotMeta?.url || (record.finalUrl ? `${record.finalUrl.origin || ''}${record.finalUrl.pathname}` : null),
       actualRoute: navigation?.actualRoute ?? record.actualRoute ?? null,
       identity: identity || record.identity || null,

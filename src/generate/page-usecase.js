@@ -96,7 +96,7 @@ function draftPage({ projectRoot, config, pageId, noScreenshot = false }) {
   if (coverageErrors.length) throw failure(coverageErrors[0].code, formatIssues(coverageErrors));
   const errors = [];
   // 事实优先级第一条：没有真实截图就没有可信的手册
-  if (!page.browser?.screenshot && !noScreenshot) {
+  if (!page.browser?.screenshot && !page.browser?.latestCaptureId && !noScreenshot) {
     errors.push(
       `"${page.id}" 还没有截图，生成的手册会缺少界面。先运行 \`manual capture ${page.id}\`。`,
       '确实要出纯文字版的话，加 --no-screenshot。'

@@ -95,7 +95,7 @@ function treeDigest(dir) {
 }
 
 /** 伪造一次成功采集并写入缓存（用于命中测试）。 */
-function seedCaptureCache(root, subject, { imageInputs, annotation = { status: 'passed', failures: [] }, repairAttempts } = {}) {
+function seedCaptureCache(root, subject, { imageInputs, annotation = { status: 'passed', failures: [] }, repairAttempts, rawRetained = true } = {}) {
   const { config, stateDirAbs } = context(root);
   const { snapshot } = planFor(root, [`${subject.type}:${subject.id}`], { cache: false });
   const s = snapshot.subjects[`${subject.type}:${subject.id}`];
@@ -103,9 +103,10 @@ function seedCaptureCache(root, subject, { imageInputs, annotation = { status: '
   const handle = captures.begin();
   fs.mkdirSync(handle.stagingDir, { recursive: true });
   fs.writeFileSync(handle.file('raw.png'), TINY_PNG);
+  fs.writeFileSync(handle.file('derivation.json'), '{}');
   const record = captures.commit(handle, {
-    record: { observedAt: new Date().toISOString(), validations: [{ scope: 'page-identity', outcome: 'passed' }], privacy: { status: 'passed' } },
-    artifacts: [{ kind: 'raw', file: handle.file('raw.png'), dir: '.manual/artifacts/raw', prefix: subject.id }],
+    record: { rawRetained, observedAt: new Date().toISOString(), validations: [{ scope: 'page-identity', outcome: 'passed' }], privacy: { status: 'passed' } },
+    artifacts: [{ kind: rawRetained ? 'raw' : 'sanitized', file: handle.file('raw.png'), dir: rawRetained ? '.manual/artifacts/raw' : '.manual/artifacts/sanitized', prefix: subject.id }, { kind: 'derivation', file: handle.file('derivation.json'), dir: '.manual/artifacts/derivation', prefix: subject.id }],
   });
   // 直接使用 planner 计算出的 key：写缓存与规划必须使用同一组字段。
   const keyInfo = { kind: 'capture', key: s.captureKey, input: {}, uncertainty: s.captureUncertainty };
@@ -219,6 +220,55 @@ try {
     assert.match(planFor(root, ['page:chat']).errors.join('\n'), /annotation-review-required: 标注失败来自功能清单/);
     seedCaptureCache(root, { type: 'page', id: 'chat' }, { annotation: { status: 'failed', failures: ['x:upload:target-not-visible'] }, repairAttempts: 2 });
     assert.match(planFor(root, ['page:chat']).errors.join('\n'), /annotation-unrepairable: 已连续定向修复 2 次仍失败（upload:target-not-visible）/);
+  });
+
+  test('R4 修复预算配置 0 禁用、3 延长，仍拒绝自动重放写操作', () => {
+    const file = path.join(root, '.manual/config.yaml');
+    const original = fs.readFileSync(file, 'utf8');
+    const setBudget = (value) => { const c = yaml.load(original); c.runtime = { ...c.runtime, repairAttempts: value }; fs.writeFileSync(file, yaml.dump(c)); };
+    try {
+      setBudget(3);
+      seedCaptureCache(root, { type: 'page', id: 'chat' }, { annotation: { status: 'failed', failures: ['x:upload:target-not-visible'] }, repairAttempts: 2 });
+      const extended = planFor(root, ['page:chat']);
+      assert.strictEqual(extended.snapshot.repairAttempts, 3);
+      assert.ok(extended.plan, extended.errors?.join('\n'));
+      assert.match(extended.plan.summary.warnings.join('\n'), /第 3\/3 次/);
+      setBudget(0);
+      assert.match(planFor(root, ['page:chat']).errors.join('\n'), /annotation-unrepairable/);
+      for (const value of [-1, 6, 1.5, '2']) { setBudget(value); assert.strictEqual(loadConfig(root).ok, false); }
+      assert.strictEqual(require('../src/runtime/repair').repairDecision({ budget: 5, failures: [{ feature_id: 'x', reason: 'target-not-visible' }], executesWrites: true }).action, 'unrepairable');
+    } finally { fs.writeFileSync(file, original); }
+  });
+
+  test('R5 运行时提示显式死字段，data.revision 变化仍改变缓存键', () => {
+    const file = path.join(root, '.manual/scenarios/page-chat.yaml');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const derived = planFor(root, ['page:chat'], { cache: false }).snapshot.subjects['page:chat'].scenarioDefinition;
+    try {
+      const explicit = structuredClone(derived);
+      explicit.data = { mode: 'live', revision: 'v1' };
+      fs.writeFileSync(file, yaml.dump(explicit));
+      const first = planFor(root, ['page:chat'], { cache: false });
+      assert.match(first.plan.summary.warnings.join('\n'), /field-deprecated.*routeBindingId/);
+      assert.ok(!first.plan.summary.warnings.join('\n').includes('data.revision'));
+      explicit.data.revision = 'v2'; fs.writeFileSync(file, yaml.dump(explicit));
+      assert.notStrictEqual(planFor(root, ['page:chat'], { cache: false }).snapshot.subjects['page:chat'].captureKey, first.snapshot.subjects['page:chat'].captureKey);
+    } finally { fs.rmSync(file, { force: true }); }
+  });
+
+  test('R6 原图未保留：相同图像输入可复用，主题变化安全重采；写任务拒绝自动重放', () => {
+    seedCaptureCache(root, { type: 'page', id: 'chat' }, { rawRetained: false });
+    const hit = planFor(root, ['page:chat']);
+    assert.strictEqual(hit.plan.tasks.find((t) => t.kind === 'capture').reuse != null, true);
+    seedCaptureCache(root, { type: 'page', id: 'chat' }, { rawRetained: false, imageInputs: { privacyRevision: 'old' } });
+    const changed = planFor(root, ['page:chat']);
+    assert.ok(!changed.plan.tasks.some((t) => t.kind === 'derive-image'));
+    assert.strictEqual(changed.plan.summary.browserScenarios, 1);
+    assert.match(changed.plan.summary.warnings.join('\n'), /rederive-unavailable/);
+    const snapshot = structuredClone(changed.snapshot);
+    snapshot.subjects['page:chat'].executesWrites = true;
+    snapshot.subjects['page:chat'].cache.hit = true;
+    assert.match(plan(snapshot, { command: 'generate' }).errors.join('\n'), /任务包含写步骤.*不自动重放/);
   });
 
   test('B5-07a 损坏的 Scenario 文件不静默跳过：规划提示 scenario-invalid', () => {

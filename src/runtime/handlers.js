@@ -334,6 +334,7 @@ function remapManifest(ctx, manifestRef, mapping, records) {
       const artifactOf = (kind) => record.artifacts.find((a) => a.kind === kind) || null;
       Object.assign(shot, {
         captureId: nextId,
+        raw: artifactOf('raw') ? path.join(ctx.projectRoot, artifactOf('raw').path) : null,
         sanitized: artifactOf('sanitized') ? path.join(ctx.projectRoot, artifactOf('sanitized').path) : null,
         annotated: artifactOf('published')?.path || null,
         sha256: artifactOf('published')?.sha256 || null,

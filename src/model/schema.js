@@ -606,6 +606,8 @@ function validateCapture(capture) {
   });
   if (!isObject(capture.privacy) || !nonEmpty(capture.privacy.status)) c.error('privacy.status', 'required', 'privacy 摘要必填。');
   validateArtifactRefs(c, capture.artifacts, 'artifacts');
+  if (capture.rawRetained !== undefined && typeof capture.rawRetained !== 'boolean') c.error('rawRetained', 'invalid-type', 'rawRetained 需要是布尔值。');
+  if (capture.rawRetained === false && Array.isArray(capture.artifacts) && capture.artifacts.some((a) => a?.kind === 'raw')) c.error('rawRetained', 'invalid-artifact', 'rawRetained: false 不能仍引用 raw 产物。');
   if (capture.finalUrl !== undefined && capture.finalUrl !== null) {
     if (!isObject(capture.finalUrl) || !nonEmpty(capture.finalUrl.pathname)) c.error('finalUrl', 'invalid-url', 'finalUrl 需要 { origin, pathname }，不含查询参数。');
     else if (capture.finalUrl.search !== undefined) c.error('finalUrl.search', 'sensitive-field', 'Capture 不能记录完整查询参数。');

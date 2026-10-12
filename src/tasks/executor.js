@@ -110,7 +110,7 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
     // 这一步截图时页面上的可访问名称（不含控件值，已去掉个人信息）：文案里的控件名据此判断是否被观察到（B3-03）
     const semantic = provider.semanticSnapshot ? await provider.semanticSnapshot() : null;
     const stateRelative = path.relative(projectRoot, stateDir).replace(/\\/g, '/') || '.';
-    const artifacts = [{ kind: 'raw', file: rawPath, dir: `${stateRelative}/artifacts/raw`, prefix }];
+    const artifacts = options.persistRaw === false ? [] : [{ kind: 'raw', file: rawPath, dir: `${stateRelative}/artifacts/raw`, prefix }];
     let safe = null;
     // 不派生发布图的截图同样先过 Demo 门禁：raw 会入库，未证明安全的画面不能留下
     if (!publish) demoGate(captured);
@@ -137,6 +137,7 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
       artifacts,
       record: {
         kind: 'task-step',
+        rawRetained: options.persistRaw !== false,
         subject: { taskId: plan.taskId, stepId: step.id, timing },
         runId: null,
         scenarioId: plan.scenario?.id || null,
@@ -172,7 +173,7 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
     store.setLatest({ [options.variant ? `scenario:${plan.scenario.id}:${step.id}:${timing}` : `task:${plan.taskId}:${step.id}:${timing}`]: record.id });
     clearGateFailure(stateDir, subjectKey(['task', plan.taskId, step.id, timing]));
     const artifactOf = (kind) => record.artifacts.find((a) => a.kind === kind) || null;
-    const output = { captureId: record.id, raw: path.join(projectRoot, artifactOf('raw').path), timing, bytes: captured.shot.bytes,
+    const output = { captureId: record.id, raw: artifactOf('raw') ? path.join(projectRoot, artifactOf('raw').path) : null, timing, bytes: captured.shot.bytes,
       meta: { ...captured.shot.meta, url: sanitizeUrl(captured.shot.meta?.url) }, warnings: [...(captured.warnings || [])] };
     if (safe) {
       output.sanitized = path.join(projectRoot, artifactOf('sanitized').path);
@@ -205,7 +206,7 @@ function screenshotFromRecord(record, projectRoot) {
   const artifact = (kind) => record.artifacts.find((item) => item.kind === kind);
   return {
     captureId: record.id,
-    raw: path.join(projectRoot, artifact('raw').path),
+    raw: artifact('raw') ? path.join(projectRoot, artifact('raw').path) : null,
     sanitized: artifact('sanitized') ? path.join(projectRoot, artifact('sanitized').path) : null,
     annotated: artifact('published')?.path || null,
     timing: record.subject.timing,
@@ -525,7 +526,7 @@ async function executeCapturePlan(plan, provider, options) {
   } catch (cause) {
     let diagnostic = null;
     if (activeStep && !options.preflight) {
-      try { diagnostic = await diagnosticScreenshot(provider, stateDir, plan, activeStep, cause); } catch (_) { /* best effort */ }
+      try { if (options.persistRaw !== false) diagnostic = await diagnosticScreenshot(provider, stateDir, plan, activeStep, cause); } catch (_) { /* best effort */ }
     }
     throw new TaskExecutionError(
       // 保留原始分类（CaptureError.reason / 定位与断言 code / Playwright 超时）；没有分类的才记 step-failed。

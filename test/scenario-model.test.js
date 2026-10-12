@@ -80,6 +80,30 @@ test('显式 Scenario 文件覆盖默认值；无效文件被拒绝', () => {
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('R5 只提示显式死字段；派生字段与有缓存语义的 data.revision 不警告', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'manual-deprecated-'));
+  try {
+    const derived = derivePageScenario(page, config);
+    assert.deepStrictEqual(resolveScenario(dir, derived).warnings, []);
+    fs.mkdirSync(path.join(dir, 'scenarios'));
+    const file = path.join(dir, 'scenarios', `${derived.id}.yaml`);
+    const explicit = structuredClone(derived);
+    explicit.data = { mode: 'live', revision: 'v1' };
+    explicit.entry.routeBindingId = 'main';
+    explicit.checkpoints[0].state = 'default';
+    fs.writeFileSync(file, require('js-yaml').dump(explicit));
+    const warned = resolveScenario(dir, derived);
+    assert.strictEqual(warned.ok, true, warned.errors?.join('\n'));
+    assert.strictEqual(warned.warnings.length, 2);
+    assert.ok(warned.warnings.every((w) => w.startsWith('field-deprecated:')));
+    assert.ok(!warned.warnings.join('\n').includes('data.revision'));
+    delete explicit.entry.routeBindingId;
+    delete explicit.checkpoints[0].state;
+    fs.writeFileSync(file, require('js-yaml').dump(explicit));
+    assert.deepStrictEqual(resolveScenario(dir, derived).warnings, []);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('入口位置：entry.path 打开路由前缀下的具体内容，entry.query 追加查询串', () => {
   assert.deepStrictEqual(resolveEntryLocation('/s', { path: '/s/abc123' }), { ok: true, route: '/s/abc123', search: '' });
   assert.deepStrictEqual(resolveEntryLocation('/s', { path: '/s' }), { ok: true, route: '/s', search: '' }, '等于前缀也可以');

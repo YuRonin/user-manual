@@ -63,7 +63,7 @@ async function rederiveCaptures({ projectRoot, config, captureIds, runId = null 
       const oldSanitized = old.artifacts.find((a) => a.kind === 'sanitized');
       const oldPublished = old.artifacts.find((a) => a.kind === 'published');
       const artifacts = [
-        { kind: 'raw', file: stagedRaw, dir: dirOf(raw.path), prefix: prefixOf(raw.path) },
+        ...(config.capture?.safety?.persistRaw === false ? [] : [{ kind: 'raw', file: stagedRaw, dir: dirOf(raw.path), prefix: prefixOf(raw.path) }]),
         { kind: 'derivation', file: handle.file('derivation.json'), dir: dirOf(derivation.path), prefix: prefixOf(derivation.path) },
         { kind: 'sanitized', file: handle.file('sanitized.png'), dir: oldSanitized ? dirOf(oldSanitized.path) : `${config.artifacts.stateDir}/artifacts/sanitized`, prefix: oldSanitized ? prefixOf(oldSanitized.path) : prefixOf(raw.path) },
       ];
@@ -74,6 +74,7 @@ async function rederiveCaptures({ projectRoot, config, captureIds, runId = null 
         artifacts,
         record: {
           ...rest,
+          rawRetained: config.capture?.safety?.persistRaw !== false,
           runId,
           privacy: safe.privacy,
           // 采集于 Demo 模式之前的证据没有门禁结论：重新派生只能沿用旧遮罩（含马赛克），提示重新采集

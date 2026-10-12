@@ -197,6 +197,9 @@ test('Capture / Release 记录校验', () => {
     artifacts: [{ kind: 'published', path: 'docs/manual/images/annotated/abc.png', sha256: 'a'.repeat(64), bytes: 10 }],
   };
   assert.deepStrictEqual(codes(schema.validateCapture(capture)), []);
+  assert.deepStrictEqual(codes(schema.validateCapture({ ...capture, rawRetained: false })), []);
+  assert.ok(hasError(schema.validateCapture({ ...capture, rawRetained: 'false' }), 'rawRetained', 'invalid-type'));
+  assert.ok(hasError(schema.validateCapture({ ...capture, rawRetained: false, artifacts: capture.artifacts.map((a) => ({ ...a, kind: 'raw' })) }), 'rawRetained', 'invalid-artifact'));
   const bad = schema.validateCapture({ ...capture, id: '2026-09-24', finalUrl: { pathname: '/x', search: '?token=1' },
     validations: [{ scope: 'everything', outcome: 'ok' }], artifacts: [{ kind: 'raw', path: '../x.png', sha256: 'nope' }] });
   for (const [path, code] of [['id', 'invalid-id'], ['finalUrl.search', 'sensitive-field'], ['validations[0].scope', 'invalid-validation'],

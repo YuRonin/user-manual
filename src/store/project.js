@@ -65,7 +65,7 @@ function readWorkingCopy(stateDirAbs) {
   const tasks = taskStore.readTasks(stateDirAbs);
   const errors = [...pages.errors, ...tasks.errors];
   if (errors.length) return { ok: false, errors };
-  return { ok: true, model: snap.toJson({ meta: readMeta(stateDirAbs), pages: pages.pages, tasks: tasks.tasks }) };
+  return { ok: true, warnings: tasks.warnings || [], model: snap.toJson({ meta: readMeta(stateDirAbs), pages: pages.pages, tasks: tasks.tasks }) };
 }
 
 /** 经过一次"渲染 → 解析"，保证写出的文件再读回来与快照完全一致。 */
@@ -192,7 +192,7 @@ function createProjectStore({ stateDirAbs, docsOutputDir = null, lockOptions = {
     const pointer = snap.readPointer(stateDirAbs);
     const rev = snap.contentRevisionOf(working.model);
     if (pointer && pointer.revision === rev) {
-      return { model: working.model, revision: rev, modelRevision: pointer.modelRevision, imported: false };
+      return { model: working.model, warnings: working.warnings, revision: rev, modelRevision: pointer.modelRevision, imported: false };
     }
     for (const page of working.model.pages) {
       const version = checkSchemaVersion('page', page);
@@ -202,7 +202,7 @@ function createProjectStore({ stateDirAbs, docsOutputDir = null, lockOptions = {
     snap.writePointer(stateDirAbs, { revision: written.revision, modelRevision: written.modelRevision, parent: pointer?.revision || null, updatedAt: new Date().toISOString(), materialized: true, source: 'working-copy-import' });
     snap.pruneSnapshots(stateDirAbs, written.revision);
     if (docsOutputDir) writeIndexesFor(stateDirAbs, working.model, { revision: written.revision, modelRevision: written.modelRevision, docsOutputDir });
-    return { model: working.model, revision: written.revision, modelRevision: written.modelRevision, imported: true };
+    return { model: working.model, warnings: working.warnings, revision: written.revision, modelRevision: written.modelRevision, imported: true };
   }
 
   function load() {
@@ -211,7 +211,7 @@ function createProjectStore({ stateDirAbs, docsOutputDir = null, lockOptions = {
       const working = readWorkingCopy(stateDirAbs);
       if (!working.ok) throw new ProjectStoreError('invalid-model', working.errors.join('；'), { errors: working.errors });
       if (snap.contentRevisionOf(working.model) === pointer.revision) {
-        return { model: working.model, revision: pointer.revision, modelRevision: pointer.modelRevision, imported: false };
+        return { model: working.model, warnings: working.warnings, revision: pointer.revision, modelRevision: pointer.modelRevision, imported: false };
       }
     }
     return withLock(stateDirAbs, () => loadLocked(), lockOptions);

@@ -394,7 +394,7 @@ Page.features [Feature ID + scope + source]
 - [x] **B5-13｜失败原因分类**：`locate / visibility / state / plan / inventory / draw / description / privacy`；区分 not-found 与 not-visible；`annotation-*` 纳入 HINTS/POLICIES。（覆盖失败带 `category`；`target-not-found` / `target-not-visible` 区分；HINTS / POLICIES / CLASSIFY 补齐新码）
 - [x] **B5-14｜定位短等待与备选记录**：有界等待元素（可用两次短重试作初始策略），记录 fallback 被采用的 locator 与当前证据，不静默替换原配置。（标注目标定位两次 300ms 短重试；备选命中沿用 B2-07 记录）
 - [x] **B5-15｜Repair Planner**：只因主题/布局失败时重新 derive；定位失败时重新定位/局部补采；状态缺失才重新播放 Scenario；源清单错误进入审核而不是盲采。（`src/runtime/repair.js`：derive / review / relocate / replay / unrepairable，接入规划的 annotation-incomplete 分支）
-- [x] **B5-16｜重试预算与幂等**：建议初始最多 **2 次定向修复**（独立于现有通用重试，需要总预算协调）；涉及写操作的任务不得在不确认副作用情况下自动重放。（缓存 `meta.repairAttempts`，同一采集输入连续 2 次；含写步骤的任务不自动重放；预算暂不可配置）
+- [x] **B5-16｜重试预算与幂等**：建议初始最多 **2 次定向修复**（独立于现有通用重试，需要总预算协调）；涉及写操作的任务不得在不确认副作用情况下自动重放。（缓存 meta.repairAttempts；runtime.repairAttempts 可配置整数 0–5，默认 2，0 禁用；含写步骤不自动重放）
 - [x] **B5-17｜终态报告**：修复不可行时报告 `annotation-unrepairable`、关联 feature 和明确行动建议；`waiting_input` 不能被伪装为 succeeded。（`annotation-unrepairable` / `annotation-review-required` 规划错误，带 featureId:reason 与建议）
 
 **修复验收**：纯绘图失败直接重派生；操作失败只重跑允许的必要步骤；连续失败按预算停止；原模型/原截图未变化时不会永久命中错误缓存。
@@ -417,7 +417,7 @@ Page.features [Feature ID + scope + source]
 - [x] **B6-07｜CI 自动化模式**：审计提议的 `--analysis-default` 属于可选方案，先确认已有 `--copy-default` 能否满足无人值守；不要为了新 flag 重建第二套分析流程。（沿用 `--copy-default`，未新增 flag；它只免去文案改写，未完成源码分析的页面仍停在 analyze 等待输入，规划期给出 `analysis-required` 提示；未做确定性的标题 / 用途兜底，避免编造页面用途）
 - [x] **B6-08｜跨机器验证**：在干净 clone / 不同 OS 测试：缺少忽略目录中的原图时行为明确、可校验的持久化 Capture 不丢、能按需重建派生产物。（AC-16 端到端里删除 `.manual/artifacts` 后 `verify` 仍通过；删掉入库发布图时明确报错并点名文件；跨 OS 实跑未做）
 - [x] **B6-09｜运行手册与故障处理**：为 `annotation-coverage-failed`、`scenario-mismatch`、`annotation-incomplete`、`ui-term-not-observed`、`geometry-scale-mismatch` 等提供定位命令/修复建议。（RUNTIME §9 补齐 B4–B6 与 Demo 新错误码；`scenario-mismatch` 在代码中不存在，改为记录实际的 `scenario-state-lost` / `scenario-setup-failed`）
-- [x] **B6-10｜收敛死字段/旧入口**：只清理被完整调用链和测试证实无消费方的字段；兼容已公开 CLI，弃用需先公告、再迁移、后删除。（只做“先公告”：MIGRATION 列出仍被接受但无执行语义的字段；未删除、未加运行时提示）
+- [x] **B6-10｜收敛死字段/旧入口**：只清理被完整调用链和测试证实无消费方的字段；兼容已公开 CLI，弃用需先公告、再迁移、后删除。（MIGRATION 公告与显式文件 field-deprecated 提示均完成；字段尚未删除。data.revision 已参与 live 缓存键，保留；派生值与自动 null 不误警告）
 - [x] **B6-11｜任务模型结构化修改**：复核 `approve-tasks` 对 YAML 长文本的格式重写；工具和运行手册中的后续修改按解析后的字段进行，不依赖原文字符串替换。格式改变不应静默漏掉授权、动作或说明更新。（approve-tasks 写回后回读核对定义，变化时提示 `task-rewrite-drift`；未构造触发折叠改写的负例测试）
 - [x] **B6-12｜开发环境采集基线**：对本地 `next dev` 验证产物写入 `.manual/`、`docs/` 不会引起持续热更新；验证开发指示器不进入发布截图。NeoAgent 侧的 Tailwind `@source not` 和 `devIndicators: false` 作为待确认的项目配置，不擅自修改产品配置。（截图时隐藏 `nextjs-portal`；doctor 检查 `devIndicators` 并提示项目侧配置，不改项目）
 - [x] **B6-13｜重跑数据与授权清单**：运行手册要求在切换测试站/本地站时核对 Scenario ID、进行中的活动、可用积分与资料；`view-billing` 等外部服务不可用时使用经声明的 Empty Fixture；写授权到期前检查有效期，续期后按现有审批规则重新批准，不让写步骤在运行中意外停下。（规划期 `write-authorization-expiring / expired` 提示；RUNTIME §10 重跑检查清单）
@@ -589,14 +589,17 @@ Page.features [Feature ID + scope + source]
 
 ### 2026-10-12 剩余优化批次
 
-开始基线 `main@d4fad5c`（包含 `2b6f61f`），工作区干净。R1–R3 已完成并通过定向正负测试及全量回归：unit 564 项、browser 372 项，0 失败。R4–R9 继续按交接顺序处理。
+开始基线 `main@d4fad5c`（包含 `2b6f61f`），工作区干净。R1–R3 完成于 `815c402`，全量 unit 564 / browser 372 通过；R4–R6 完成于本记录同批提交，最终全量 unit 566 / browser 378 通过，0 失败。R5 的 data.revision 子项前提不成立，保留现有缓存语义。按用户调整，R7–R9 暂缓。详见 [实施与回归记录](handoff/2026-10-12-r1-r6-results.md)。
 
 | 项 | 当前状态 | 验证 / 遗留 |
 |---|---|---|
 | R1 / B5-06 | 完成 | variant-manual 5 项通过；variants → 自动采集依赖 → 冻结章节 → update / verify |
 | R2 / B4-06 | 完成 | live-verify 10 项通过；任务步骤同层视觉比较，旧环境指纹缺失明确不可比 |
 | R3 / B5-04 | 完成 | auth-identity 17 项通过；档案断言覆盖全局默认，失败不换身份 |
-| R4–R9 | 未开始 | R5 核对发现 data.revision 已参与 live 缓存键，不能作为死字段弃用；其余按序实施 |
+| R4 / B5-16 | 完成 | 0–5 次修复预算，默认 2；写步骤仍不自动重放；全量 566 / 378 通过 |
+| R5 / B6-10 | 完成；一个子项跳过 | 显式死字段 field-deprecated；data.revision 已参与 live 缓存键，不弃用；正负测试及全量通过 |
+| R6 / Demo 原图保留 | 完成 | persistRaw false、无 raw 的生成 / 验证 / 缓存 / 会话核对、缺原图安全重采；默认 true 兼容旧项目；全量通过 |
+| R7–R9 | 暂缓：用户要求不实施 | 2026-10-12 调整范围，只完成 R4–R6；既有遗留保持未勾选 |
 
 | 批次 | 状态 | 开始基线 | 完成提交/PR | 测试记录 | 遗留问题 |
 |---|---|---|---|---|---|
@@ -604,9 +607,9 @@ Page.features [Feature ID + scope + source]
 | B1 | 完成 | `fa9b500` | 待提交 | unit / browser 全部通过；新增 task-scenario-variant、capture-stability、target-obscured 测试，import-graph / runtime-planner / runtime-runner / auth-cache / scenario-fixtures 增补正反例 | 侧栏等 UI 状态需项目在 `auth.ephemeralStorageKeys` 声明并用 `requires` 断言；网络未空闲只提示不阻断（长轮询页面）；`reply-ready` 语义仍由目标项目的状态断言定义 |
 | B2 | 完成 | `8cc2fd1` | 待提交 | unit / browser 全部通过（与并行的 Demo Capture 改动一起跑）；新增 model-links 测试，annotation-coverage 29 项，target-obscured 增加遮挡用例 | Required 只认显式 features，NeoAgent 现有页面需在 describe 中确认候选后才能 public 发布；单图超上限拆图在 B4-02 |
 | B3 | 完成 | `c842c38` | 待提交 | unit / browser 全部通过；新增 grounding、quality-summary 测试，model-handoff 文案改为有依据的内容，runtime-runner 增补 quality 断言 | 真实性检查是规则级（控件 / 结果表达），只给 review-required 不自动证明语义；名称与 locator 逐项关联、步骤级 result 引用、严格 / 观察模式区分未做 |
-| B4 | 完成 | `50e7c6a` | 原批与 B5 同一提交；R2 后续提交 | unit 564 / browser 372 全部通过；任务步骤视觉漂移正负测试；原 annotation-layout / Golden 仍通过 | 旧任务缺环境指纹需重采才能视觉比较；拆图 part 为可选字段；页面配色变体的 golden 未做 |
-| B5 | 基本完成 | `50e7c6a` | 原批与 B4 同一提交；R1 / R3 后续提交 | unit 564 / browser 372 全部通过；变体手册 5 项、在线验证 10 项、认证身份 17 项 | 修复预算不可配置；显式定义死字段未加运行时提示；旧变体缺 scenarioRevision 需重采 |
-| B6 | 基本完成 | `08068e4` | 见本批提交 | unit / browser 全部通过；quality-summary 增补 B6-01/02/03/13，doctor 增补 B6-12，runtime-planner 增补 B6-07，annotation-golden 增补 B6-08 | 已移除 GitHub Actions，Linux / Windows 未在本地验证；死字段只公告未加运行时提示；NeoAgent 全量重跑待确认 |
+| B4 | 完成 | `50e7c6a` | 原批与 B5 同一提交；R2：815c402 | unit 566 / browser 378 全部通过；任务步骤视觉漂移正负测试；原 annotation-layout / Golden 仍通过 | 旧任务缺环境指纹需重采才能视觉比较；拆图 part 为可选字段；页面配色变体的 golden 未做 |
+| B5 | 基本完成 | `50e7c6a` | R1 / R3：815c402；R4 见本记录同批提交 | unit 566 / browser 378 全部通过；变体手册 5、在线验证 10、身份 17、规划 19 项 | 旧变体缺 scenarioRevision 需重采；真实站点验收待做；显式死字段仅提示、不删除 |
+| B6 | 基本完成 | `08068e4` | R5 见本记录同批提交 | unit 566 / browser 378 全部通过；显式死字段正负测试；data.revision 缓存失效测试 | R9 重写漂移负例按用户要求暂缓；Linux / Windows 未复验；NeoAgent 全量重跑待确认 |
 
 **建议立即执行的第一条命令不是修改代码，而是检查最新仓库状态并做 B0-01 的差异核对。** 审计报告已有一批在并发开发中被修复/变动的结论；以最新实现为准，计划不会要求重新造轮子。
 

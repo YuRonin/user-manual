@@ -61,7 +61,11 @@ manual migrate --rollback <迁移 id>             # 用完整备份恢复
 | 每次发布写 `.manual/quality/<manualId>.json` | 本机产物，记录最近 20 次的质量计数 | 无 |
 | `approve-tasks` 写回后回读核对 | 写回导致定义变化时提示 `task-rewrite-drift` | 按提示检查任务文件 |
 
-**仍被接受但没有执行语义的字段**（B6-10，后续版本先提示再移除）：Scenario 的 `entry.routeBindingId`、`data.revision`、检查点的 `state`（派生 Scenario 内部使用）；任务的 `capturePlan`（只读兼容）。新写的定义不要依赖它们。
+**仍被接受但没有执行语义的字段**（B6-10，先提示，尚未删除）：显式 Scenario 的 `entry.routeBindingId`、检查点的 `state`；任务文件非空的 `capturePlan`。读取返回 `field-deprecated`，Runtime 规划 / Run 摘要与直接采集 warnings 展示；派生 Scenario 及自动写出的 `capturePlan: null` 不提示。分别用 `entry.path / params / query`、`setup / assertions`、步骤 `capture` 定义替代。
+
+`data.revision` **不是死字段**：live Scenario 用它隔离采集缓存，变化会失效旧缓存；fixture 模式按 Fixture 定义和数据内容算 revision。保留此字段及现有行为。
+
+`capture.safety.persistRaw: false` 可停止保存新 Capture 的原图；默认 `true` 保持旧行为。旧原图不自动删除。关闭后 `browser.screenshot` / 任务截图 `raw` 为 null，正式生成改用 Capture 发布图；`capture --out` 导出安全图。关闭模式与原模式缓存隔离；主题 / 隐私变化无法从无原图的证据重新派生，安全主体会重新采集，含写步骤的任务要求显式 `--refresh`。旧任务缺环境指纹、旧变体缺 scenarioRevision 时需重采。
 
 ## 历史产物只留当前版本
 

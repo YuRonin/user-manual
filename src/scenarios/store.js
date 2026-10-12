@@ -32,7 +32,12 @@ function readScenario(stateDirAbs, id, context = {}) {
   }
   const checked = validateScenario(parsed, context);
   if (!checked.ok) return { ok: false, errors: checked.errors.map((e) => `${id}.yaml ${e.path}: ${e.code} ${e.message}`) };
-  return { ok: true, scenario: withRevision(parsed) };
+  const warnings = [];
+  if (parsed.entry?.routeBindingId !== undefined) warnings.push(`field-deprecated: Scenario ${id} entry.routeBindingId 没有路由选择语义；使用 entry.path / params / query。`);
+  for (const checkpoint of parsed.checkpoints || []) {
+    if (checkpoint.state !== undefined) warnings.push(`field-deprecated: Scenario ${id} checkpoints.${checkpoint.id}.state 不执行状态切换；使用 setup 与 assertions。`);
+  }
+  return { ok: true, scenario: withRevision(parsed), warnings };
 }
 
 /** 显式定义优先，否则用派生的默认值。 */
@@ -42,7 +47,7 @@ function resolveScenario(stateDirAbs, derived, context = {}) {
   const scenario = explicit.scenario || derived;
   const checked = validateScenario(scenario, context);
   if (!checked.ok) return { ok: false, errors: checked.errors.map((e) => `Scenario ${scenario.id} ${e.path}: ${e.code} ${e.message}`) };
-  return { ok: true, scenario, explicit: !!explicit.scenario };
+  return { ok: true, scenario, explicit: !!explicit.scenario, warnings: explicit.warnings || [] };
 }
 
 module.exports = { scenariosDirFor, readScenario, resolveScenario };

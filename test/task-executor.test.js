@@ -90,6 +90,34 @@ function plan() {
       assert.strictEqual(next.annotationCoverage.ok, true);
       assert.strictEqual(next.artifacts.find((item) => item.kind === 'raw').sha256, prior.artifacts.find((item) => item.kind === 'raw').sha256);
       assert.notStrictEqual(next.artifacts.find((item) => item.kind === 'published').sha256, prior.artifacts.find((item) => item.kind === 'published').sha256);
+      const withoutRaw = await rederiveCaptures({ projectRoot: root, config: { ...config, capture: { safety: { persistRaw: false } } }, captureIds: [original.captureId] });
+      const stripped = withoutRaw.records[0].record;
+      assert.strictEqual(stripped.rawRetained, false);
+      assert.ok(!stripped.artifacts.some((a) => a.kind === 'raw'));
+      assert.ok(fs.existsSync(original.raw), '不删除历史原图');
+      await assert.rejects(rederiveCaptures({ projectRoot: root, config, captureIds: [stripped.id] }), (e) => e.code === 'rederive-unavailable');
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  await test('R6 核对已有会话：缺 raw 的历史步骤正常恢复，不重放动作', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'manual-no-raw-reconcile-'));
+    try {
+      const { executeCapturePlan, reconcileCapturePlan } = require('../src/tasks/executor');
+      const definition = plan(); definition.modelRevision = null; definition.scenario = { id: 'default' };
+      const options = { baseUrl: 'http://example.test', stateDir: path.join(root, '.manual'), projectRoot: root, annotatedDir: 'docs/manual/images/annotated', theme: require('../src/config/annotation').DEFAULT_THEME, persistRaw: false };
+      const provider = new FakeProvider();
+      const originalShot = provider.screenshot.bind(provider);
+      provider.screenshot = async (args) => { const shot = await originalShot(args); shot.meta.url = 'http://example.test/user-center'; return shot; };
+      const first = await executeCapturePlan(definition, provider, options);
+      const prior = first.steps[0].screenshots[0];
+      assert.strictEqual(prior.raw, null);
+      const last = definition.steps[1]; last.capture = { timing: 'after' }; last.expectedState = { id: 'saved', assertions: [{ type: 'visible', target: { text: '已保存' } }] };
+      const checker = new FakeProvider();
+      checker.currentObservation = async () => ({ url: 'http://example.test/user-center?session=1', bodyTextLength: 300, elementCount: 100 });
+      const result = await reconcileCapturePlan(definition, checker, { ...options, sessionUrl: 'http://example.test/user-center?session=1', priorCaptureIds: [prior.captureId] });
+      assert.strictEqual(result.steps[0].screenshots[0].raw, null);
+      assert.strictEqual(result.steps[0].screenshots[0].captureId, prior.captureId);
+      assert.ok(!checker.calls.some((call) => call[0] === 'action' && call[1] !== 'inspect'), '允许只读标注定位，不重放业务动作或写步骤');
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 

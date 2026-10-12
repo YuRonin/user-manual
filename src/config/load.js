@@ -128,7 +128,15 @@ function loadConfig(projectRoot) {
   };
 
   const defaults = runtimeDefaults();
-  config.runtime = { ...(raw.runtime || {}), budget: { ...defaults.budget, ...(raw.runtime?.budget || {}) } };
+  if (raw.capture.safety !== undefined && (!raw.capture.safety || typeof raw.capture.safety !== 'object' || Array.isArray(raw.capture.safety))) {
+    return { ok: false, errors: ['capture.safety 需要是对象。'] };
+  }
+  config.capture = { ...config.capture, safety: { persistRaw: true, ...(raw.capture.safety || {}) } };
+  if (typeof config.capture.safety.persistRaw !== 'boolean') return { ok: false, errors: ['capture.safety.persistRaw 需要是布尔值。'] };
+  config.runtime = { repairAttempts: 2, ...(raw.runtime || {}), budget: { ...defaults.budget, ...(raw.runtime?.budget || {}) } };
+  if (!Number.isInteger(config.runtime.repairAttempts) || config.runtime.repairAttempts < 0 || config.runtime.repairAttempts > 5) {
+    return { ok: false, errors: ['runtime.repairAttempts 需要是 0–5 的整数（0 禁用自动定向修复）。'] };
+  }
   config.cache = { ...defaults.cache, ...(raw.cache || {}) };
   for (const [field, value] of [...Object.entries(config.runtime.budget).map(([k, v]) => [`runtime.budget.${k}`, v]), ...Object.entries(config.cache).map(([k, v]) => [`cache.${k}`, v])]) {
     if (!Number.isInteger(value) || value <= 0) return { ok: false, errors: [`${field} 需要是正整数，收到: ${value}`] };

@@ -225,6 +225,8 @@ function setup(root, { now = () => T0 } = {}) {
     assert.strictEqual(init.status, 0, init.stderr + init.stdout);
     let loaded = loadConfig(root);
     assert.strictEqual(loaded.config.runtime.budget.maxActions, 200);
+    assert.strictEqual(loaded.config.runtime.repairAttempts, 2);
+    assert.strictEqual(loaded.config.capture.safety.persistRaw, true);
     assert.strictEqual(loaded.config.cache.captureTtlMs, 15 * MIN);
     const configFile = path.join(root, '.manual/config.yaml');
     const original = fs.readFileSync(configFile, 'utf8');

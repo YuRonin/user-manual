@@ -93,6 +93,18 @@ test('任务 YAML 稳定序列化并可读回', (root) => {
   assert.deepStrictEqual(store.readTasks(stateDir).tasks.map((item) => item.id), ['edit-profile']);
 });
 
+test('R5 显式 capturePlan 警告进入模型读取；自动写出的 null 不警告', (root) => {
+  const store = require('../src/tasks/store');
+  const stateDir = path.join(root, '.manual');
+  store.writeTask(stateDir, task());
+  assert.deepStrictEqual(store.readTasks(stateDir).warnings, []);
+  store.writeTask(stateDir, { ...task(), capturePlan: { legacy: true } });
+  const result = store.readTasks(stateDir);
+  assert.strictEqual(result.tasks.length, 1);
+  assert.match(result.warnings.join('\n'), /field-deprecated.*capturePlan/);
+  assert.deepStrictEqual(require('../src/store/project').readWorkingCopy(stateDir).warnings, result.warnings);
+});
+
 test('读取损坏任务时报告错误而不是静默忽略', (root) => {
   const store = require('../src/tasks/store');
   const dir = store.tasksDirFor(path.join(root, '.manual'));

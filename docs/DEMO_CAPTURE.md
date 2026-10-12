@@ -42,6 +42,18 @@
 
 门禁失败时没有 Capture 记录，原因码单独记在 `.manual/evidence/demo-gate/<主体>.json`（只有原因码与时间，没有页面内容），同一主体之后采集成功即删除。`generate` 据此提示 `demo-recapture-blocked`：最近一次重新采集被阻断，手册仍在使用旧截图。
 
+## 原图保留策略
+
+```yaml
+capture:
+  safety:
+    persistRaw: false
+```
+
+默认 `true` 兼容旧项目。`false` 时稳定截图仍临时写入本次 staging 供安全派生，成功提交或失败中止后清理；新 Capture 标记 `rawRetained: false`，只保留安全图及验证 / 冻结标注信息，不保存 raw 产物，也不保存任务失败诊断原图。进程被强制终止的 staging 按现有恢复 / GC 机制清理；此配置不删除历史原图。
+
+无原图的 Capture 可生成、发布、完整性校验与缓存复用；原图路径投影为 null。`capture --out` 只导出安全发布图（无发布图时须通过隐私检查的 sanitized），没有安全图则拒绝导出，不导出 staging 原图。主题或隐私规则变化后 `rederive-unavailable` 转安全重采；含写步骤的任务不能自动重放，需核对业务状态再显式 `--refresh`。在线视觉比较仍用安全图和冻结计划，不需要历史 raw。
+
 ## 配置演示值
 
 在 `.manual/config.yaml` 中配置：

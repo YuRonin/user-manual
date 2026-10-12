@@ -279,6 +279,34 @@ async function pixels(file) {
       assert.ok(!r.stdout.includes('WX20240501883921'));
     });
 
+    await test('R6 persistRaw false：页面无原图、可生成发布、--out 只导出安全图；禁止重新派生', async () => {
+      const root = await project({});
+      const file = path.join(root, '.manual/config.yaml');
+      const config = yaml.load(fs.readFileSync(file, 'utf8'));
+      config.capture.safety = { persistRaw: false };
+      fs.writeFileSync(file, yaml.dump(config));
+      const exported = path.join(root, '.manual/exported.png');
+      const r = await runCli(['capture', 'chat', '--project-root', root, '--out', exported, '--json']);
+      assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+      assert.strictEqual(r.json.screenshot, null);
+      assert.strictEqual(r.json.screenshotAbsolute, null);
+      const record = recordOf(root, r);
+      assert.strictEqual(record.rawRetained, false);
+      assert.ok(!record.artifacts.some((a) => a.kind === 'raw'));
+      assert.ok(!fs.existsSync(path.join(root, '.manual/artifacts/raw')));
+      assert.deepStrictEqual(fs.readFileSync(exported), fs.readFileSync(path.join(root, record.artifacts.find((a) => a.kind === 'published').path)));
+      const description = path.join(root, '.manual/description.json');
+      fs.writeFileSync(description, JSON.stringify({ pages: [{ id: 'chat', title: '工作台', purpose: '发送消息。' }] }));
+      assert.strictEqual((await runCli(['describe', '--project-root', root, '--input', description])).status, 0);
+      const generated = await runCli(['generate', 'page:chat', '--project-root', root, '--copy-default', '--json']);
+      assert.strictEqual(generated.status, 0, generated.stdout + generated.stderr);
+      const verified = await runCli(['verify', 'page:chat', '--project-root', root, '--json']);
+      assert.strictEqual(verified.status, 0, verified.stdout + verified.stderr);
+      await assert.rejects(require('../src/evidence/rederive').rederiveCaptures({ projectRoot: root, config: require('../src/config/load').loadConfig(root).config, captureIds: [record.id] }), (e) => e.code === 'rederive-unavailable');
+      config.capture.safety.persistRaw = 'false'; fs.writeFileSync(file, yaml.dump(config));
+      assert.strictEqual(require('../src/config/load').loadConfig(root).ok, false);
+    });
+
     // ------------------------------------------------------------ 任务：动作触发的写请求
     const taskOptions = (root, extra = {}) => ({
       baseUrl: server.baseUrl, stateDir: path.join(root, '.manual'), projectRoot: root, annotatedDir: 'docs/manual/images/annotated',
@@ -322,6 +350,23 @@ async function pixels(file) {
         const diagnostics = pngFiles(root).filter((f) => /failure\.png$/.test(f));
         assert.strictEqual(diagnostics.length, saved ? 1 : 0, JSON.stringify(diagnostics));
       }
+    });
+
+    await test('R6 任务不保留原图：安全发布与记录读取不崩溃，失败不保存诊断原图', async () => {
+      const root = fx.makeTempDir('manual-no-raw-task-'); projects.push(root);
+      const routes = [{ path: '/api/demo/conversations/1', matcher: /^\/api\/demo\/conversations\/1$/, method: 'DELETE', query: null, status: 200, contentType: 'application/json', body: '{"ok":true}' }];
+      const p = provider();
+      const result = await executeCapturePlan(deletePlan(), p, taskOptions(root, { routes, persistRaw: false, provenanceMode: 'simulated' }));
+      const shot = result.steps[0].screenshots[0];
+      assert.strictEqual(shot.raw, null); assert.ok(shot.annotated);
+      const store = require('../src/evidence/store').createCaptureStore({ projectRoot: root, stateDirAbs: path.join(root, '.manual') });
+      const record = store.read(shot.captureId);
+      assert.strictEqual(record.rawRetained, false);
+      assert.ok(!record.artifacts.some((a) => a.kind === 'raw'));
+      const q = provider();
+      const badPlan = deletePlan(); badPlan.steps[0].expectedState.assertions = [{ type: 'visible', target: { text: '不会出现' } }];
+      await assert.rejects(executeCapturePlan(badPlan, q, taskOptions(root, { routes, persistRaw: false, assertionTimeoutMs: 100 })));
+      assert.ok(!fs.existsSync(path.join(root, '.manual/artifacts/diagnostics')));
     });
 
     await test('完整模拟（任务）：Fixture 拦截删除请求，步骤完成、截图通过门禁，服务端 0 次写', async () => {

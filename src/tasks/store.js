@@ -74,7 +74,8 @@ function readTasks(stateDirAbs) {
   const dir = tasksDirFor(stateDirAbs);
   const tasks = [];
   const errors = [];
-  if (!fs.existsSync(dir)) return { tasks, errors };
+  const warnings = [];
+  if (!fs.existsSync(dir)) return { tasks, errors, warnings };
 
   for (const name of fs.readdirSync(dir).sort()) {
     if (!/\.ya?ml$/i.test(name)) continue;
@@ -82,12 +83,15 @@ function readTasks(stateDirAbs) {
       const parsed = yaml.load(fs.readFileSync(path.join(dir, name), 'utf8'));
       const result = validateTask(parsed);
       if (!result.ok) errors.push(`${name}: ${result.errors.join('；')}`);
-      else tasks.push(result.task);
+      else {
+        tasks.push(result.task);
+        if (parsed.capturePlan != null) warnings.push(`field-deprecated: 任务 ${parsed.id} capturePlan 仅作兼容存档，不控制执行；使用步骤 capture 定义。`);
+      }
     } catch (error) {
       errors.push(`${name}: ${error.message}`);
     }
   }
-  return { tasks, errors };
+  return { tasks, errors, warnings };
 }
 
 function removeTask(stateDirAbs, id) {

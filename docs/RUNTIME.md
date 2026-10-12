@@ -194,9 +194,13 @@ checkpoints:
 | 清单 / 计划 / 说明缺失 | `annotation-review-required`：先用 `describe` 补齐功能与目标 |
 | 定位 / 可见性失败 | 重新采集（`→relocate`）；定位有两次短等待，备选定位命中会记录 |
 | 状态丢失 | 重新回放 Scenario（`→replay`） |
-| 已连续修复 2 次仍失败，或任务含写步骤 | `annotation-unrepairable`：停止并给出建议，不自动重放写操作 |
+| 已用完定向修复预算，或任务含写步骤 | `annotation-unrepairable`：停止并给出建议，不自动重放写操作 |
 
 覆盖失败的每一项带 `category`（locate / visibility / state / plan / inventory / draw / description / privacy）。定位失败区分 `target-not-found`（页面上没有）与 `target-not-visible`（存在但不可见）。
+
+`runtime.repairAttempts` 为 0–5 的整数，默认 2，0 禁用自动定向修复；与通用重试独立，写步骤安全限制不变。预算冻结在 Run 计划中，修改配置需重新规划。显式 Scenario 的 `entry.routeBindingId` / checkpoint `state` 与任务非空 `capturePlan` 会给 `field-deprecated` 提示，不执行这些字段；派生默认值不提示。`data.revision` 仍用于 live 缓存隔离，不弃用。
+
+`capture.safety.persistRaw: false` 停止保存新原图，Capture 标记 `rawRetained: false`；默认 true 兼容历史。安全图仍能发布、验证与复用，原图路径为 null。缺原图的证据需要重新派生时给 `rederive-unavailable` 并规划重采；含写步骤的任务要求确认状态后显式 `--refresh`，不自动重放。历史原图不删除，临时 staging 按提交 / 中止 / 恢复规则清理。细节见 [Demo Capture](DEMO_CAPTURE.md)。
 
 ## 8. 保留与回收
 

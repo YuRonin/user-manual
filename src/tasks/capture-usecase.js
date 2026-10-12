@@ -113,6 +113,7 @@ async function captureTask({ projectRoot, config, taskId, session = null, runId 
     theme: config.annotation.themes[config.annotation.activeTheme],
     redactionRules: config.privacy || {},
     waits: resolveWaits(config),
+    persistRaw: config.capture.safety?.persistRaw !== false,
     // BrowserSession 负责写回认证（成功总是写，失败只在凭据变化时写）并关闭 Context
     authRuntime: authRuntimeFor(auth, { refresh: ownsProvider }),
     ownsProvider,
@@ -121,7 +122,7 @@ async function captureTask({ projectRoot, config, taskId, session = null, runId 
     ...(continueUrl ? { sessionUrl: continueUrl, priorEvidence, priorCaptureIds: task.lastCapture.captureIds, allowRefresh } : {}),
   });
   let evidence;
-  const warnings = [];
+  const warnings = [...(base.warnings || []), ...(scenario.warnings || [])];
   if (session) {
     const result = await session.withScenario({ id: providerId, providerConfig, profile, auth }, (provider) => execute(provider, false));
     evidence = result.value;
