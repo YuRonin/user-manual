@@ -22,7 +22,7 @@ const { readFixture, fixtureRevision, dataRevisionFor } = require('../scenarios/
 const { checkFixtureAllowed } = require('../scenarios/policy');
 const { buildCapturePlan } = require('../tasks/capture-plan');
 const { isActivePage, ANALYSIS } = require('../inspect/model');
-const { authDisabled, identityRevision } = require('../auth/identity');
+const { authDisabled, identityRevision, identityAssertionsFor } = require('../auth/identity');
 const { policyRevision } = require('../publication/validate');
 const { RENDERER_VERSION } = require('../evidence/image-pipeline');
 const { repairDecision } = require('./repair');
@@ -212,6 +212,18 @@ function collectPlanningInputs({ projectRoot, config, base, targets, mode, cache
     if (!result.ok) throw new RuntimeError(result.code, result.message, { candidates: result.candidates || null });
     resolved.push(result.target);
   }
+  const requested = resolved.splice(0);
+  for (const target of requested) {
+    if (target.type === 'page' && !target.scenarioId) {
+      const page = model.pages.find((p) => p.id === target.id);
+      for (const variant of page?.variants || []) {
+        const entry = scenarios.find((s) => s.id === variant.scenarioId && s.variant && s.subject.type === 'page' && s.subject.id === page.id);
+        if (!entry) throw new RuntimeError('invalid-scenario', `页面 ${page.id} 的变体 ${variant.scenarioId} 不存在或不属于该页面。`);
+        resolved.push({ type: 'page', id: page.id, scenarioId: variant.scenarioId, ref: `scenario:${variant.scenarioId}`, dependencyFor: subjectKey(target) });
+      }
+    }
+    resolved.push(target);
+  }
   const browser = browserVersion();
   const provider = config.browser.providers[config.browser.activeProvider];
   const subjects = {};
@@ -271,9 +283,10 @@ function collectPlanningInputs({ projectRoot, config, base, targets, mode, cache
     imageInputs: imageInputsOf(config),
     capabilities: capabilitiesFor(provider, config.browser.activeProvider),
     auth: { enabled: config.auth?.enabled !== false, verifyPath: config.auth?.verifyPath || null,
-      hasAssertions: !!config.auth?.identityAssertions?.length },
+      hasAssertions: !!config.auth?.identityAssertions?.length,
+      profileAssertions: Object.fromEntries(Object.values(subjects).map((s) => [s.scenario.authProfile, !!identityAssertionsFor(config, s.scenario.authProfile).length])) },
     mode: { name: mode.name, browserAllowed: mode.browserAllowed },
-    targets: resolved.map((target) => ({ type: target.type, id: target.id, ref: target.ref, key: subjectKey(target.variantScenarioId ? { ...target, scenarioId: target.variantScenarioId } : target), ...(target.scenarioId ? { scenarioId: target.scenarioId } : {}), ...(target.manualId ? { manualId: target.manualId } : {}) })),
+    targets: resolved.map((target) => ({ type: target.type, id: target.id, ref: target.ref, key: subjectKey(target.variantScenarioId ? { ...target, scenarioId: target.variantScenarioId } : target), ...(target.scenarioId ? { scenarioId: target.scenarioId } : {}), ...(target.dependencyFor ? { dependencyFor: target.dependencyFor } : {}), ...(target.manualId ? { manualId: target.manualId } : {}) })),
     subjects,
   };
 }
@@ -297,6 +310,7 @@ function plan(snapshot, policy) {
   const summary = { actions: [], browserScenarios: 0, riskBoundaries: [], cache: [], waitingFor: [], warnings: [] };
   for (const item of snapshot.invalidScenarios || []) summary.warnings.push(`scenario-invalid: .manual/scenarios/${item.id}.yaml 未参与规划（${item.reason}）`);
   const captureByKey = new Map();
+  const variantDependencies = new Map();
   const multi = snapshot.targets.length > 1;
   const idOf = (kind, index) => (multi ? `${kind}-t${index + 1}` : kind);
   const add = (node) => { nodes.push({ retry: { maxAttempts: 3, replay: 'safe' }, reuse: null, ...node }); return node.id; };
@@ -304,7 +318,7 @@ function plan(snapshot, policy) {
   snapshot.targets.forEach((target, index) => {
     const s = snapshot.subjects[target.key || subjectKey(target)];
     const subject = s.subject;
-    if (command !== 'capture' && target.scenarioId) errors.push(`scenario 目标只用于 capture：${target.ref}`);
+    if (command !== 'capture' && target.scenarioId && !target.dependencyFor) errors.push(`scenario 目标只用于 capture：${target.ref}`);
     errors.push(...s.planErrors);
     for (const warning of s.qualityWarnings || []) summary.warnings.push(`${subjectKey(subject)}：${warning}`);
     const needed = subject.type === 'task' ? TASK_CAPABILITIES : CAPTURE_CAPABILITIES;
@@ -330,7 +344,7 @@ function plan(snapshot, policy) {
     // 节点始终存在，避免缓存状态变化导致 resume 的 DAG 输入漂移。
     let authId = null;
     const authProfile = s.scenario.authProfile;
-    if (snapshot.auth?.enabled && authProfile !== 'anonymous' && snapshot.auth.verifyPath && snapshot.auth.hasAssertions) {
+    if (snapshot.auth?.enabled && authProfile !== 'anonymous' && snapshot.auth.verifyPath && (snapshot.auth.profileAssertions?.[authProfile] ?? snapshot.auth.hasAssertions)) {
       authId = add({
         id: idOf('auth-check', index), kind: 'auth-check', dependsOn: gateDeps.slice(),
         inputHash: revisionOf({ subject, captureKey: s.captureKey, authProfile, verifyPath: snapshot.auth.verifyPath }),
@@ -415,11 +429,16 @@ function plan(snapshot, policy) {
         summary.actions.push(`清理测试数据 ${s.fixture.id}`);
       }
     }
+    if (target.dependencyFor) {
+      if (!variantDependencies.has(target.dependencyFor)) variantDependencies.set(target.dependencyFor, []);
+      variantDependencies.get(target.dependencyFor).push(derived || captureId);
+      return;
+    }
     if (command === 'capture') return;
 
     // ---- 文档：(analyze) → draft → (rewrite) → validate → publish
     // 源码语义分析（标题、用途）只影响文档，不阻塞采集。
-    const draftDeps = [derived || captureId];
+    const draftDeps = [derived || captureId, ...(variantDependencies.get(target.key || subjectKey(target)) || [])];
     if (subject.type === 'page' && s.analysis !== ANALYSIS.COMPLETED && copy.mode === 'default') {
       // 无人值守（--copy-default）只免去文案改写，页面标题与用途仍要分析：规划时就说清楚，Run 会停在 waiting_input（B6-07）
       summary.warnings.push(`analysis-required: 页面 ${subject.id} 还没有标题与用途；--copy-default 不会补写它们，Run 将停在 analyze 等待输入。无人值守前先运行 manual describe --input <文件>。`);

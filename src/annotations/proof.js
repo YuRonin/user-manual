@@ -59,11 +59,17 @@ function coverageFromProof(proof) {
  * 按当前模型重算这条 Capture 作用域内的清单（用于判断证据是否过期）。
  * @returns {{ inventory, page } | { missing: string }}
  */
-function currentScope(model, record) {
+function currentScope(model, record, { stateDirAbs = null } = {}) {
   if (record.kind === 'page') {
     const page = model.pages.find((item) => item.id === record.subject?.pageId);
     if (!page) return { missing: `页面 ${record.subject?.pageId} 已不存在` };
-    return { page, inventory: pageInventory({ page, scenarioId: record.scenarioId }) };
+    let checkpoint = null;
+    if (stateDirAbs && record.scenarioId && record.scenarioId !== `page-${page.id}`) {
+      const resolved = require('../scenarios/store').readScenario(stateDirAbs, record.scenarioId, { stepIds: [] });
+      if (!resolved.ok || !resolved.scenario) return { missing: `Scenario ${record.scenarioId} 已不存在或损坏` };
+      checkpoint = resolved.scenario.checkpoints?.find((c) => c.id === record.checkpointId) || null;
+    }
+    return { page, inventory: pageInventory({ page, scenarioId: record.scenarioId, checkpoint }) };
   }
   if (record.kind === 'task-step') {
     const task = model.tasks.find((item) => item.id === record.subject?.taskId);

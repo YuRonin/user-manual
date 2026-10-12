@@ -140,6 +140,8 @@ capture:
 
 ## verify 中的 Demo 结果
 
+页面声明进入手册的 Scenario 变体与默认截图使用同一组发布门禁；变体缺图、隐私 / Demo 未通过、覆盖失败或完整性异常均阻断该页面发布。正文的每个变体章节引用冻结的 Capture，不使用私有原图。
+
 `manual verify`（离线产物验证）在输出与报告中给出独立于标注覆盖率的 `demo` 字段：
 
 - `demo_privacy`：手册引用的截图有多少通过了 Demo 门禁（`passed`）；采集于 Demo 模式之前的旧证据记为 `legacy`（沿用旧遮罩规则，只提示、不判失败）；并汇总数据来源（`api_mock` / `dom_replace`）与无法审计区域数量。

@@ -351,6 +351,7 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
         subject: { pageId },
         runId,
         scenarioId: scenario.id,
+        scenarioRevision: scenario.revision,
         checkpointId: 'default',
         inputHash: revisionOf({ pageId, modelRevision, scenarioRevision: scenario.revision, url: sanitizeUrl(url), spec }),
         modelRevision,

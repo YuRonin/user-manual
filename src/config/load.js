@@ -210,6 +210,16 @@ function loadConfig(projectRoot) {
     return { ok: false, errors: ['privacy.rules.redact/preserve 需要是数组。'] };
   }
   const safeName = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+  if (config.auth.profiles !== undefined) {
+    if (!config.auth.profiles || typeof config.auth.profiles !== 'object' || Array.isArray(config.auth.profiles)) return { ok: false, errors: ['auth.profiles 需要是档案对象。'] };
+    for (const [id, value] of Object.entries(config.auth.profiles)) {
+      if (!safeName.test(id) || !value || typeof value !== 'object' || Array.isArray(value)) return { ok: false, errors: [`auth.profiles.${id} 需要安全名称与对象。`] };
+      if (value.identityAssertions !== undefined) {
+        const checked = require('../model/schema').validatePage({ id: 'auth-profile', route: '/', identityAssertions: value.identityAssertions });
+        if (!checked.ok) return { ok: false, errors: checked.errors.map((e) => `auth.profiles.${id}.${e.path}: ${e.message}`) };
+      }
+    }
+  }
   const ephemeral = config.auth.ephemeralStorageKeys;
   if (ephemeral !== undefined && (!Array.isArray(ephemeral) || ephemeral.some((key) => typeof key !== 'string' || !key.trim() || key === '*'))) {
     return { ok: false, errors: ['auth.ephemeralStorageKeys 需要是 localStorage 键名数组（可用 `前缀*`，不能只写 `*`）。'] };

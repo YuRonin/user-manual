@@ -111,7 +111,7 @@ manual verify --all --live                 # 全部已发布手册，复用一�
 
 `--live` 的报告（`.manual/verifications/<id>.json`，不可变，本机产物不入库，按 `runLogDays` 回收）：逐条检查（`scope` / `outcome` / `category`）、完成声明（发布时状态、本次状态）、章节结果、覆盖（已执行步骤、停止边界）、漂移（页面手册）。
 结果与退出码：`passed` 0；`failed` / `drift` 4；需要登录 3；`inconclusive`（网络 / 超时）1。视觉差异只报告，不否定已验证行为；基线不会被自动接受。
-动态区域在 `config.yaml` 的 `verify.visual.dynamicRegions: [{ id, selector }]` 声明，只用于比较，与断言目标重叠的区域不能被忽略。
+动态区域在 `config.yaml` 的 `verify.visual.dynamicRegions: [{ id, selector }]` 声明，只用于比较，与断言目标重叠的区域不能被忽略。任务截图也按发布时的 Capture、步骤与 before / after 时机比较；`drift.steps` 逐张记录比较结果。旧任务 Capture 缺环境指纹时返回 `environment-incompatible`，需重新采集后才能进行像素比较。
 `manual verify scenario:<id> --live` 在线验证页面的 Scenario 变体：按声明打开、执行 setup、确认检查点断言（不做像素漂移比较，基线是默认截图）。声明的合法跳转同样生效。
 
 ## 7. Scenario 变体与 Fixture
@@ -140,6 +140,10 @@ fixtures:
 
 Fixture 定义在 `.manual/fixtures/<id>.yaml`（格式见 `src/scenarios/fixtures.js` 头注释）。`manual capture scenario:<id>` 采集变体；
 mock 结果标 `simulated`，hook 的 setup / cleanup 是独立任务（采集失败也清理）；生产与未登记环境在规划时拒绝；secret 只写 `env:NAME` 引用。
+
+**把页面变体放进手册**：通过 `describe --input` 在页面声明 `variants: [{ scenarioId: dashboard-empty, title: 空数据状态 }]`。`generate page:<id>` 会先规划这些变体的采集 / 派生依赖，再生成独立章节；所有分图复用隐私、Demo、覆盖与完整性门禁。章节冻结 `captureRefs` / `scenarioRefs`，`verify page:<id> --live` 会回放已发布的变体；update 跟踪变体定义和最新截图。缺图、错主体或过期定义会阻断，不会静默省略。旧变体 Capture 没有 Scenario 修订号时需 `generate --refresh` 重采；未声明 variants 的页面保持原行为。
+
+**逐身份断言**：`auth.profiles.<id>.identityAssertions` 覆盖该档案的全局默认 `auth.identityAssertions`；未声明的档案沿用全局值。登录与认证预检均使用有效断言，档案断言失败报 `auth-identity-mismatch`，不会换用其他身份；断言变更会更新身份修订号与采集缓存键。
 
 **打开具体内容**：有些页面的路由是静态的，数据却从路径后缀（`/s/<shareId>`，由 rewrite 落到 `/s`）或查询参数（`/activities/detail?id=`）读取，
 只靠路由打不开有效内容。在页面的 `page-<id>.yaml` 里用 `entry.path` / `entry.query` 指定一条测试数据：

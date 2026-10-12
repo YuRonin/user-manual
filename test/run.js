@@ -107,11 +107,13 @@ const FILES = [
   'annotation-layout.test.js',
   'annotation-golden.test.js',
   'scenario-states.test.js',
+  'variant-manual.test.js',
   'gate3.test.js',
 ];
 
 // 启动真实 Chromium 或测试服务器的文件；其余为 unit。新增浏览器测试时加到这里（test-groups.test 会核对）。
 const BROWSER = new Set([
+  'variant-manual.test.js',
   'auth-identity.test.js', 'browser-session.test.js', 'cache-policy.test.js', 'capture.test.js', 'drift-report.test.js',
   'gate0.test.js', 'gate1.test.js', 'gate2.test.js', 'gate3.test.js', 'generate.test.js', 'image-pipeline.test.js',
   'incremental-update.test.js', 'install-smoke.test.js', 'live-verify.test.js', 'model-handoff.test.js', 'page-validation.test.js',

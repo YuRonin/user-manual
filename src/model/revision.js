@@ -14,7 +14,7 @@ const { revisionOf } = require('../util/hash');
 const DEFINITION_FIELDS = {
   page: [
     'id', 'lifecycle', 'title', 'purpose', 'route', 'dynamic', 'params', 'routeBindings',
-    'entry', 'source', 'includeInManual', 'detectedActions', 'features', 'guide', 'states', 'identityAssertions',
+    'entry', 'source', 'includeInManual', 'detectedActions', 'features', 'guide', 'states', 'identityAssertions', 'variants',
   ],
   userTask: [
     'id', 'title', 'goal', 'entryPage', 'priority', 'preconditions', 'readerPreconditions', 'risk', 'environment',

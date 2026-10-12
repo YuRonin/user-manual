@@ -121,6 +121,23 @@ async function prepare(root, server, env) {
       const saved = JSON.parse(fs.readFileSync(path.join(state, 'verifications', `${report.verificationId}.json`), 'utf8'));
       assert.strictEqual(saved.onlineChecked, true);
       assert.ok(saved.inputRevisions.scenarioRevision && saved.releaseId && saved.environment.origin);
+      assert.strictEqual(report.drift.steps.length, 1, 'R2 只比较发布记录引用的已执行步骤截图');
+      assert.strictEqual(report.drift.steps[0].stepId, 'open-editor');
+      assert.strictEqual(report.drift.steps[0].visual.status, 'same');
+    });
+
+    await step('R2 任务步骤布局变化：同层视觉比较报告漂移，基线与 Capture 保持不变', async () => {
+      const before = captures();
+      server.set({ editorShift: 90 });
+      try {
+        const out = await expectExit(root, ['verify', 'task:edit-profile', '--live'], 0, env);
+        const report = out.reports[0];
+        assert.strictEqual(report.drift.classification, 'visual-only');
+        assert.strictEqual(report.drift.steps[0].visual.status, 'changed');
+        assert.ok(['sanitized', 'annotated'].includes(report.drift.steps[0].visual.layer));
+        assert.strictEqual(report.drift.baselineAccepted, false);
+        assert.strictEqual(captures(), before);
+      } finally { server.reset(); }
     });
 
     await step('重复 live：每次真实导航、生成新报告，旧报告不变', async () => {

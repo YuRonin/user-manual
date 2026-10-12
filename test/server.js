@@ -58,7 +58,7 @@ ${state.draftPending ? '<p id="pending">待补充：七年级期中分析</p>' :
 <h1>个人中心</h1>
 ${state.canEdit ? `<button aria-label="${state.editLabel}" onclick="document.getElementById('editor').hidden=false">${state.editLabel}</button>` : ''}
 <button aria-label="学校权益" onclick="document.getElementById('benefits').hidden=false">学校权益</button>
-<section id="editor" role="dialog" aria-label="编辑资料" hidden>
+<section id="editor" role="dialog" aria-label="编辑资料" style="margin-top:${Number(state.editorShift) || 0}px" hidden>
   <label for="nickname">昵称</label><input id="nickname" value="星河老师">
   <label for="phone">手机号</label><input id="phone" value="13812345678">
   <label for="profile-school">学校</label><input id="profile-school" value="星海中学">

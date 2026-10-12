@@ -115,6 +115,44 @@ function runCli(args, env) {
     assert.strictEqual(result.validationStatus, 'validated');
   });
 
+  await test('R3 profile 身份断言独立于全局与其他档案；修订号跟随有效断言', async () => {
+    const assertions = [{ type: 'visible', target: { role: 'link', name: '管理员入口' } }];
+    const c = config({ identityAssertions: [{ type: 'visible', target: { text: '会员' } }], profiles: { admin: { identityAssertions: assertions } } });
+    const seen = [];
+    const provider = { async assertCondition(a) { seen.push(a); return { ok: true }; } };
+    const result = await verifyIdentity(provider, { config: c, profile: 'admin' });
+    assert.deepStrictEqual(seen, assertions);
+    assert.strictEqual(result.validationStatus, 'validated');
+    assert.notStrictEqual(identityRevision(c, 'admin'), identityRevision(c, 'member'));
+    const changed = config({ ...c.auth, profiles: { admin: { identityAssertions: [{ type: 'visible', target: { text: '新入口' } }] } } });
+    assert.notStrictEqual(identityRevision(c, 'admin'), identityRevision(changed, 'admin'));
+    assert.strictEqual(identityRevision(c, 'member'), identityRevision(changed, 'member'));
+  });
+
+  await test('R3 profile 身份不符报 auth-identity-mismatch，不回退到全局身份', async () => {
+    const c = config({ profiles: { admin: { identityAssertions: [{ type: 'visible', target: { text: '管理员' } }] } } });
+    let calls = 0;
+    await assert.rejects(verifyIdentity({ async assertCondition() { calls++; throw new Error('身份不符'); } }, { config: c, profile: 'admin', timeoutMs: 1 }), (e) => e.code === 'auth-identity-mismatch');
+    assert.ok(calls > 0);
+  });
+
+  await test('R3 配置校验接受合法档案断言，拒绝非法断言与档案名称', async (root) => {
+    const init = await runCli(['init', '--base-url', 'http://app.test', '--project-root', root, '--json']);
+    assert.strictEqual(init.status, 0, init.stderr);
+    const file = path.join(root, '.manual/config.yaml');
+    const raw = yaml.load(fs.readFileSync(file, 'utf8'));
+    const load = require('../src/config/load').loadConfig;
+    for (const [profiles, expected] of [
+      [{ admin: { identityAssertions: [{ type: 'visible', target: { role: 'link', name: '管理' } }] } }, true],
+      [{ admin: { identityAssertions: [{ type: 'unknown' }] } }, false],
+      [{ '../admin': { identityAssertions: [] } }, false],
+    ]) {
+      raw.auth.profiles = profiles;
+      fs.writeFileSync(file, yaml.dump(raw));
+      assert.strictEqual(load(root).ok, expected);
+    }
+  });
+
   await test('刷新 CAS：旧 Context 的快照不能覆盖其他进程写入的新快照', async (root) => {
     const ref = { root, cacheKey: 'app', profile: 'member' };
     cache.writeState(ref, { origin: 'http://app.test', storageState: STORAGE('v1') });

@@ -75,9 +75,9 @@ async function frozenTargets(provider, plan, fullPage) {
  * 页面手册的语义 / 视觉漂移：与发布时的 Capture 比较（基线只来自已发布的已验证采集，不自动接受新图）。
  * 当前图走与发布相同的派生管线（同隐私策略 / 渲染器）生成到临时目录，比较后删除原图与中间产物。
  */
-async function pageDrift({ provider, projectRoot, config, stateDirAbs, release, identityAssertions, reportId }) {
+async function pageDrift({ provider, projectRoot, config, stateDirAbs, release, identityAssertions, reportId, captureId: selectedCaptureId = null }) {
   const out = { semantic: { status: 'baseline-missing' }, visual: { status: 'not-compared', reasons: [] }, warnings: [] };
-  const captureId = (release.captureIds || [])[0];
+  const captureId = selectedCaptureId || (release.captureIds || [])[0];
   let baseline = null;
   try { baseline = captureId ? createCaptureStore({ projectRoot, stateDirAbs }).read(captureId) : null; } catch (_) { baseline = null; }
   const current = provider.semanticSnapshot ? await provider.semanticSnapshot() : null;
@@ -111,6 +111,7 @@ async function pageDrift({ provider, projectRoot, config, stateDirAbs, release, 
     const rawPath = path.join(work, `raw.${format}`);
     const plan = layer === 'annotated' ? (sidecar?.plan || []) : [];
     const captured = await captureStable(provider, { rawPath, fullPage: !!baseline.spec?.fullPage, format,
+      assertState: async () => { for (const assertion of identityAssertions.filter((a) => a.type !== 'url')) await assertWithin(provider, assertion, { timeoutMs: DEFAULT_ASSERTION_TIMEOUT_MS }); },
       resolveTargets: async () => frozenTargets(provider, plan, !!baseline.spec?.fullPage) });
     if (layer === 'annotated' && sidecar?.inventory) { captured.inventory = sidecar.inventory; captured.plan = plan; }
     const safe = await derivePublished({
@@ -258,6 +259,7 @@ async function verifyLive({ projectRoot, config, target, session, timeoutMs = DE
   const startedAt = new Date().toISOString();
   const reportId = newUuid();
   let drift = null;
+  const stepDrifts = [];
   const { stateDirAbs, model, manualId, release, entity } = loadSubject(projectRoot, config, target);
   const profileId = config.capture.activeProfile;
   const providerId = config.browser.activeProvider;
@@ -312,6 +314,21 @@ async function verifyLive({ projectRoot, config, target, session, timeoutMs = DE
   }
 
   const auth = prepareAuth(config, { profile: scenario.authProfile });
+  const compareStep = async (provider, step, timing) => {
+    if (!driftEnabled) return;
+    const store = createCaptureStore({ projectRoot, stateDirAbs });
+    const ids = (release.captureIds || []).filter((id) => {
+      try { const r = store.read(id); return r?.kind === 'task-step' && r.subject?.taskId === target.id && r.subject?.stepId === step.id && r.subject?.timing === timing; }
+      catch (_) { return false; }
+    });
+    for (const captureId of ids) {
+      let compared;
+      try { compared = await pageDrift({ provider, projectRoot, config, stateDirAbs, release, captureId,
+        identityAssertions: timing === 'after' ? (step.expectedState?.assertions || []) : [...(step.beforeState?.assertions || []), ...(step.requires || [])], reportId: `${reportId}-${step.id}-${timing}-${captureId}` }); }
+      catch (error) { compared = { semantic: { status: 'unavailable' }, visual: { status: 'not-compared', reasons: [codeOf(error)] }, warnings: [] }; }
+      stepDrifts.push({ stepId: step.id, timing, captureId, ...compared });
+    }
+  };
   const work = async (provider) => {
     // Demo 网络守卫：在线回放同样不允许写请求到达服务端（不装 Fixture 路由：这里验证的是线上真实行为）
     if (provider.installDemoGuard) await provider.installDemoGuard({ baseUrl: config.project.baseUrl, demo: mergeDemo(config.capture?.demo, null) });
@@ -354,6 +371,7 @@ async function verifyLive({ projectRoot, config, target, session, timeoutMs = DE
       const required = await collectAssertions(provider, step.requires || [], { scope: 'scenario-state', phase: 'before', stepId: step.id, idPrefix: `${step.id}:requires`, timeoutMs });
       checks.push(...required);
       if (required.some(c => c.outcome !== 'passed')) { record.status = 'failed'; stopped = 'precondition-failed'; continue; }
+      await compareStep(provider, step, 'before');
       try {
         const actionResult = await provider.performAction(step.action);
         if (actionResult?.resolution?.fallback) checks.push(check(`locator:${step.id}`, 'interaction', 'inconclusive', { stepId: step.id, reason: 'locator-fallback-used' }));
@@ -374,6 +392,7 @@ async function verifyLive({ projectRoot, config, target, session, timeoutMs = DE
       record.validations = after.map((c) => ({ assertionId: c.assertionId, phase: 'after', outcome: c.outcome === 'passed' ? 'passed' : 'failed', scope: c.scope, checkedAt: c.checkedAt }));
       record.status = after.some((c) => c.outcome !== 'passed') ? 'failed' : 'executed';
       if (record.status === 'failed') stopped = 'blocked-by-failure';
+      else await compareStep(provider, step, 'after');
     }
     return { stepRecords };
   };
@@ -386,6 +405,17 @@ async function verifyLive({ projectRoot, config, target, session, timeoutMs = DE
     value = { stepRecords: [] };
   }
   steps = value.stepRecords;
+  const variants = [];
+  if (target.type === 'page' && !target.scenarioId) {
+    const scenarioIds = [...new Set(sectionsOf(release).flatMap((s) => s.scenarioRefs || []))];
+    for (const scenarioId of scenarioIds) {
+      try {
+        const variant = await verifyLive({ projectRoot, config, target: { ...target, scenarioId }, session, timeoutMs, drift: driftEnabled });
+        variants.push(variant);
+        checks.push(...variant.checks.map((c) => ({ ...c, id: `${scenarioId}:${c.id}`, scenarioId })));
+      } catch (error) { checks.push(failedCheck(`variant:${scenarioId}`, 'scenario-state', error, { scenarioId })); }
+    }
+  }
 
   if (target.type === 'task') {
     const evidence = {
@@ -422,6 +452,11 @@ async function verifyLive({ projectRoot, config, target, session, timeoutMs = DE
   const sections = sectionResults(release, target, checks, steps, claims);
   let result = overall(checks, claims.filter((c) => c.outcome !== 'not_run'));
   const behaviorFailed = result === 'failed';
+  if (stepDrifts.length) {
+    const ranked = stepDrifts.map((d) => ({ value: d, classification: classifyDrift({ behaviorFailed: false, semantic: d.semantic, visual: d.visual }) }))
+      .sort((a, b) => DRIFT_ORDER.indexOf(a.classification) - DRIFT_ORDER.indexOf(b.classification));
+    drift = ranked[0].value;
+  }
   const driftReport = {
     classification: classifyDrift({ behaviorFailed, semantic: drift?.semantic || (target.type === 'task' ? { status: 'same' } : null), visual: drift?.visual || null }),
     semantic: drift?.semantic || null,
@@ -429,6 +464,7 @@ async function verifyLive({ projectRoot, config, target, session, timeoutMs = DE
     warnings: drift?.warnings || [],
     // 基线只来自已发布的采集；验证发现差异不会自动接受新图（需要重新 generate / update 并通过发布门槛）
     baselineAccepted: false,
+    ...(stepDrifts.length ? { steps: stepDrifts } : {}),
   };
   // 语义内容变化：行为断言仍通过也说明手册可能过期 → drift；视觉差异不能否定已验证行为，语义失败也不能被"图很像"覆盖
   if (result === 'passed' && driftReport.classification === 'content-changed') result = 'drift';
@@ -456,6 +492,7 @@ async function verifyLive({ projectRoot, config, target, session, timeoutMs = DE
       deployedBuild: config.runtime?.deployedBuild || 'unknown',
     },
     checks,
+    ...(variants.length ? { variants } : {}),
     steps: steps.map(({ id, status, reason }) => ({ id, status, ...(reason ? { reason } : {}) })),
     claims,
     sections,

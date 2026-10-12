@@ -34,7 +34,7 @@ const SHA256_RE = /^(sha256:)?[0-9a-f]{64}$/;
 const KNOWN_FIELDS = {
   page: ['schemaVersion', 'id', 'revision', 'lifecycle', 'title', 'purpose', 'route', 'dynamic', 'params', 'routeBindings',
     'entry', 'source', 'dependencies', 'includeInManual', 'detectedActions', 'features', 'guide', 'states', 'identityAssertions', 'confidence',
-    'browser', 'status', 'analysis', 'latestCaptureId'],
+    'browser', 'status', 'analysis', 'latestCaptureId', 'variants'],
   userTask: ['schemaVersion', 'id', 'revision', 'title', 'goal', 'entryPage', 'priority', 'preconditions', 'readerPreconditions', 'risk', 'status',
     'approval', 'environment', 'fixtures', 'writeAuthorization', 'steps', 'branches', 'relatedTasks', 'completion', 'evidence', 'evidenceManifest',
     'capturePlan', 'captureIds', 'lastCapture', 'stale', 'lastVerification', 'params', 'authProfile',
@@ -237,6 +237,18 @@ function validatePage(page) {
   const version = checkSchemaVersion('page', page);
   if (!version.ok) { c.error(version.path, version.code, version.message); return c.result(); }
   warnUnknown(c, 'page', page);
+  if (page.variants !== undefined) {
+    if (!Array.isArray(page.variants)) c.error('variants', 'invalid-variant', 'variants 需要是数组。');
+    else {
+      const ids = new Set();
+      page.variants.forEach((item, i) => {
+        const at = `variants[${i}]`;
+        if (!isObject(item) || !isSafeId(item.scenarioId) || ids.has(item.scenarioId) || !nonEmpty(item.title)) {
+          c.error(at, 'invalid-variant', '变体需要唯一安全 scenarioId 与非空 title。');
+        } else ids.add(item.scenarioId);
+      });
+    }
+  }
 
   if (!isSafeId(page.id)) c.error('id', 'invalid-id', `页面 id 只能使用小写字母、数字和连字符: ${page.id}`);
   if (!nonEmpty(page.route) || !page.route.startsWith('/')) c.error('route', 'invalid-route', 'route 需要以 / 开头。');

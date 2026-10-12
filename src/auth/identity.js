@@ -33,8 +33,12 @@ function resolveCapabilities(config) {
 
 /** 身份断言定义的稳定引用（不含任何账号明文），用于区分"以谁的身份"保存的快照。 */
 function identityRevision(config, profile) {
-  const assertions = config.auth?.identityAssertions || [];
+  const assertions = identityAssertionsFor(config, profile);
   return assertions.length ? revisionOf({ profile, assertions }) : null;
+}
+
+function identityAssertionsFor(config, profile) {
+  return config.auth?.profiles?.[profile]?.identityAssertions ?? config.auth?.identityAssertions ?? [];
 }
 
 /**
@@ -42,7 +46,7 @@ function identityRevision(config, profile) {
  * @returns {{ validationStatus: 'validated'|'unvalidated', validatedAt: string|null, identityRevision: string|null }}
  */
 async function verifyIdentity(provider, { config, profile, verifyUrl, timeoutMs = 10000 }) {
-  const assertions = config.auth?.identityAssertions || [];
+  const assertions = identityAssertionsFor(config, profile);
   if (!assertions.length) return { validationStatus: 'unvalidated', validatedAt: null, identityRevision: null };
   if (verifyUrl) {
     await provider.open(verifyUrl, { timeout: 30000 });
@@ -51,7 +55,7 @@ async function verifyIdentity(provider, { config, profile, verifyUrl, timeoutMs 
   try {
     await runAssertions(provider, assertions, { scope: 'auth-identity', idPrefix: `auth:${profile}`, timeoutMs });
   } catch (error) {
-    throw Object.assign(new Error(`登录后身份断言未通过：${error.message}`), { code: 'auth-verification-failed' });
+    throw Object.assign(new Error(`登录后身份断言未通过：${error.message}`), { code: config.auth?.profiles?.[profile]?.identityAssertions !== undefined ? 'auth-identity-mismatch' : 'auth-verification-failed' });
   }
   return { validationStatus: 'validated', validatedAt: new Date().toISOString(), identityRevision: identityRevision(config, profile) };
 }
@@ -63,5 +67,6 @@ module.exports = {
   authDisabled,
   resolveCapabilities,
   identityRevision,
+  identityAssertionsFor,
   verifyIdentity,
 };

@@ -26,6 +26,7 @@ function section(id, kind, refs = {}) {
     taskRefs: unique(refs.taskRefs || []),
     claimRefs: unique(refs.claimRefs || []),
     captureRefs: unique(refs.captureRefs || []),
+    ...(refs.scenarioRefs?.length ? { scenarioRefs: unique(refs.scenarioRefs) } : {}),
     // 图文对应（B2-09）：只在有冻结标注证明时出现；旧数据保持原形状
     ...(refs.annotationRefs?.length ? { annotationRefs: unique(refs.annotationRefs) } : {}),
     ...(refs.featureRefs?.length ? { featureRefs: unique(refs.featureRefs) } : {}),
@@ -73,8 +74,14 @@ function pageSections(pack, proofs = new Map()) {
   const pageRefs = [pack.manualId];
   const out = [
     section('overview', 'overview', { pageRefs }),
-    section('location', 'location', { pageRefs, captureRefs: pack.artifacts.map((a) => a.captureId) }),
+    section('location', 'location', { pageRefs, captureRefs: pack.artifacts.filter((a) => !a.scenarioId).map((a) => a.captureId) }),
   ];
+  for (const scenarioId of unique(pack.artifacts.map((a) => a.scenarioId))) {
+    const captureRefs = unique(pack.artifacts.filter((a) => a.scenarioId === scenarioId).map((a) => a.captureId));
+    const refs = captureRefs.map((id) => annotationRefsOf(id, proofs.get(id)));
+    out.push(section(`variant.${scenarioId}`, 'variant', { pageRefs, scenarioRefs: [scenarioId], captureRefs,
+      annotationRefs: refs.flatMap((r) => r.annotationRefs), featureRefs: refs.flatMap((r) => r.featureRefs) }));
+  }
   const captureId = pack.artifacts.find((a) => a.captureId)?.captureId || null;
   for (const item of pack.guide || []) {
     // guide 小节引用页面截图上为它画出的那一项（不再靠"下标 + 1"约定对应）

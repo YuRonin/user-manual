@@ -196,6 +196,7 @@ async function run(argv) {
       verificationId: r.id, target: r.target, releaseId: r.releaseId, result: r.result, coverage: r.coverage,
       failures: r.checks.filter((c) => c.outcome !== 'passed').map(({ id, scope, outcome, code, category, message, stepId }) => ({ id, scope, outcome, code, category, message, stepId })),
       claims: r.claims, sections: r.sections, drift: r.drift,
+      ...(r.variants ? { variants: r.variants } : {}),
     })),
     errors,
   };

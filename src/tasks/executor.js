@@ -150,6 +150,7 @@ async function takeScreenshot(provider, stateDir, plan, step, timing, options = 
         observedAt: new Date().toISOString(),
         finalUrl: sanitizeUrl(meta.url),
         spec,
+        ...(provider.environmentInfo ? { environment: provider.environmentInfo({ fullPage: !!meta.fullPage }) } : {}),
         validations: validations.filter((v) => v && v.scope && v.outcome),
         // 未做隐私检测的截图明确记为 not-run，发布时按 unknown 处理
         ...(safe ? { quality: safe.quality } : {}),

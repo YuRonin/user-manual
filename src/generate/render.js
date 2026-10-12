@@ -76,7 +76,7 @@ const TEMPLATES = {
 // render-13：面向读者的帮助中心结构——入口并入步骤，正文不暴露采集与验证范围等维护信息。
 // render-14：页面指南标题恢复编号，与截图标注 ①②③ 对应。
 // render-15：任务步骤有 title 时，在 step 注释后写 <!-- step-title: … -->，供帮助中心目录使用；正文不变。
-const TEMPLATE_VERSION = 'render-15';
+const TEMPLATE_VERSION = 'render-16';
 
 class TemplateError extends Error {
   constructor(language) {
@@ -234,8 +234,17 @@ function renderPage(pack, copy = {}, { draft = false } = {}) {
   const intro = blockText(pack, copy, 'intro');
   if (intro) overview.push('', intro);
   const location = [t.pageEntry(`[${pack.title}](${pack.route})`)];
-  for (const artifact of pack.artifacts) location.push(...figure(artifact, pack.title, artifact.markdownHref));
+  for (const artifact of pack.artifacts.filter((a) => !a.scenarioId)) location.push(...figure(artifact, pack.title, artifact.markdownHref));
   const blocks = [['overview', overview], ['location', location]];
+  for (const scenarioId of [...new Set(pack.artifacts.map((a) => a.scenarioId).filter(Boolean))]) {
+    const artifacts = pack.artifacts.filter((a) => a.scenarioId === scenarioId);
+    const title = artifacts[0].variantTitle;
+    const lines = [`## ${title}`];
+    for (const artifact of artifacts) lines.push(...figure(artifact, title, artifact.markdownHref));
+    for (const explanation of artifacts.flatMap((a) => a.featureExplanations || [])) lines.push('', explanation.text);
+    if (artifacts.some((a) => a.privacy?.demo?.sources?.api_mock || a.privacy?.demo?.sources?.fixture)) lines.push('', t.simulated);
+    blocks.push([`variant.${scenarioId}`, lines]);
+  }
   // 编号与截图标注一致：标注按 guide 下标 i + 1 编号（含没有 target 的条目），标题用同一编号
   for (const [i, item] of (pack.guide || []).entries()) {
     const lines = [`## ${i + 1}. ${item.title}`, '', item.instruction];

@@ -198,6 +198,12 @@ function validateEntry(entry, index, knownIds, errors) {
     }
   }
 
+  if (entry.variants !== undefined) {
+    const checked = require('../model/schema').validatePage({ id: entry.id, route: '/', variants: entry.variants });
+    if (!checked.ok) errors.push(...checked.errors.map(e => `${where}.${e.path}: ${e.message}`));
+    else { patch.variants = entry.variants; touched = true; }
+  }
+
   if (entry.features !== undefined) {
     const checked = require('../model/schema').validatePage({ id: entry.id, route: '/', features: entry.features });
     if (!checked.ok) errors.push(...checked.errors.map(e => `${where}.${e.path}: ${e.message}`));
@@ -244,6 +250,7 @@ function applyPatch(page, patch) {
   const next = {
     ...page,
     ...(patch.guide !== undefined ? { guide: patch.guide } : {}),
+    ...(patch.variants !== undefined ? { variants: patch.variants } : {}),
     ...(patch.features !== undefined ? { features: patch.features } : {}),
     title: patch.title !== undefined ? patch.title : page.title,
     purpose: patch.purpose !== undefined ? patch.purpose : page.purpose,

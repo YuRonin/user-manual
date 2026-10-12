@@ -114,9 +114,10 @@ function validateSectionLinks({ sections = [], captureIds = [], readRecord, kind
           errors.push(issue('capture-subject-mismatch', `章节 ${section.id} 引用的截图属于 ${record.subject?.taskId || record.subject?.pageId}/${record.subject?.stepId || '-'}，不是这个步骤`));
         }
       }
-      if (kind === 'page' && record.kind === 'page' && record.subject?.pageId !== subjectId) {
+      if (kind === 'page' && (record.kind !== 'page' || record.subject?.pageId !== subjectId)) {
         errors.push(issue('capture-subject-mismatch', `章节 ${section.id} 引用的截图属于页面 ${record.subject?.pageId}，不是 ${subjectId}`));
       }
+      if (section.scenarioRefs?.length && !section.scenarioRefs.includes(record.scenarioId)) errors.push(issue('capture-subject-mismatch', `章节 ${section.id} 引用的 Capture 不属于声明的 Scenario`));
     }
     const annotated = new Set();
     for (const ref of section.annotationRefs || []) {

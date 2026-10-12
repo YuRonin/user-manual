@@ -295,7 +295,7 @@ async function capture(ctx, task) {
   // 规划时缓存可用、执行时失效：采集前补做在线认证检查。
   const authProfile = current.scenario.authProfile;
   if (ctx.config.auth?.enabled !== false && authProfile !== 'anonymous' && ctx.config.auth?.verifyPath &&
-      ctx.config.auth?.identityAssertions?.length && !ctx.authChecks.has(authProfile)) {
+      require('../auth/identity').identityAssertionsFor(ctx.config, authProfile).length && !ctx.authChecks.has(authProfile)) {
     await authCheck(ctx, { input: { subject, authProfile, captureKey: current.captureKey } });
   }
 
@@ -363,7 +363,7 @@ async function deriveImage(ctx, task) {
   const model = loadModel(ctx).load().model;
   for (const record of readRecords(ctx, captureIds)) {
     if (!record.annotationProof) continue;
-    const stale = staleness(record.annotationProof, currentScope(model, record), record);
+    const stale = staleness(record.annotationProof, currentScope(model, record, { stateDirAbs: ctx.stateDirAbs }), record);
     if (stale.length) throw new RuntimeError('annotation-plan-changed', `Capture ${record.id}: ${stale.map((p) => p.message).join('；')}；需要重新采集（generate --refresh）。`);
   }
   const { records, mapping } = await rederiveCaptures({ projectRoot: ctx.projectRoot, config: ctx.config, captureIds, runId: ctx.runId });

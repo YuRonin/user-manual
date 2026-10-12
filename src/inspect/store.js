@@ -128,6 +128,7 @@ function renderPageYaml(page) {
     detectedActions: page.detectedActions || [],
     ...(page.features ? { features: page.features } : {}),
     ...(page.guide ? { guide: page.guide } : {}),
+    ...(page.variants ? { variants: page.variants } : {}),
     entry: page.entry,
     source: page.source || [],
     dependencies: {

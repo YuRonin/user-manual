@@ -30,6 +30,7 @@ const VIEW_FIELDS = {
     }),
     docs: (p) => ({
       title: p.title, purpose: p.purpose, includeInManual: p.includeInManual,
+      variants: p.variants,
       features: (p.features || []).map((f) => ({ id: f.id ?? f.feature_id, label: f.label, description: f.description ?? null })),
       guide: (p.guide || []).map((g) => ({ id: g.id, title: g.title ?? null, instruction: g.instruction ?? null })),
     }),
@@ -112,6 +113,14 @@ function modelChangeSections({ projectRoot, stateDirAbs, model, published, image
     }
     // 主题 / 渲染器变化只需重新派生
     const records = (release.captureIds || []).map((captureId) => { try { return store.read(captureId); } catch (_) { return null; } }).filter(Boolean);
+    if (type === 'page') {
+      for (const variant of entity.variants || []) {
+        const resolved = require('../scenarios/store').readScenario(stateDirAbs, variant.scenarioId, { stepIds: [] });
+        const baseline = records.find((r) => r.scenarioId === variant.scenarioId);
+        if (!resolved.ok || !resolved.scenario || !baseline || baseline.scenarioRevision !== resolved.scenario.revision
+          || store.readLatest()[`scenario:${variant.scenarioId}`] !== baseline.id) reasons.push(`scenario-changed:${variant.scenarioId}`);
+      }
+    }
     if (records.some((r) => (r.provenance?.rendererVersion && r.provenance.rendererVersion !== imageInputs.rendererVersion)
       || (r.provenance?.themeRevision && r.provenance.themeRevision !== imageInputs.themeRevision))) reasons.push('image-inputs-changed');
     // 发布之后最近一次在线验证失败 / 漂移（B5-11）

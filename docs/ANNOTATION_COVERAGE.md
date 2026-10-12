@@ -48,6 +48,8 @@
 
 ## 在线验证的视觉比较
 
+任务手册的 before / after 步骤截图也使用下述同层比较；`drift.steps` 保留步骤、时机、Capture 与逐图结果。未执行的写操作边界之后不会比较截图。旧任务证据没有采集环境指纹时明确不可比，需要重新采集。
+
 `verify --live` 不拿历史带标注图去比新的无标注图。它用基线 Capture 冻结的标注计划，在当前页面重新定位、重新绘制，然后带标注图对带标注图逐张比较（拆图时每张都比，张数不同即视为变化，`layer: annotated`）。基线没有标注计划时，未标注的 sanitized 对 sanitized（`layer: sanitized`）。只换了标注主题时结果是 `baseline-incompatible`（`annotation-theme-changed`），重新派生即可，不算页面漂移。
 
 ## 证据：随仓库提交的精简证明

@@ -161,6 +161,34 @@ function draftPage({ projectRoot, config, pageId, noScreenshot = false }) {
       if (partIssues.length > 0) throw failure(partIssues[0].code || 'publication-gate', formatIssues(partIssues));
       images.push(part);
     }
+    const captures = createCaptureStore({ projectRoot, stateDirAbs });
+    const latest = captures.readLatest();
+    for (const variant of page.variants || []) {
+      const resolved = require('../scenarios/store').readScenario(stateDirAbs, variant.scenarioId, { stepIds: [] });
+      if (!resolved.ok || !resolved.scenario) throw failure('invalid-scenario', resolved.errors || [`找不到 Scenario ${variant.scenarioId}`]);
+      if (resolved.scenario.userTaskId || resolved.scenario.entry?.pageId !== page.id) throw failure('capture-subject-mismatch', [`Scenario ${variant.scenarioId} 不属于页面 ${page.id}`]);
+      const captureId = latest[`scenario:${variant.scenarioId}`];
+      if (!captureId) throw failure('capture-record-missing', [`先采集变体：manual capture scenario:${variant.scenarioId}`]);
+      const record = captures.read(captureId);
+      if (record?.kind !== 'page' || record.subject?.pageId !== page.id || record.scenarioId !== variant.scenarioId) throw failure('capture-subject-mismatch', [`Capture ${captureId} 不属于页面变体 ${variant.scenarioId}`]);
+      if (record.scenarioRevision !== resolved.scenario.revision) throw failure('evidence-stale', [`Scenario ${variant.scenarioId} 在截图后变化，需要重新采集。`]);
+      const coverage = validateCaptureCoverage({ projectRoot, config, captureIds: [captureId] });
+      if (coverage.length) throw failure(coverage[0].code, formatIssues(coverage));
+      const variantSource = publishedFromRecord({ projectRoot, stateDirAbs, captureId, sourceRevision: page.analysis?.sourceRevision || null });
+      if (!variantSource.ok) throw failure('evidence-unusable', variantSource.errors);
+      for (const [index, sourcePart] of [variantSource, ...(variantSource.extraParts || [])].entries()) {
+        const file = path.resolve(projectRoot, sourcePart.artifactPath);
+        const part = { artifactPath: sourcePart.artifactPath, markdownHref: toMarkdownHref({ manualFile: finalPath, artifactFile: file }), sha256: sourcePart.sha256,
+          privacy: variantSource.privacy, captureId, scenarioId: variant.scenarioId, variantTitle: variant.title,
+          ...(index === 0 ? { featureExplanations: (record.annotationProof?.inventory || []).filter((f) => f.priority === 'required' && !f.explanation_ref).map((f) => ({ featureId: f.feature_id, text: f.description })) } : {}),
+          ...(variantSource.extraParts?.length ? { part: index + 1 } : {}) };
+        const blocked = recaptureBlocked(stateDirAbs, subjectKey(['page', page.id, variant.scenarioId]), variantSource.observedAt);
+        if (blocked) part.demoRecapture = blocked;
+        const issues = validateArtifact(part, { projectRoot, config, stage: 'draft', warnings: [] });
+        if (issues.length) throw failure(issues[0].code, formatIssues(issues));
+        images.push(part);
+      }
+    }
   }
 
   let built;
@@ -201,10 +229,19 @@ function pageObservedTerms(projectRoot, stateDirAbs, pageId, captureId) {
 }
 
 /** 草稿之后页面定义、源码指纹、截图记录或模板变了：旧草稿不能再发布。 */
-function pageDraftStale(page, pack, language) {
+function pageDraftStale(page, pack, language, { projectRoot, stateDirAbs } = {}) {
   if (!pack) return null;
+  if (projectRoot && page.variants?.length) {
+    const latestRefs = createCaptureStore({ projectRoot, stateDirAbs }).readLatest();
+    for (const artifact of pack.artifacts.filter((a) => a.scenarioId)) {
+      if (latestRefs[`scenario:${artifact.scenarioId}`] !== artifact.captureId) return `draft-stale: 变体 ${artifact.scenarioId} 的截图已更新，重新生成草稿。`;
+      const scenario = require('../scenarios/store').readScenario(stateDirAbs, artifact.scenarioId, { stepIds: [] });
+      const record = createCaptureStore({ projectRoot, stateDirAbs }).read(artifact.captureId);
+      if (!scenario.ok || !scenario.scenario || record?.scenarioRevision !== scenario.scenario.revision) return `draft-stale: 变体 ${artifact.scenarioId} 的定义已变化，重新采集并生成草稿。`;
+    }
+  }
   const latest = page.browser?.latestCaptureId;
-  const current = buildPageFactPack({ page, images: pack.artifacts.map(({ id: _id, ...artifact }) => ({ ...artifact, captureId: latest ?? artifact.captureId ?? null })), language, headerComments: pack.headerComments });
+  const current = buildPageFactPack({ page, images: pack.artifacts.map(({ id: _id, ...artifact }) => ({ ...artifact, captureId: artifact.scenarioId ? artifact.captureId : latest ?? artifact.captureId ?? null })), language, headerComments: pack.headerComments });
   const changed = ['inputRevision', 'templateRevision', 'language'].filter((key) => current[key] !== pack[key]);
   return changed.length ? `draft-stale: 草稿之后事实发生变化（${changed.join(', ')}），重新运行 \`manual generate ${page.id}\` 生成草稿。` : null;
 }
@@ -227,7 +264,7 @@ function preparePageFinal({ projectRoot, config, pageId, copy = null, markdown =
   const draftFactsEarly = fs.existsSync(factsFile) ? JSON.parse(fs.readFileSync(factsFile, 'utf8')) : {};
   const pack = draftFactsEarly.factPack || null;
   let stale;
-  try { stale = pageDraftStale(page, pack, config.docs.language); } catch (error) { throw failure('draft-stale', [error.message]); }
+  try { stale = pageDraftStale(page, pack, config.docs.language, { projectRoot, stateDirAbs }); } catch (error) { throw failure('draft-stale', [error.message]); }
   if (stale) throw failure('draft-stale', [stale]);
 
   const fromPack = markdown === null;

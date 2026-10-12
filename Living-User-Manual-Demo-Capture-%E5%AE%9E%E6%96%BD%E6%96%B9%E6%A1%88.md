@@ -369,6 +369,8 @@ Playwright 进程通常无法绝对防护通过目标前端之外的后台定时
 
 ## 11. 实施记录（2026-10-11）
 
+2026-10-12 后续批次（基线 `main@d4fad5c`）：R1 页面变体截图复用现有发布门禁，R2 任务步骤在线视觉比较复用 captureStable / derivePublished / 冻结计划，R3 档案级身份断言复用认证验证链路。三项完成；定向测试分别 5 / 10 / 17 项通过，全量 unit 564 项、browser 372 项通过，0 失败。旧变体缺 scenarioRevision 需重采，旧任务缺环境指纹时视觉不可比。不声明 variants 或 profiles 时兼容原行为。原图保留开关（R6）、角色 / 名称敏感区域（R7）尚待实施，下面的遗留说明仍有效。
+
 | 阶段 | 状态 | 证据 |
 |---|---|---|
 | P0 审计与基线 | 完成 | `docs/audit/2026-10-11-demo-capture-audit.md`；`test/tools/demo-baseline.js`（改造前后同页对比） |

@@ -149,7 +149,7 @@ function checkAnnotations({ projectRoot, config, record, captureId, markdown, au
   if (!coverage.ok) errors.push(issue('annotation-coverage-failed', `Capture ${captureId}: ${coverage.failures.map((item) => `${item.feature_id}:${item.reason}`).join(', ')}`));
   if (proof) {
     let scope;
-    try { scope = currentScope(createProjectStore({ stateDirAbs: path.join(projectRoot, config.artifacts.stateDir), docsOutputDir: config.docs.outputDir }).load().model, record); }
+    try { scope = currentScope(createProjectStore({ stateDirAbs: path.join(projectRoot, config.artifacts.stateDir), docsOutputDir: config.docs.outputDir }).load().model, record, { stateDirAbs: path.join(projectRoot, config.artifacts.stateDir) }); }
     catch (error) { scope = { missing: `无法读取当前模型：${error.message}` }; }
     for (const problem of staleness(proof, scope, record)) {
       const found = issue(problem.code, `Capture ${captureId}: ${problem.message}`, { hint: '重新采集（manual generate --refresh 或 manual capture）后再发布' });
