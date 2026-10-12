@@ -1,271 +1,160 @@
 # Living User Manual
 
-为 Web 项目生成并持续维护图文使用手册：读源码建立页面与任务模型 → 真实浏览器操作并截图 → 按帮助中心的结构出稿 → 代码变化后只更新受影响的文档。
+为 Next.js 项目生成并持续维护图文使用手册。它读取页面源码，使用真实浏览器采集界面与操作证据，生成页面说明和任务指南；项目变化后，只更新受影响的内容。
 
-以 Claude Code / Codex Skill 形式交付（主 skill 名 `manual`），同时是一个可脱离 AI 独立运行的 Node CLI。路由扫描目前支持 Next.js（App Router + Pages Router）。
+可作为 **Claude Code / Codex Skill** 使用，也可直接运行 Node.js CLI。当前路由扫描支持 Next.js App Router 和 Pages Router；其他框架会收到明确的暂不支持提示。
 
-## 安装
+## 它做什么
+
+| 能力 | 结果 |
+| --- | --- |
+| 建立项目地图 | 扫描路由和源码依赖，记录页面、功能候选与任务入口 |
+| 采集真实界面 | 在 Chromium 中访问页面、执行已授权的操作、截图并标注控件 |
+| 生成手册 | 输出页面说明、按目标组织的任务指南，以及可选的静态帮助中心 |
+| 持续维护 | 根据代码依赖定位受影响手册，并用浏览器回放检查线上变化 |
+| 控制发布风险 | 对演示数据、隐私、写操作、截图证据和文案事实执行门禁 |
+
+手册中的操作顺序、界面名称、截图和完成标志来自结构化模型与采集证据。AI 可以把说明写得更自然，不能把未经验证的功能或结果写成事实。
+
+## 快速开始
+
+需要 Node.js **20.9.0 或更新版本**，以及能启动 Chromium 的环境。先安装工具，再在要编写手册的 Next.js 项目中启动应用。
+
+### 1. 安装
+
+克隆本仓库，在仓库根目录运行：
 
 ```bash
-npm ci                          # 依赖版本以 package-lock.json 为准（js-yaml、markdown-it、playwright、sharp）
+git clone https://github.com/YuRonin/user-manual.git
+cd user-manual
+npm ci
 npx playwright install chromium
-npm run install:compat          # 安装客户端别名；--client codex / claude / all（默认 all）
 ```
 
-把本目录链接到 `~/.claude/skills/manual`（Claude Code）或 `~/.codex/skills/manual`（Codex）。别名只覆盖主流程命令：Claude Code 用 `/manual-init`、`/manual-generate` 等，Codex 用 `$manual-init`、`$manual-generate` 等；其它命令通过主 skill `manual` 使用。重新安装会清理旧版本生成的其它别名。
+Linux 上安装浏览器时可用 `npx playwright install --with-deps chromium` 安装系统依赖；中文截图还需要可用的 CJK 字体。
 
-## 生成出来的手册长什么样
+将仓库链接为两个客户端的 `manual` skill。根据系统选择一组命令；只使用一个客户端时，也建议建立两个链接，因为生成的 Claude Code 命令别名通过 Codex 的 `manual` 路径定位主 skill。
 
-正式文档按读者完成任务的顺序组织，参照飞书、Notion 等帮助中心：
-
-```markdown
-# 修改个人资料
-
-修改昵称和简介，其他成员会看到更新后的信息。
-
-## 前提条件
-- 已登录账号
-
-## 操作步骤
-
-进入 [个人中心](/profile) 页面，按以下步骤操作。
-
-1. 点击「编辑资料」
-
-   [![编辑面板打开后的界面](images/annotated/edit-profile--open.png)](images/annotated/edit-profile--open.png)
-
-2. 在「昵称」中填写内容
-
-   昵称最多 20 个字，例如“李老师”。
-
-3. 点击「保存」
-
-## 如何确认已完成
-
-完成标志：编辑面板已关闭，个人中心显示新昵称。
-
-## 常见问题
-
-**提示登录已过期**
-
-重新登录后从第 1 步开始。
-
-## 相关文档
-- [更换头像](change-avatar.md)
-```
-
-步骤动作句、顺序、截图和完成标志由程序从结构化模型生成；导语与步骤说明由模型按[写作规范](references/manual-writing-style.md)填写，程序校验它没有改动事实。验证范围、截图时间等维护信息不进入正文，用 `review-task` 和发布记录查看。`docs.outputDir/index.md` 自动维护目录：默认分“操作指南”和“功能介绍”两组；在 `config.yaml` 的 `docs.catalog` 里可改成按场景分组（任务篇与页面篇混排，未列入的已发布手册自动落到兜底分组），见[命令细节](references/command-workflows.md#目录分组docscatalog)。同时重写 `docs.outputDir/meta.json`：每篇已发布手册的最后更新时间与最多 5 篇相关文章，供应用内帮助中心等下游读取（契约见[命令细节](references/command-workflows.md#文档元数据metajson)）。
-
-## 用法
-
-首次接入：
+**macOS / Linux**（在仓库根目录）：
 
 ```bash
-manual init --base-url http://localhost:3000 --audience public
-manual auth login --profile default        # 有登录保护时；先在 .manual/config.yaml 配 auth.verifyPath 与 auth.identityAssertions
-manual inspect                              # 扫描页面，列出需要阅读的源码
-manual describe --input describe.json       # AI 读完源码后写回标题、用途、主要操作
+mkdir -p ~/.claude/skills ~/.codex/skills
+ln -s "$(pwd)" ~/.claude/skills/manual
+ln -s "$(pwd)" ~/.codex/skills/manual
+npm run install:compat
 ```
 
-建模任务（“怎样完成某件事”）：`task-guide "目标"` 找入口 → `discover-tasks` 保存候选 → 用户确认后 `approve-tasks`。
+**Windows PowerShell**（在仓库根目录）：
 
-生成：
+```powershell
+New-Item -ItemType Directory -Force "$HOME\.claude\skills", "$HOME\.codex\skills" | Out-Null
+New-Item -ItemType Junction -Path "$HOME\.claude\skills\manual" -Target (Get-Location).Path
+New-Item -ItemType Junction -Path "$HOME\.codex\skills\manual" -Target (Get-Location).Path
+npm run install:compat
+```
+
+如果 `manual` 目录已存在，先确认它指向哪里，再决定是否更新；不要用上述命令覆盖已有安装。`install:compat` 为两个客户端各生成 9 个主流程别名，并清理旧版本由本工具生成、现已停用的别名。源码是目录链接，修改本仓库后两个客户端都会读取到最新内容。
+
+### 2. 在 AI 客户端中使用
+
+在目标项目里打开 Claude Code 或 Codex，直接描述目标，例如：
+
+> 为这个项目建立图文使用手册，先检查环境并扫描页面。发布前让我确认任务范围。
+
+也可以使用主 skill `manual`，或使用命令别名：
+
+| 阶段 | Claude Code | Codex |
+| --- | --- | --- |
+| 初始化 | `/manual-init` | `$manual-init` |
+| 扫描页面 | `/manual-inspect` | `$manual-inspect` |
+| 生成手册 | `/manual-generate` | `$manual-generate` |
+| 更新 / 核对 | `/manual-update`、`/manual-verify` | `$manual-update`、`$manual-verify` |
+
+完整别名还包括 `describe`、`auth`、`site` 和 `doctor`。客户端会按 [SKILL.md](SKILL.md) 处理源码分析、任务审批、模型文案与需要人工参与的步骤。
+
+### 3. 直接使用 CLI
+
+CLI 无需全局 npm 安装。从工具仓库运行，并用 `--project-root` 指向目标项目：
 
 ```bash
-manual generate task:edit-profile page:chat
-# 采集（可复用有效缓存）→ 事实草稿 → 退出码 3 等待模型文案
-manual resume <runId> --request <requestId> --input <响应.json>
-# 提交文案并继续 → 发布；结果里的 documents 给出正式文档路径
-manual review-task edit-profile --preview   # 对照截图审阅
+node /path/to/user-manual/bin/manual.js doctor --project-root /path/to/your-nextjs-app
+node /path/to/user-manual/bin/manual.js init --project-root /path/to/your-nextjs-app --base-url http://localhost:3000
+node /path/to/user-manual/bin/manual.js inspect --project-root /path/to/your-nextjs-app
 ```
 
-`--plan` 只预览动作与风险边界；`--offline` 只用已有证据；`--refresh` 强制重新采集；`--copy-default` 跳过模型文案出粗稿（交付前必须审阅）。登录失效时 `manual auth login --resume <runId>` 登录后自动继续。
+以下示例用 `manual` 简写同一个 CLI；直接运行时，替换为上面的 `node .../bin/manual.js` 路径。`doctor` 是只读环境检查，`init` 创建 `.manual/config.yaml`，`inspect` 生成页面地图。`inspect` 之后，需要阅读源码并用 `describe --input <分析.json>` 补充页面用途和操作；AI skill 会引导这一步。[命令细节](references/command-workflows.md)给出了输入格式。
 
-持续维护：
+## 一份手册怎样生成
+
+```text
+源码与路由 → 页面 / 任务模型 → 浏览器采集与标注 → 事实草稿
+           → AI 填写说明文案 → 事实和发布校验 → Markdown 手册
+```
+
+页面说明介绍页面用途、选项和操作。任务指南围绕读者要完成的目标，列出前提条件、步骤截图和完成标志。候选任务必须经过用户批准才会采集或发布。
 
 ```bash
-manual update --plan       # 代码改了：先看影响范围与原因链
-manual update              # 只更新受影响的已发布手册
-manual verify --all        # 离线核对产物
-manual verify --all --live # 在线回放，源码没变、线上变了也能发现
-manual gc                  # 列出可回收的临时文件与原图；确认后 --apply --expect <planHash>
+manual task-guide "修改个人资料"             # 查找入口和操作线索
+manual discover-tasks <page-id>             # 保存候选任务
+manual approve-tasks --input decisions.json # 批准要采集的任务
+manual generate task:edit-profile           # 采集、出稿并进入发布流程
 ```
 
-发布成网站：
+`generate` 默认在需要模型文案时暂停，返回等待输入状态；客户端按请求文件填写文案后通过 `resume` 继续。直接使用 CLI 时，运行 `manual status <runId>` 查看下一步，再按 [Runtime 使用说明](docs/RUNTIME.md)提交响应。`--plan` 可先查看执行范围，`--offline` 只用已有证据，`--refresh` 重新采集。`--copy-default` 可生成未经润色的粗稿，交付前需要人工审阅。
+
+输出在目标项目中，默认结构如下：
+
+```text
+.manual/                       配置、模型、运行记录和本地中间产物
+docs/manual/index.md           手册目录
+docs/manual/<page-id>.md       页面说明
+docs/manual/tasks/<task-id>.md 任务指南
+docs/manual/images/annotated/ 通过发布校验的标注截图
+docs/manual/meta.json          文档更新时间和相关文章
+```
+
+生成的 Markdown 可以继续用 `manual site` 转成静态帮助中心，默认输出到 `.manual/site/`。网站包含目录、页面导航、任务完成提示和 WebP 截图；配置见[命令细节](references/command-workflows.md#帮助中心网站manual-site)。
+
+## 更新与核对
 
 ```bash
-manual site                # 把 docs.outputDir 渲染成静态帮助中心（默认输出 .manual/site/）
+manual update --plan       # 预览代码变化会影响哪些手册
+manual update              # 更新受影响的已发布手册
+manual verify --all        # 离线核对文档与证据
+manual verify --all --live # 在真实浏览器中回放可安全执行的步骤
 ```
 
-首页是目录（默认操作指南 / 功能介绍，或 `docs.catalog` 配置的分组）加可选的求助区，正文页带面包屑，任务篇的「如何确认已完成」渲染为「完成后你会看到」提示框，截图转为 WebP。文档互链改写为相对 `.html`，`file://` 直接打开或放到任意子路径都能用；手册里的 `/credits` 这类产品入口原样保留（独立部署时用 `site.appBaseUrl` 补全域名）。任何死链都会让构建失败且不写文件；只清理自己上次生成的文件，输出目录非空且不是它生成的会拒绝写入（确认后 `--force`）。标题、主题色、求助区等在 `config.yaml` 的 `site:` 段配置（`init` 生成的模板里有注释示例）。
+`update` 依据源码依赖关系定位影响范围。远端数据、权限或部署发生变化但源码未变时，用 `verify --live` 检查。在线核对不会自动重做写操作；结果会区分失败、内容漂移和环境导致的无法判断。人工写在生成块之外的内容会保留；生成块和人工修改冲突时会暂停，等待处理。[Runtime 使用说明](docs/RUNTIME.md)解释缓存、恢复和冲突流程。
 
-正式文档里生成的内容由 `<!-- manual:block … -->` 标记分段：块外可以自由补充说明，`update` / `generate` 会保留；同一块被人和生成器同时改动时停下来（退出码 4），给出提案与逐块对照，不会静默覆盖。
+## 截图与发布边界
 
-退出码：0 成功 / `--plan`；1 失败；2 参数错误或目标歧义；3 等待输入（文案、登录、审批、人工确认、测试数据清理）；4 漂移或冲突。
+- **真实界面**：截图来自浏览器实际渲染。页面打不开或证据不足时会报告原因，不用猜测内容补图。
+- **演示数据**：公开内容、Fixture、精确 API Mock 或受控的页面替换可用于构造演示场景。敏感内容未处理完时，截图状态为 `needs_fixture` 或 `blocked`，不能发布。
+- **写操作**：未授权的提交、删除、支付等请求会被阻断；需要展示结果时，应使用完整的 Fixture 模拟或经过明确授权的测试操作。
+- **可追溯**：正式文档只引用通过门禁的发布图。原图和诊断产物保留在本地受控目录，不进入公开手册。
 
-## 命令
+如何配置 `capture.demo`、Fixture 和网络规则，见 [Demo Capture](docs/DEMO_CAPTURE.md)；标注覆盖与发布条件见 [标注覆盖率](docs/ANNOTATION_COVERAGE.md)。
 
-`manual --help` 按分组列出：
+## 常用命令
 
-| 分组 | 命令 |
-|---|---|
-| 主流程 | `init` · `inspect` · `describe` · `auth` · `generate` · `update` · `verify` · `site` · `doctor` |
-| 任务型指南 | `task-guide` · `discover-tasks` · `approve-tasks` · `review-task` |
-| Run 查看与继续 | `status` · `resume` |
-| 高级与维护 | `capture`（只采集）· `plan-capture`（只读预演）· `capture-task`（写操作核对与续采）· `publication`（发布事务恢复）· `gc` · `migrate` |
+| 目的 | 命令 |
+| --- | --- |
+| 环境检查与首次接入 | `doctor`、`init`、`inspect`、`describe`、`auth` |
+| 编写页面与任务指南 | `task-guide`、`discover-tasks`、`approve-tasks`、`generate`、`review-task` |
+| 查看和继续运行 | `status`、`resume` |
+| 维护与发布 | `update`、`verify`、`site` |
+| 高级操作 | `capture`、`plan-capture`、`capture-task`、`publication`、`gc`、`migrate` |
 
-兼容入口仍可执行，但不在帮助与主文档中列出：`run-submit`（改用 `resume --request --input`）、`generate-task`（改用 `generate task:<id>`）、`migrate-artifacts`，以及 `generate <page-id> --draft / --finalize`。迁移说明见 [docs/MIGRATION.md](docs/MIGRATION.md)。
+运行 `node bin/manual.js --help` 或 `node bin/manual.js <命令> --help` 查看完整参数；加 `--json` 获取结构化结果。旧命令的迁移方式见 [迁移与兼容说明](docs/MIGRATION.md)。
 
-每条命令都有 `--help`；加 `--json` 得到结构化输出。运行时细节（Run、等待输入、缓存、恢复）见 [docs/RUNTIME.md](docs/RUNTIME.md)，架构见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+旧入口 `run-submit`、`generate-task`、`migrate-artifacts` 仍可执行，分别迁移到 `resume --request --input`、`generate task:<id>`、`migrate`；新项目从上表的命令开始。
 
-## 实现细节
-
-### inspect 扫到什么
-
-Next.js（App Router + Pages Router）：
-
-| 文件 | 路由 |
-|---|---|
-| `app/chat/page.tsx` | `/chat` |
-| `app/artifact/[id]/page.tsx` | `/artifact/:id` · `dynamic: true` |
-| `app/docs/[...slug]/page.tsx` | `/docs/:slug*` |
-| `app/blog/[[...slug]]/page.tsx` | `/blog/:slug?` |
-| `app/(marketing)/pricing/page.tsx` | `/pricing`（路由组不进 URL） |
-| `pages/user/[id].tsx` | `/user/:id` |
-
-自动跳过：`layout` / `loading` / `error` / `not-found` / `template` / `route`、`api/**`、私有目录 `_foo`、并行插槽 `@modal`、拦截路由 `(.)foo`、`_app` / `_document`、测试与 story 文件。
-
-inspect 还会从每个页面入口递归追踪项目内的静态 `import`、re-export 和字面量 `require()`，支持相对路径以及 `tsconfig.json` / `jsconfig.json` 的 `baseUrl`、`paths`。第三方包、样式和静态资源不会进入依赖图；无法解析的项目内导入会记录 warning，但不会中断其它页面扫描。
-
-扫描完成后会生成两个可重建的 JSON 索引：
-
-- `.manual/index/forward.json`：页面 → 入口、关联源码、组件、Hook、截图和手册路径。
-- `.manual/index/reverse.json`：源码文件 → 受影响页面，为未来的 `manual update` 提供影响范围。
-
-当前路由扫描只支持 Next.js（App Router + Pages Router）。Vite + Vue 等框架能被识别，但 `inspect` 会明确提示暂不支持。
-
-### capture 怎么保证截图质量
-
-截图前依次等待：load 事件 → 网络空闲 → 指定元素（可选）→ Web Font 就绪 → 图片加载完 →
-DOM 连续静止 → 冻结 CSS 动画与过渡 → 静置回流。每步有独立上限，单步超时只记 warning 不中断。
-
-尺寸严格按配置的 viewport × DPR：`desktop-standard` 得到 2880×1800 的高清 PNG。
-动画被冻结，所以**同一页面连续两次截图字节完全一致**（有测试锁住）。
-
-**页面打不开时绝不产出截图**，而是给出分类原因与可操作建议：
-
-| 原因 | 含义 |
-|---|---|
-| `server-unreachable` | 项目没启动 / 端口不对 |
-| `http-not-found` | 404，route 可能已过期 |
-| `auth-missing` | 页面需要登录，但对应认证档案尚未建立 |
-| `auth-expired` | 已有认证档案失效，需要重新登录 |
-| `auth-corrupt` | 本机认证缓存损坏或属于其它站点 |
-| `timeout` | 加载超时 |
-| `blank-page` | 加载完但 body 是空的，通常前端崩了 |
-| `http-error` · `unsafe-port` · `dns-failure` | 其余明确可判的情况 |
-
-运行 `manual auth login --profile <名称>` 会打开一次可见浏览器。登录成功后，cookies 与 localStorage
-保存在当前系统用户的缓存目录，而不是项目或 worktree 中。Windows 默认位置为
-`%LOCALAPPDATA%/living-user-manual/auth/`。`status` 只展示档案元数据，绝不输出 cookie 或 token；
-`clear` 可清除指定档案。
-
-### 截图里的数据：Demo Capture
-
-截图只有一种数据模式 `capture.mode: demo`：真实界面 + 公开内容或可证明为虚构的演示数据。
-敏感区域在 Skill 侧的 `capture.demo.selectors` 中按 CSS 选择器声明（被采集项目无需改动；页面自带的
-`data-redact="<键>"` 等价），截图前替换为 `capture.demo.text` 配置的演示值，或由 Fixture 接口数据提供；
-截图后审计原始值是否仍出现在页面其他可见位置。浏览器内的非只读请求默认中止，只放行登记过的请求；
-页面有敏感区域时，没有 Fixture 也没有登记的数据读取同样不放行截图。门禁结论为 `passed / needs_fixture / blocked`，未通过的截图连同原图一起丢弃。
-配置、Fixture 写法与原因码排查见 [Demo Capture](docs/DEMO_CAPTURE.md)。
-
-表单控件里的手机号、邮箱、认证字段仍按文字内容计算矩形做精确遮罩（完全不透明的浅色合成马赛克，
-不使用 blur）；已经显示为 `134****1255` 的内容不会重复处理。
-
-任务产物分为本地 raw、sanitized 中间图和可发布 annotated 图。正式任务文档只能引用
-`docs/manual/images/annotated/`，发布校验会阻止 raw、诊断图或不安全遮罩进入外部手册。
-
-### generate 怎么保证「中文自然」又「事实不走样」
-
-两件事分开做：**中文润色是 AI 的活，事实校验是程序的活。**
-
-```
-页面模型 + 真实 capture 数据
-    → .manual/drafts/<id>.md          事实草稿（程序，只有确定性事实）
-    → references/manual-writing-style.md   中文自然化（AI）
-    → 事实一致性校验                    （程序，逐项比对）
-    → docs/manual/<id>.md              正式文档
-```
-
-留中间草稿是为了出问题时能一眼判断：是事实生成阶段错了，还是中文润色阶段错了。
-
-润色阶段**只能改**句式、语序、冗余表达、翻译腔、AI 套话；**不能改**事实、UI 名称、
-操作顺序、截图引用、数字。程序会逐项比对并拦截：
-
-```
-✗ 出现了草稿里没有的 UI 名称。这些词是编的，真实页面上可能不存在。
-      新增: "开启新会话"  "导出"
-✗ 出现了草稿里没有的数字。响应时间、限额、数量这类事实不能在润色阶段补。
-      新增: "3"
-✗ 操作步骤数量从 3 变成了 4。
-```
-
-校验不过就不输出正式文档。`--fallback-draft` 可以用草稿原文强行定稿——保事实、丢润色。
-
-写作规范见 [references/manual-writing-style.md](references/manual-writing-style.md)。
-
-## 生成什么
-
-```
-<项目根>/.manual/
-  config.yaml          项目配置（init 产出，应入库）
-  project.yaml         项目地图 / 页面索引（inspect 产出）
-  pages/<id>.yaml      每个页面的详情
-  index/forward.json   页面到源码、截图与手册的正索引（派生产物）
-  index/reverse.json   源码文件到受影响页面的逆索引（派生产物）
-  drafts/<id>.md       事实草稿（generate 产出，保留便于回溯）
-  .gitignore           让本地截图中间产物不入库
-
-<项目根>/docs/manual/
-  <id>.md              正式手册（generate 定稿产出）
-  tasks/<id>.md        任务操作指南
-  index.md             目录（manual:catalog 区块自动维护）
-  meta.json            每篇的更新时间 + 相关文章（每次发布整文件重写）
-  images/annotated/    发布图（原图与诊断图留在 .manual/ 下，不发布）
-```
-
-页面文件的字段有明确归属：`route`/`dynamic`/`entry`/`dependencies` 由扫描拥有，重跑 inspect 会更新；`title`/`purpose`/`detectedActions` 由分析拥有，**inspect 绝不覆盖**；`browser.*` 由 capture 拥有。入口或路由变了，原分析会被标成 `stale` 提示重新分析；路由变了截图状态会被清空；代码里删掉的路由默认只报告，确认后加 `--prune` 才清理。
-
-capture 和 generate 会读取正索引：capture 使用索引中的当前路由，generate 把关联源码作为结构化上下文与草稿元数据。索引缺失或 JSON 损坏时，两条命令都会回退到页面 YAML，旧项目无需迁移。
-
-配置结构靠**具名注册表 + active 指针**保证扩展性：加截图规格、加 Browser Provider 都是纯增量。生成的 config.yaml 里带有 mobile profile 与 computer-use provider 的注释示例。
-
-## 测试
+## 开发与测试
 
 ```bash
-npm test               # 全部测试文件（node test/run.js）
-npm run test:unit      # 不启动浏览器的测试（秒级到数十秒）
-npm run test:browser   # 真实 Chromium + 本地测试服务器的集成测试
-node test/run.js --list --group browser   # 查看分组
-node test/run.js --group golden   # 固定小页面集：标注几何（DPR 1/1.5/2 × 视口/整页）、Demo 截图、Scenario 状态
-node test/run.js --group e2e      # 端到端：init → capture → generate → publish → update / verify
+npm run test:unit
+npm run test:browser
+npm test
 ```
 
-全程真实：真 spawn CLI、真 HTTP 服务器、真 Chromium、真 PNG。测试服务器提供运行态开关（按钮改名、权限收回、
-页面 404、布局偏移、时钟区域），用来证明 `verify --live` 在源码没有变化时也能发现线上变化。
-
-- `test/performance.test.js` 断言调用次数：冷启动 1 次 Browser 启动、每个 Scenario 一个 Context；无变化再生成不启动
-  Browser、不新增截图；只改模板不启动 Browser；改共享组件只重新导航受影响的页面。耗时只报告中位数 / p90
-  （设 `MANUAL_PERF_REPORT_DIR` 时写入 `performance.json`），不设硬阈值。
-- `test/install-smoke.test.js` 把 `npm pack` 的包解到临时目录，HOME 指向空目录，依次执行 doctor / init / inspect /
-  describe / generate / update，证明安装后的工具不依赖仓库外的个人工具目录。
-
-### CI
-
-本仓库不配置 GitHub Actions，测试在本地运行（`npm test`）。需要在其他平台验证时，在对应机器上执行
-`npm ci && npx playwright install chromium`（Linux 加 `--with-deps` 并安装 `fonts-noto-cjk`）后运行 `npm test`。
-
-## 设计
-
-- [架构与演进约定](docs/ARCHITECTURE.md)
-- [运行时](docs/RUNTIME.md)、[迁移与兼容入口](docs/MIGRATION.md)
+浏览器测试使用本地测试服务器和真实 Chromium。本仓库不配置 GitHub Actions；跨平台验证需在相应机器安装依赖并运行测试。架构、模型和扩展约定见 [架构文档](docs/ARCHITECTURE.md)。
