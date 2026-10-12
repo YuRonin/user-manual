@@ -98,6 +98,19 @@ const annotationCodes = (errors) => errors.map((item) => item.code).filter((code
 (async () => {
   console.log('annotation coverage');
 
+  await test('任务步骤的显式标注不是本步动作目标时，合成的功能 ID 也登记进清单，计划不引用清单外功能', () => {
+    const page = { id: 'chat', guide: [], detectedActions: [] };
+    const task = { id: 'review', steps: [{ id: 'open-popover', page: 'chat', action: { type: 'click', target: { role: 'button', name: '当前积分' } },
+      capture: { timing: 'after', annotations: [{ target: { role: 'button', name: '积分中心' }, label: '1' }, { target: 'action.target', label: '2' }] } }] };
+    const step = task.steps[0];
+    const inv = buildInventory({ page, task });
+    const stepPlan = buildPlan({ inventory: inv, page, task, step });
+    const listed = new Set(inv.map((item) => item.feature_id));
+    assert.deepStrictEqual(stepPlan.map((item) => item.feature_id), ['task:review:open-popover:annotation:0', 'task:review:open-popover']);
+    for (const item of stepPlan) assert.ok(listed.has(item.feature_id), `计划引用了清单外功能 ${item.feature_id}`);
+    assert.strictEqual(inv.find((item) => item.feature_id === 'task:review:open-popover:annotation:0').priority, 'optional');
+  });
+
   await test('Required 8 个、计划 6 个：缺两项 missing-from-plan，不能 100%', () => {
     const report = verifyCoverage({ inventory, plan, rendered });
     assert.strictEqual(report.required.total, 8);

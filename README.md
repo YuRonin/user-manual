@@ -84,6 +84,19 @@ node /path/to/user-manual/bin/manual.js inspect --project-root /path/to/your-nex
 
 以下示例用 `manual` 简写同一个 CLI；直接运行时，替换为上面的 `node .../bin/manual.js` 路径。`doctor` 是只读环境检查，`init` 创建 `.manual/config.yaml`，`inspect` 生成页面地图。`inspect` 之后，需要阅读源码并用 `describe --input <分析.json>` 补充页面用途和操作；AI skill 会引导这一步。[命令细节](references/command-workflows.md)给出了输入格式。
 
+### 4. 受登录保护的站点
+
+先在 `.manual/config.yaml` 配好 `auth.verifyPath` 与 `auth.identityAssertions`，再运行：
+
+```bash
+manual auth login --profile default   # 打开一次可见浏览器，手动登录后保存登录状态
+manual auth check                     # 在线确认登录状态仍然有效
+```
+
+cookies 与 localStorage 保存在当前系统用户的缓存目录（Windows 为 `%LOCALAPPDATA%`），不写进项目，可跨 worktree 复用。运行中遇到 `auth-missing`（还没有认证档案）或 `auth-expired`（登录已失效）时，运行 `manual auth login --resume <runId>`，登录后自动继续。
+
+两点容易踩坑：侧栏收起这类界面状态如果存在 localStorage，在 `auth.ephemeralStorageKeys` 里列出，避免被写回认证档案；Demo 截图默认中止所有非只读请求，站点靠 `POST` 刷新令牌时要把刷新接口登记到 `capture.demo.network.allow`，否则令牌过期后页面会被登出。细节见[命令细节](references/command-workflows.md)与 [Demo Capture](docs/DEMO_CAPTURE.md)。
+
 ## 一份手册怎样生成
 
 ```text

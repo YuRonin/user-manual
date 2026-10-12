@@ -12,6 +12,20 @@ async function test(name, fn) { try { await fn(); passed++; console.log(`  ✓ $
  const prepare = async (selectors) => { await p.installDemoGuard({ baseUrl: server.baseUrl, demo: config(selectors).demo }); await p.open(server.baseUrl + '/role-demo'); await p.applyDemo(); };
  const gate = async () => decide({ audit: await p.auditDemo(), demo: p.demo });
  try {
+ await test('外层声明、内层带样式：演示值写进内层元素，保留其 class；有直接文字的区域整体替换', async () => {
+  await p.installDemoGuard({ baseUrl: server.baseUrl, demo: config({ private: '.wrap, .mixed' }).demo });
+  await p.open(server.baseUrl + '/role-demo');
+  await p.page.evaluate(() => document.body.insertAdjacentHTML('beforeend',
+   '<p><span class="wrap"><span class="styled" style="font-weight:700">真实余额7356</span></span></p>' +
+   '<p><span class="mixed">余额 <b class="inner">真实数字8123</b></span></p>'));
+  await p.applyDemo();
+  const styled = p.page.locator('.wrap > .styled');
+  assert.strictEqual(await styled.count(), 1);
+  assert.match(await styled.textContent(), /^演示/);
+  assert.strictEqual(await p.page.locator('.mixed .inner').count(), 0);
+  assert.match(await p.page.locator('.mixed').textContent(), /^演示/);
+  assert.strictEqual((await gate()).status, 'passed');
+ });
  await test('角色重复命中全部替换，名称改变后仍可幂等处理与审计', async () => {
   await prepare({ private: { role: 'button', name: '私人说明甲' } });
   assert.deepStrictEqual(await p.page.locator('.private').allTextContents(), ['演示甲', '演示乙']);

@@ -56,6 +56,14 @@ function applyDemoInPage({ text = {}, images = {}, known = [], selectors = {}, r
   const regions = [...regionKeys.keys()].filter((el) => !el.parentElement || !inRegion(el.parentElement));
   const out = { replaced: {}, images: {}, unconfigured: [], imageUnconfigured: [], unreplaceable: [], invalidSelectors, missingSelectors };
   const counters = {};
+  // 写入演示值的位置：区域本身没有直接文字、只包着一个子元素时，沿这条单链下探到最内层，
+  // 只替换那里的文字，保留内层元素及其 class 样式。例如 <span data-redact><span class="font-semibold">7,356</span></span>，
+  // 直接写外层 textContent 会删掉内层带样式的 span，演示值变成无样式文字。
+  const textHost = (el) => {
+    let host = el;
+    while (host.children.length === 1 && ![...host.childNodes].some((n) => n.nodeType === 3 && n.nodeValue.trim())) host = host.firstElementChild;
+    return host;
+  };
   const unreplaceable = new Set(['canvas', 'video', 'iframe', 'object', 'embed', 'svg', 'picture']);
   for (const el of regions) {
     if (!rendered(el)) continue;
@@ -90,7 +98,7 @@ function applyDemoInPage({ text = {}, images = {}, known = [], selectors = {}, r
     if (current !== value) {
       // 之前替换过的演示值不是原始值；只有页面自己渲染出的内容才记为原始值
       if (current !== el.getAttribute('data-manual-demo')) remember(current);
-      if (field) el.value = value; else el.textContent = value;
+      if (field) el.value = value; else textHost(el).textContent = value;
     }
     el.setAttribute('data-manual-demo', value);
     out.replaced[key] = (out.replaced[key] || 0) + 1;

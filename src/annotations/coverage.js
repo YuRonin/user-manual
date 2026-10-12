@@ -62,6 +62,14 @@ function buildInventory({ page, task = null, scenario = 'default' }) {
     const id = stepFeatureId(task, step, [...features.values()]);
     // 隐式动作目标默认是提示性标注：截"操作后"图时目标可能已消失；显式功能声明的优先级优先
     put({ feature_id: id, label: step.action?.target?.name || step.instruction, priority: features.get(id)?.priority || 'optional', source: ['task.steps'], source_refs: [`task.steps:${task.id}/${step.id}`], task_ids: [task.id], scenario: task.scenarioId || scenario, description: step.instruction || '', explanation_ref: `step.${step.id}`, target: step.action?.target || null });
+    // 显式标注框住的不是本步动作目标（如"点开卡片后标出下一步要点的按钮"）时，buildPlan 给它合成
+    // task:<任务>:<步骤>:annotation:<序号>；这里同步登记进清单，否则计划引用清单外功能、记录写入必然失败。
+    for (const [index, annotation] of (step.capture?.annotations || []).entries()) {
+      if (annotation.feature_id || annotation.target === 'action.target') continue;
+      if (step.action?.target && JSON.stringify(annotation.target) === JSON.stringify(step.action.target)) continue;
+      const annotationId = `task:${task.id}:${step.id}:annotation:${index}`;
+      put({ feature_id: annotationId, label: annotation.target?.name || annotation.label || step.instruction, priority: features.get(annotationId)?.priority || 'optional', source: ['task.steps'], source_refs: [`task.steps:${task.id}/${step.id}/annotations/${index}`], task_ids: [task.id], scenario: task.scenarioId || scenario, description: step.capture?.readerCaption || step.instruction || '', explanation_ref: `step.${step.id}`, target: annotation.target || null });
+    }
   }
   return [...features.values()];
 }
