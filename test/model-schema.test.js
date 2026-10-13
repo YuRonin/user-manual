@@ -151,7 +151,7 @@ test('normalizeLegacy：旧版转内存兼容模型，不修改入参', () => {
   const n = schema.normalizeLegacy('page', oldPage);
   assert.equal(n.legacy, true);
   assert.equal(n.fromVersion, 1);
-  assert.equal(n.value.schemaVersion, 2);
+  assert.equal(n.value.schemaVersion, schema.SCHEMA_VERSIONS.page);
   assert.equal(n.value.lifecycle, 'active');
   assert.deepStrictEqual(n.value.routeBindings, [{ id: 'main', template: '/user-center', entryFiles: ['app/user-center/page.tsx'] }]);
   assert.equal(JSON.stringify(oldPage), before);

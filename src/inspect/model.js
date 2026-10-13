@@ -198,6 +198,8 @@ function mergePage(existing, scanned) {
     purpose: existing.purpose ?? null,
     detectedActions: Array.isArray(existing.detectedActions) ? existing.detectedActions : [],
     ...(existing.guide ? { guide: existing.guide } : {}),
+    ...(existing.sections ? { sections: existing.sections } : {}),
+    ...(existing.figures ? { figures: existing.figures } : {}),
     ...(Array.isArray(existing.variants) ? { variants: existing.variants } : {}),
     // 显式确认的功能是人工决定，重新扫描不能丢（B2-02）
     ...(Array.isArray(existing.features) ? { features: existing.features } : {}),

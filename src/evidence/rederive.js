@@ -30,7 +30,7 @@ function dirOf(artifactPath) {
 /**
  * @returns {Promise<{ records: object[], mapping: Record<string, string> }>}  mapping: 旧 captureId → 新 captureId
  */
-async function rederiveCaptures({ projectRoot, config, captureIds, runId = null }) {
+async function rederiveCaptures({ projectRoot, config, captureIds, runId = null, layoutPage = null }) {
   const stateDirAbs = path.join(projectRoot, config.artifacts.stateDir);
   const store = createCaptureStore({ projectRoot, stateDirAbs });
   const records = [];
@@ -52,13 +52,28 @@ async function rederiveCaptures({ projectRoot, config, captureIds, runId = null 
     fs.copyFileSync(path.join(projectRoot, raw.path), stagedRaw);
     fs.copyFileSync(path.join(projectRoot, derivation.path), handle.file('derivation.json'));
     try {
-      const captured = { shot: { meta: sidecar.shotMeta || {} }, geometry: sidecar.geometry, targets: sidecar.targets || [], candidates: sidecar.candidates || [], inventory: sidecar.inventory || null, plan: sidecar.plan || null, featureCandidates: sidecar.featureCandidates || [], demoDecision: old.privacy?.demo || null };
+      const captured = { shot: { meta: sidecar.shotMeta || {} }, geometry: sidecar.geometry, targets: sidecar.targets || [], candidates: sidecar.candidates || [], inventory: sidecar.inventory || null, plan: sidecar.plan || null, featureCandidates: sidecar.featureCandidates || [], demoDecision: old.privacy?.demo || null, figures: sidecar.figures, bindings: sidecar.bindings, stateVerified: sidecar.stateVerified };
+      if (layoutPage?.sections?.length) {
+        const layout = require('../annotations/section-plan');
+        if (old.bindingRevision !== layout.bindingRevision(layoutPage)) throw new RuntimeError('rederive-unavailable', '控件或状态发生变化，无法使用旧坐标重新派生');
+        const nextPlan = layout.layoutPlan(layoutPage, old.scenarioId, old.checkpointId).map(p => ({ ...p, target: sidecar.bindings.find(b => b.operationId === p.operation_id)?.target || p.target }));
+        const nextFigures = layout.figuresFor(layoutPage, old.scenarioId, old.checkpointId);
+        captured.targets = nextPlan.map(p => {
+          const prior = sidecar.targets.find(t => t.operation_id === p.operation_id && t.rect);
+          if (!prior) throw new RuntimeError('rederive-unavailable', `缺少操作 ${p.operation_id} 的有效几何，需要重新采集`);
+          return { ...prior, figure_id: p.figure_id, label: p.label };
+        });
+        captured.figures = nextFigures.map(f => ({ ...f, regionRect: sidecar.figures.find(old => JSON.stringify(old.frame?.target) === JSON.stringify(f.frame?.target))?.regionRect || null }));
+        captured.plan = nextPlan;
+        captured.bindings = nextPlan.map(p => ({ ...sidecar.bindings.find(b => b.operationId === p.operation_id), figureId: p.figure_id }));
+        fs.writeFileSync(handle.file('derivation.json'), require('./capture-page').derivationSidecar(captured));
+      }
       const safe = await derivePublished({
         captured, rawPath: stagedRaw, sanitizedPath: handle.file('sanitized.png'), publishedPath: handle.file('published.png'),
         theme: config.annotation.themes[config.annotation.activeTheme], redactionRules: config.privacy || {},
       });
       // 沿用冻结的清单与计划：重新派生只换主题 / 隐私规则，不按当前定义重新解释（定义变了由 annotation-plan-changed 要求重采）
-      const annotationOut = captured.inventory ? annotationArtifacts({ inventory: captured.inventory, plan: captured.plan || [], rendered: safe.rendered, candidates: captured.featureCandidates, coverage: safe.coverage }) : null;
+      const annotationOut = captured.inventory ? annotationArtifacts({ inventory: captured.inventory, plan: captured.plan || [], rendered: safe.rendered, figures: safe.figures, bindings: safe.bindings, candidates: captured.featureCandidates, coverage: safe.coverage }) : null;
       if (annotationOut) fs.writeFileSync(handle.file('annotations.json'), JSON.stringify(annotationOut.document, null, 2));
       const oldSanitized = old.artifacts.find((a) => a.kind === 'sanitized');
       const oldPublished = old.artifacts.find((a) => a.kind === 'published');
@@ -74,6 +89,7 @@ async function rederiveCaptures({ projectRoot, config, captureIds, runId = null 
         artifacts,
         record: {
           ...rest,
+          ...(layoutPage?.sections?.length ? { layoutRevision: require('../annotations/section-plan').layoutRevision(layoutPage) } : {}),
           rawRetained: config.capture?.safety?.persistRaw !== false,
           runId,
           privacy: safe.privacy,

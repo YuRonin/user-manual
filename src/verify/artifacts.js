@@ -96,12 +96,25 @@ function verifyPageArtifacts({ root, config, pageId }) {
   const manual = path.join(root, release.documentPath);
   if (!fs.existsSync(manual)) return { ok: false, errors: [`document-missing: ${release.documentPath} 不存在。`], release };
   const errors = [];
+  let operationCoverage = null;
   if (fileHash(manual) !== release.documentHash) errors.push(`document-modified: ${release.documentPath} 与当前发布记录 ${release.id} 不一致（发布后被修改）。`);
   const markdown = fs.readFileSync(manual, 'utf8');
   const gate = validatePublication({ projectRoot: root, manualFile: manual, markdown, images: release.facts?.images || [], config, frozen: true });
   if (!gate.ok) errors.push(...formatIssues(gate.errors));
+  const pack = release.facts?.factPack;
+  if (pack?.sections?.length) {
+    errors.push(...require('../annotations/section-plan').validateRenderedLayout(pack, markdown).map(e => `${e.code}: ${e.message}`));
+    const page = { id: pageId, features: pack.features, sections: pack.sections, figures: pack.figures };
+    const store = createCaptureStore({ projectRoot: root, stateDirAbs: state });
+    const records = [...new Set((pack.artifacts || []).map(i => i.captureId))].map(id => store.read(id)).filter(Boolean);
+    const claims = require('../generate/result-evidence').resultEvidence({ projectRoot: root, config, page, frozen: pack.resultEvidence || [] });
+    errors.push(...claims.errors.map(e => `${e.code}: ${e.message}`));
+    const coverage = require('../annotations/section-plan').documentCoverage(page, release.facts.images || [], records, claims.claims);
+    operationCoverage = coverage;
+    errors.push(...coverage.errors.map(e => `${e.code}: ${e.message}`));
+  }
   errors.push(...formatIssues(sectionLinkErrors(root, config, release, 'page', pageId)));
-  return errors.length ? { ok: false, errors, release, manual } : { ok: true, release, manual, images: (release.facts?.images || []).map((i) => i.artifactPath), warnings: formatIssues(gate.warnings) };
+  return errors.length ? { ok: false, errors, release, manual, operationCoverage } : { ok: true, release, manual, operationCoverage, images: (release.facts?.images || []).map((i) => i.artifactPath), warnings: formatIssues(gate.warnings) };
 }
 
 /** 错误列表 → 报告检查项。 */

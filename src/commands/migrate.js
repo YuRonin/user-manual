@@ -9,7 +9,7 @@ const { exitCodeFor, usageExit } = require('../cli/output');
 const { loadConfig, configPathFor } = require('../config/load');
 const { planMigration, applyMigration, rollbackMigration } = require('../store/migrate');
 
-const KNOWN_FLAGS = new Set(['projectRoot', 'dryRun', 'apply', 'manifest', 'rollback', 'json', 'help']);
+const KNOWN_FLAGS = new Set(['projectRoot', 'dryRun', 'apply', 'manifest', 'rollback', 'json', 'help', 'layout', 'input']);
 const HELP = `
 manual migrate —— 把旧项目显式迁移到 v2 模型（可重复执行）
 
@@ -17,6 +17,9 @@ manual migrate —— 把旧项目显式迁移到 v2 模型（可重复执行）
   manual migrate --dry-run [--manifest <计划.json>] [--json]
   manual migrate --apply [--manifest <计划.json>] [--json]
   manual migrate --rollback <迁移 id> [--json]
+  manual migrate --layout --dry-run [--input <分类计划.json>] [--json]
+  manual migrate --layout --apply --input <分类计划.json> [--json]
+  manual migrate --layout --rollback <迁移 id> [--json]
 
 --dry-run   只读：列出实体版本变化、拟生成的 ID、无法证明的验证项、仍被公开引用的原图、
             需要重新采集的对象，以及 facts 与正式文档的冲突。不写项目内任何文件；
@@ -50,7 +53,7 @@ function summarize(plan) {
 }
 
 function run(argv) {
-  const { values, unknownFlags } = parseArgs(argv, { known: KNOWN_FLAGS, booleans: ['dryRun', 'apply'] });
+  const { values, unknownFlags } = parseArgs(argv, { known: KNOWN_FLAGS, booleans: ['dryRun', 'apply', 'layout'] });
   const json = values.json === true;
   if (values.help) { process.stdout.write(HELP + '\n'); return 0; }
   if (unknownFlags.length) return usageExit(fail(`未知参数: ${unknownFlags.join(', ')}`, json));
@@ -63,6 +66,14 @@ function run(argv) {
   const rawConfig = yaml.load(fs.readFileSync(configPathFor(projectRoot), 'utf8'));
 
   try {
+    if (values.layout) {
+      const migration = require('../annotations/layout-migration');
+      if (values.rollback) return output(migration.rollbackLayout({ projectRoot, config: loaded.config, id: values.rollback }), json);
+      const payload = values.input ? JSON.parse(fs.readFileSync(path.resolve(values.input), 'utf8')) : null;
+      if (values.dryRun) return output({ ok: true, report: migration.prepareLayouts({ projectRoot, config: loaded.config, payload }).report }, json);
+      if (!payload) return fail('--layout --apply 需要 --input <分类计划.json>', json);
+      return output(migration.applyLayouts({ projectRoot, config: loaded.config, payload }), json);
+    }
     if (values.dryRun) {
       const plan = planMigration(projectRoot, loaded.config, rawConfig);
       if (values.manifest) {

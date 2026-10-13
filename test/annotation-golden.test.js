@@ -120,7 +120,7 @@ const TARGETS = [
     }
 
     // ------------------------------------------------------------ AC-16 端到端：7 个标注、单图上限 5 → 两张图进入手册
-    await test('AC-16 端到端：7 个 guide 目标拆成两张发布图（1–5、6–7），手册按顺序引用两张图；B6-08 删掉 .manual/artifacts 后离线验证仍可核对，缺发布图明确报错', async () => {
+    await test('AC-16 端到端：分类工具栏的 7 个操作拆成两图并分别编号；B6-08 删掉 .manual/artifacts 后离线验证仍可核对，缺发布图明确报错', async () => {
       const project = fx.captureFixture();
       try {
         fx.writeFile(project, 'app/layout-dense/page.tsx');
@@ -134,13 +134,17 @@ const TARGETS = [
         const file = path.join(project, '.manual', 'pages', 'layout-dense.yaml');
         const page = yaml.load(fs.readFileSync(file, 'utf8'));
         page.guide = names.map((name, i) => ({ id: `tool-${i + 1}`, title: name, instruction: `点击「${name}」。`, target: { role: 'button', name } }));
+        page.schemaVersion = 3;
+        page.features = page.guide.map(g => ({ id: `page:${page.id}:${g.id}`, guideId: g.id, label: g.title, priority: 'required', contentKind: 'operation', operations: [{ id: g.id, instruction: g.instruction, evidenceRequirement: 'entry', targetHint: g.target }] }));
+        page.sections = [{ id: 'toolbar', title: '管理批改任务', goal: '找到批改工具栏的操作入口。', featureRefs: page.features.map(f => f.id), figureRefs: ['toolbar'] }];
+        page.figures = [{ id: 'toolbar', sectionId: 'toolbar', purpose: 'entry', caption: '批改工具栏', operationRefs: page.guide.map(g => g.id), frame: { mode: 'auto' } }];
         fs.writeFileSync(file, yaml.dump(page));
         const out = await expectExit(project, ['generate', 'page:layout-dense', '--copy-default'], 0, env);
         const record = JSON.parse(fs.readFileSync(path.join(project, '.manual', 'evidence', 'captures', `${JSON.parse(fs.readFileSync(path.join(project, '.manual', 'evidence', 'latest.json'), 'utf8')).refs['page:layout-dense']}.json`), 'utf8'));
         const parts = record.artifacts.filter((a) => a.kind === 'published');
         assert.deepStrictEqual(parts.map((a) => a.part), [1, 2], JSON.stringify(record.artifacts.map((a) => a.kind)));
         assert.ok(/--part-2--/.test(parts[1].path), parts[1].path);
-        assert.deepStrictEqual(record.annotationProof.rendered.map((r) => [r.label, r.part]), names.map((_, i) => [String(i + 1), i < 5 ? 1 : 2]));
+        assert.deepStrictEqual(record.annotationProof.rendered.map((r) => [r.label, r.part]), names.map((_, i) => [String(i % 5 + 1), i < 5 ? 1 : 2]));
         const doc = fs.readFileSync(path.join(project, 'docs', 'manual', 'layout-dense.md'), 'utf8');
         const images = [...doc.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)].map((m) => m[1]);
         assert.strictEqual(images.length, 2, doc);

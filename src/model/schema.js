@@ -16,7 +16,7 @@
 
 const { isSafeId, isUuid, isAssertionRef } = require('./ids');
 
-const SCHEMA_VERSIONS = { config: 2, page: 2, userTask: 2, scenario: 1, capture: 1, release: 1, run: 1 };
+const SCHEMA_VERSIONS = { config: 2, page: 3, userTask: 2, scenario: 1, capture: 1, release: 1, run: 1 };
 
 const ACTION_TYPES = ['click', 'hover', 'fill', 'select', 'check', 'uncheck', 'inspect'];
 const ASSERTION_TYPES = ['url', 'visible', 'hidden', 'editable'];
@@ -34,7 +34,7 @@ const SHA256_RE = /^(sha256:)?[0-9a-f]{64}$/;
 const KNOWN_FIELDS = {
   page: ['schemaVersion', 'id', 'revision', 'lifecycle', 'title', 'purpose', 'route', 'dynamic', 'params', 'routeBindings',
     'entry', 'source', 'dependencies', 'includeInManual', 'detectedActions', 'features', 'guide', 'states', 'identityAssertions', 'confidence',
-    'browser', 'status', 'analysis', 'latestCaptureId', 'variants'],
+    'browser', 'status', 'analysis', 'latestCaptureId', 'variants', 'sections', 'figures'],
   userTask: ['schemaVersion', 'id', 'revision', 'title', 'goal', 'entryPage', 'priority', 'preconditions', 'readerPreconditions', 'risk', 'status',
     'approval', 'environment', 'fixtures', 'writeAuthorization', 'steps', 'branches', 'relatedTasks', 'completion', 'evidence', 'evidenceManifest',
     'capturePlan', 'captureIds', 'lastCapture', 'stale', 'lastVerification', 'params', 'authProfile',
@@ -322,6 +322,11 @@ function validatePage(page) {
       });
     }
   }
+  for (const e of require('../annotations/section-plan').validateLayout(page)) c.error(e.path, e.code, e.message);
+  for (const [i, f] of (Array.isArray(page.features) ? page.features : []).entries()) for (const [j, op] of (Array.isArray(f?.operations) ? f.operations : []).entries()) {
+    if (op?.targetHint) validateTarget(c, op.targetHint, `features[${i}].operations[${j}].targetHint`);
+  }
+  for (const [i, fig] of (Array.isArray(page.figures) ? page.figures : []).entries()) if (fig?.frame?.target) validateTarget(c, fig.frame.target, `figures[${i}].frame.target`);
   if (page.identityAssertions !== undefined) validateAssertions(c, page.identityAssertions, 'identityAssertions');
   return c.result({ version: version.version });
 }

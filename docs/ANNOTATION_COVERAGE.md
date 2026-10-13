@@ -1,5 +1,7 @@
 # 标注覆盖率
 
+分类手册增加文档级操作覆盖：进入 sections.featureRefs 的全部操作（包括 optional）必须在实际引用的 Figure/part 中有对应绑定、标注和状态证明。草稿报告缺口，internal/public 正式发布均阻断。完整模型见 [分类图文手册](GROUPED_MANUAL.md)。下文旧 guide 的 optional 规则仅用于兼容清单，不能免除正式正文证据要求。
+
 ## 功能清单：Required 从哪里来
 
 **Required 只来自显式确认**：页面 `features` 里由 `describe --input` 写入的决定。其余来源都只是待确认候选（`undecided`），照常进入标注计划、出图，但不计入 Required 分母，避免"计划核对计划"：

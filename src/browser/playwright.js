@@ -667,18 +667,31 @@ class PlaywrightBrowserProvider extends BrowserProvider {
       const aria = await this.page.locator('body').ariaSnapshot({ timeout: 5000 });
       // Demo 原始自由文本也可能残留在 aria-label；摘要只能保留处理后的名称。
       const safeItems = await this.page.evaluate((items) => {
+        // Native file inputs may be absent from the accessibility snapshot.
+        // Observe their labels and stable attributes, never their selected values.
+        for (const el of document.querySelectorAll('input[type="file"]')) {
+          const name = el.getAttribute('aria-label') || [...(el.labels || [])].map(l => l.innerText).join(' ').trim();
+          if (!name) continue;
+          const selector = el.id ? `input[type="file"]#${CSS.escape(el.id)}` : el.name ? `input[type="file"][name="${CSS.escape(el.name)}"]` : 'input[type="file"]';
+          items.push({ role: 'fileinput', name, locator: { selector } });
+        }
         for (const item of items) for (const original of window.__manualDemo?.originals || []) {
           // accessible name 会归一化空白；快照还可能转义反斜杠。两种形式都不能持久化。
           const variants = [original, original.replace(/\s+/g, ' '), JSON.stringify(original).slice(1, -1).replace(/\\"/g, '"')];
-          for (const value of variants) if (value) item.name = item.name.split(value).join('[redacted]');
+          for (const value of variants) if (value) {
+            item.name = item.name.split(value).join('[redacted]');
+            if (item.within?.name) item.within.name = item.within.name.split(value).join('[redacted]');
+          }
         }
         return items;
       }, parseAriaSnapshot(aria));
-      const summary = semanticSummary(safeItems);
-      for (const item of summary.items) {
-        if (!item.name || item.name.includes('[redacted]')) { item.locator = null; item.resolution = 'redacted-or-unnamed'; continue; }
-        const target = { role: item.role, name: item.name, ...(item.level ? { level: item.level } : {}) };
-        const count = await this.locatorFor(target).count();
+      const summary = semanticSummary(safeItems.map(i => ({ ...i, name: require('../verify/semantic-diff').redact(i.name) })));
+      for (const [index, item] of summary.items.entries()) {
+        if (!item.name || item.name.includes('[redacted]') || safeItems[index].within?.name.includes('[redacted]')) { item.locator = null; item.resolution = 'redacted-or-unnamed'; continue; }
+        const target = safeItems[index].locator || { role: item.role, name: item.name, exact: true, ...(safeItems[index].within ? { within: safeItems[index].within } : {}) };
+        const locator = this.locatorFor(target);
+        let count = 0;
+        for (let i = 0, total = await locator.count(); i < total; i++) if (await locator.nth(i).isVisible().catch(() => false)) count++;
         item.matchCount = count;
         item.resolution = count === 1 ? 'unique' : count > 1 ? 'ambiguous' : 'missing';
         item.locator = count === 1 ? target : null;
@@ -757,6 +770,22 @@ class PlaywrightBrowserProvider extends BrowserProvider {
     }
     // presence 区分"页面上根本没有"与"有但不可见"（B5-13）；code 保持不变，旧的处理分支不受影响
     throw Object.assign(new Error(anyMatch ? '目标元素存在但不可见；检查它需要的前置交互（展开、悬停、切换标签）。' : '目标元素不存在；检查前置数据、空结果和页面状态。'), { code: 'target-not-visible', presence: anyMatch ? 'hidden' : 'absent' });
+  }
+
+  /** Explicit hints must resolve to the same DOM control as a safe observed candidate. */
+  async matchBindingCandidate(target, candidates) {
+    const locator = await this.uniqueVisibleLocator(target);
+    const element = await locator.elementHandle();
+    if (!element) return null;
+    try {
+      for (const candidate of candidates) {
+        try {
+          const observed = await this.uniqueVisibleLocator(candidate.target);
+          if (await observed.evaluate((el, expected) => el === expected, element)) return candidate;
+        } catch (_) { /* A changed or ambiguous candidate cannot verify a hint. */ }
+      }
+      return null;
+    } finally { await element.dispose(); }
   }
 
   /** 元素实际画出来了吗：自身 visibility 不可见，或自身与祖先 opacity 连乘近 0（hover 才显示的图标常见写法）都算透明。 */

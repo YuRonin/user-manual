@@ -24,14 +24,16 @@ const VIEW_FIELDS = {
   page: {
     capture: (p) => ({
       lifecycle: p.lifecycle, route: p.route, dynamic: p.dynamic, params: p.params, routeBindings: p.routeBindings, entry: p.entry,
+      ...(p.sections?.length ? { binding: require('../annotations/section-plan').bindingLayout(p) } : {}),
       states: p.states, identityAssertions: p.identityAssertions, detectedActions: p.detectedActions,
       features: (p.features || []).map((f) => ({ id: f.id ?? f.feature_id, priority: f.priority, target: f.target ?? null, taskIds: f.taskIds ?? f.task_ids ?? null })),
       guide: (p.guide || []).map((g) => ({ id: g.id, target: g.target ?? null, featureId: g.featureId ?? null })),
     }),
     docs: (p) => ({
+      sections: p.sections, figures: p.figures,
       title: p.title, purpose: p.purpose, includeInManual: p.includeInManual,
       variants: p.variants,
-      features: (p.features || []).map((f) => ({ id: f.id ?? f.feature_id, label: f.label, description: f.description ?? null })),
+      features: (p.features || []).map((f) => ({ id: f.id ?? f.feature_id, label: f.label, description: f.description ?? null, operations: f.operations })),
       guide: (p.guide || []).map((g) => ({ id: g.id, title: g.title ?? null, instruction: g.instruction ?? null })),
     }),
   },
@@ -114,7 +116,7 @@ function modelChangeSections({ projectRoot, stateDirAbs, model, published, image
     // 主题 / 渲染器变化只需重新派生
     const records = (release.captureIds || []).map((captureId) => { try { return store.read(captureId); } catch (_) { return null; } }).filter(Boolean);
     if (type === 'page') {
-      for (const variant of entity.variants || []) {
+      for (const variant of entity.sections?.length ? [...new Set(entity.figures.map(f => f.scenarioId || `page-${id}`))].filter(s => s !== `page-${id}`).map(scenarioId => ({ scenarioId })) : entity.variants || []) {
         const resolved = require('../scenarios/store').readScenario(stateDirAbs, variant.scenarioId, { stepIds: [] });
         const baseline = records.find((r) => r.scenarioId === variant.scenarioId);
         if (!resolved.ok || !resolved.scenario || !baseline || baseline.scenarioRevision !== resolved.scenario.revision

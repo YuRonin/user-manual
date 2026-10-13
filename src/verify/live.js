@@ -59,13 +59,14 @@ async function frozenTargets(provider, plan, fullPage) {
   const targets = [];
   for (const [i, item] of plan.entries()) {
     const label = item.label || String(i + 1);
-    if (item.rect) { targets.push({ feature_id: item.feature_id, label, rect: item.rect }); continue; }
+    const extra = item.operation_id ? { operation_id: item.operation_id, figure_id: item.figure_id } : {};
+    if (item.rect) { targets.push({ ...extra, feature_id: item.feature_id, label, rect: item.rect }); continue; }
     if (!item.target) { targets.push({ feature_id: item.feature_id, label, reason: 'target-not-declared' }); continue; }
     try {
       const found = await provider.performAction({ type: 'inspect', target: item.target });
       if (!found?.rect) { targets.push({ feature_id: item.feature_id, label, reason: 'target-not-located' }); continue; }
       const geometry = fullPage ? await provider.collectGeometry({ fullPage: true }) : null;
-      targets.push({ feature_id: item.feature_id, label, rect: toCanvasRect(found.rect, { fullPage, geometry, pinned: found.pinned || null }) });
+      targets.push({ ...extra, feature_id: item.feature_id, label, rect: toCanvasRect(found.rect, { fullPage, geometry, pinned: found.pinned || null }) });
     } catch (error) { targets.push({ feature_id: item.feature_id, label, reason: error.code || 'target-not-located' }); }
   }
   return targets;
@@ -114,6 +115,14 @@ async function pageDrift({ provider, projectRoot, config, stateDirAbs, release, 
       assertState: async () => { for (const assertion of identityAssertions.filter((a) => a.type !== 'url')) await assertWithin(provider, assertion, { timeoutMs: DEFAULT_ASSERTION_TIMEOUT_MS }); },
       resolveTargets: async () => frozenTargets(provider, plan, !!baseline.spec?.fullPage) });
     if (layer === 'annotated' && sidecar?.inventory) { captured.inventory = sidecar.inventory; captured.plan = plan; }
+    if (layer === 'annotated' && sidecar?.figures) {
+      const figures = [];
+      for (const f of sidecar.figures) {
+        const region = f.frame?.mode === 'region' ? await provider.performAction({ type: 'inspect', target: f.frame.target }) : null;
+        figures.push({ ...f, ...(region?.rect ? { regionRect: toCanvasRect(region.rect, { fullPage: !!baseline.spec?.fullPage, geometry: captured.geometry, pinned: region.pinned || null }) } : {}) });
+      }
+      Object.assign(captured, { figures, bindings: sidecar.bindings, stateVerified: sidecar.stateVerified });
+    }
     const safe = await derivePublished({
       captured, rawPath,
       sanitizedPath: path.join(work, 'sanitized.png'),
@@ -150,7 +159,11 @@ async function pageDrift({ provider, projectRoot, config, stateDirAbs, release, 
     for (const [index, pair] of pairs.entries()) {
       const result = await compareImages({
         ...pair,
-        masks: used.map((m) => scaleRect(m.rect, dpr)),
+        masks: used.map((m) => {
+          const scaled = scaleRect(m.rect, dpr);
+          const crop = sidecar?.figures ? baseline.annotationProof?.figures?.find(f => f.part === (baselineParts[index]?.part || index + 1))?.crop : null;
+          return crop ? { ...scaled, x: scaled.x - crop.x, y: scaled.y - crop.y } : scaled;
+        }),
         tolerance: config.verify?.visual?.tolerance,
         threshold: config.verify?.visual?.threshold,
         diffPath: path.join(stateDirAbs, 'verifications', `${reportId}-visual-diff${index ? `-part-${index + 1}` : ''}.png`),
@@ -343,6 +356,33 @@ async function verifyLive({ projectRoot, config, target, session, timeoutMs = DE
     const identityOk = !checks.some((c) => c.outcome !== 'passed');
     const stepRecords = [];
     if (!plan) {
+      if (release.facts?.factPack?.sections?.length) {
+        const store = createCaptureStore({ projectRoot, stateDirAbs });
+        const records = [...new Set((release.facts.images || []).map(i => i.captureId))].map(id => store.read(id)).filter(r => r?.scenarioId === scenario.id);
+        for (const record of records) {
+          // Each frozen state is checked separately; an entry cannot stand in for a menu.
+          const checkpoint = scenario.checkpoints.find(c => c.id === record.checkpointId);
+          if (!checkpoint) { checks.push(failedCheck(`checkpoint:${record.id}`, 'scenario-state', { code: 'state-assertion-failed', message: '已发布检查点不存在' })); continue; }
+          const start = checks.length;
+          await openEntry(provider, url, expected, checks, auth);
+          try { await runSetup(provider, scenario.setup || [], { timeoutMs }); }
+          catch (error) { checks.push(failedCheck(`setup:${record.id}`, 'scenario-state', error)); continue; }
+          const assertions = (checkpoint.assertions || []).filter(a => a.type !== 'url');
+          checks.push(...await collectAssertions(provider, assertions, { scope: 'scenario-state', idPrefix: `${scenario.id}:${checkpoint.id}`, timeoutMs }));
+          for (const binding of record.annotationProof?.bindings || []) {
+            try {
+              const found = await provider.performAction({ type: 'inspect', target: binding.target });
+              if (!found?.rect || found.obscuredBy) throw Object.assign(new Error('已发布控件不可见或被遮挡'), { code: 'target-not-visible' });
+              checks.push(check(`binding:${record.id}:${binding.figureId}:${binding.operationId}`, 'scenario-state', 'passed'));
+            } catch (error) { checks.push(failedCheck(`binding:${record.id}:${binding.operationId}`, 'scenario-state', error)); }
+          }
+          if (driftEnabled && checks.slice(start).every(c => c.outcome === 'passed')) {
+            const compared = await pageDrift({ provider, projectRoot, config, stateDirAbs, release, captureId: record.id, identityAssertions: assertions, reportId: `${reportId}-${record.id}` });
+            stepDrifts.push({ scenarioId: scenario.id, checkpointId: checkpoint.id, captureId: record.id, ...compared });
+          }
+        }
+        return { stepRecords };
+      }
       // 漂移以发布时的默认截图为基线；变体状态与它不可比，只做行为回放
       if (driftEnabled && identityOk && !target.scenarioId) {
         try {
@@ -407,7 +447,7 @@ async function verifyLive({ projectRoot, config, target, session, timeoutMs = DE
   steps = value.stepRecords;
   const variants = [];
   if (target.type === 'page' && !target.scenarioId) {
-    const scenarioIds = [...new Set(sectionsOf(release).flatMap((s) => s.scenarioRefs || []))];
+    const scenarioIds = [...new Set(sectionsOf(release).flatMap((s) => s.scenarioRefs || []))].filter(id => id !== `page-${target.id}`);
     for (const scenarioId of scenarioIds) {
       try {
         const variant = await verifyLive({ projectRoot, config, target: { ...target, scenarioId }, session, timeoutMs, drift: driftEnabled });

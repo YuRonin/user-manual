@@ -28,22 +28,26 @@ function inventoryRevision(inventory = []) {
 }
 
 function planRevision(plan = []) {
-  return revisionOf(plan.map((item) => ({ feature_id: item.feature_id, label: item.label || null, target: item.target || null, rect: item.rect || null })));
+  return revisionOf(plan.map((item) => ({ feature_id: item.feature_id, label: item.label || null, target: item.target || null, rect: item.rect || null,
+    ...(item.operation_id ? { operation_id: item.operation_id, figure_id: item.figure_id } : {}) })));
 }
 
 /** 写入 artifacts 的完整文档（含坐标），以及内嵌进 Capture 记录的精简证明。 */
-function annotationArtifacts({ inventory, plan, rendered, candidates = [], coverage }) {
+function annotationArtifacts({ inventory, plan, rendered, candidates = [], coverage, figures = null, bindings = null }) {
   const revisions = { inventoryRevision: inventoryRevision(inventory), planRevision: planRevision(plan) };
-  const document = { version: 1, ...revisions, inventory, plan, rendered, candidates, coverage };
+  const extra = figures ? { figures, bindings: bindings || [] } : {};
+  const document = { version: 1, ...revisions, inventory, plan, rendered, candidates, coverage, ...extra };
   const proof = {
     version: PROOF_VERSION,
+    ...extra,
     ...revisions,
     inventory: inventory.map((item) => ({ feature_id: item.feature_id, label: item.label || null, priority: item.priority, description: item.description || '', explanation_ref: item.explanation_ref || null, ...(item.guide_id ? { guide_id: item.guide_id } : {}), source: item.source || [] })),
-    plan: plan.map((item) => ({ feature_id: item.feature_id, label: item.label || null, priority: item.priority, ...(item.guide_id ? { guide_id: item.guide_id } : {}) })),
+    plan: plan.map((item) => ({ feature_id: item.feature_id, label: item.label || null, priority: item.priority, ...(item.operation_id ? { operation_id: item.operation_id, figure_id: item.figure_id } : {}), ...(item.guide_id ? { guide_id: item.guide_id } : {}) })),
     rendered: rendered.map((item) => ({ feature_id: item.feature_id, label: item.label || null, located: !!item.located, outlined: !!item.outlined, intersects: !!item.intersects, drawn: !!item.drawn, reason: item.reason || null,
       ...(item.visible !== undefined ? { visible: item.visible } : {}),
       ...(item.visibleRatio !== undefined ? { visibleRatio: item.visibleRatio, redactedRatio: item.redactedRatio } : {}),
       ...(item.part ? { part: item.part } : {}),
+      ...(item.operation_id ? { operation_id: item.operation_id, figure_id: item.figure_id } : {}),
       ...(item.locator ? { locator: item.locator } : {}) })),
     candidates: candidates.map((item) => ({ candidate_id: item.candidate_id, label: item.label, role: item.role })),
   };
@@ -88,8 +92,12 @@ function currentScope(model, record, { stateDirAbs = null } = {}) {
 function staleness(proof, scope, record) {
   const problems = [];
   if (scope.missing) return [{ code: 'annotation-plan-changed', message: scope.missing }];
-  if (proof.inventoryRevision && proof.inventoryRevision !== inventoryRevision(scope.inventory)) {
+  if (!record.layoutRevision && proof.inventoryRevision && proof.inventoryRevision !== inventoryRevision(scope.inventory)) {
     problems.push({ code: 'annotation-plan-changed', message: '截图之后功能清单或其优先级 / 说明 / 目标发生了变化' });
+  }
+  if (record.layoutRevision) {
+    if (record.layoutRevision !== require('./section-plan').layoutRevision(scope.page)) return [{ code: 'annotation-plan-changed', message: '分类图片计划或控件绑定定义已变化' }];
+    return [];
   }
   if (record.kind === 'page' && record.scenarioId === `page-${scope.page.id}`) {
     const current = buildPlan({ inventory: scope.inventory, page: scope.page });

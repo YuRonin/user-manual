@@ -210,6 +210,8 @@ function validateEntry(entry, index, knownIds, errors) {
     else { patch.features = entry.features; touched = true; }
   }
 
+  for (const field of ['sections', 'figures', 'states']) if (entry[field] !== undefined) { patch[field] = entry[field]; touched = true; }
+
   if (entry.source !== undefined) {
     if (!Array.isArray(entry.source) || entry.source.some((s) => typeof s !== 'string')) {
       errors.push(`${where}.source 需要是字符串数组。`);
@@ -249,6 +251,7 @@ function validateEntry(entry, index, knownIds, errors) {
 function applyPatch(page, patch) {
   const next = {
     ...page,
+    ...Object.fromEntries(['sections', 'figures', 'states'].filter(k => patch[k] !== undefined).map(k => [k, patch[k]])),
     ...(patch.guide !== undefined ? { guide: patch.guide } : {}),
     ...(patch.variants !== undefined ? { variants: patch.variants } : {}),
     ...(patch.features !== undefined ? { features: patch.features } : {}),
@@ -353,9 +356,14 @@ function run(argv) {
   const updated = [];
   for (const patch of patches) {
     const next = applyPatch(byId.get(patch.id), patch);
+    if (next.sections?.length) next.schemaVersion = 3;
+    const checked = require('../model/schema').validatePage(next);
+    if (!checked.ok) errors.push(...checked.errors.map(e => `${next.id}.${e.path}: ${e.message}`));
     byId.set(patch.id, next);
     updated.push(next);
   }
+
+  if (errors.length) return fail(errors, { json });
 
   // 定义提交：基于本次读取的 revision 做 CAS，读取之后别人改过模型就拒绝，而不是覆盖
   try {

@@ -234,6 +234,29 @@ function renderPage(pack, copy = {}, { draft = false } = {}) {
   const overview = [`# ${pack.title}`];
   const intro = blockText(pack, copy, 'intro');
   if (intro) overview.push('', intro);
+  if (pack.sections?.length) {
+    const blocks = [['overview', overview], ['location', [t.pageEntry(`[${pack.title}](${pack.route})`)]]];
+    const byFeature = new Map(pack.features.map(f => [f.id ?? f.feature_id, f]));
+    for (const section of pack.sections) {
+      blocks.push([`section.${section.id}`, [`## ${section.title}`, '', section.goal]]);
+      for (const id of section.featureRefs) {
+        const feature = byFeature.get(id);
+        const operations = feature.operations || [];
+        // Retain old guide block identities so three-way merging preserves human edits.
+        blocks.push([feature.guideId ? `guide.${feature.guideId}` : `feature.${id}`, ['', ...operations.map(op => op.instruction), ...(feature.taskId ? ['', `[${t.guideLink}](tasks/${feature.taskId}.md)`] : [])]]);
+      }
+      for (const id of section.figureRefs) {
+        const fig = pack.figures.find(f => f.id === id);
+        for (const artifact of pack.artifacts.filter(a => a.figureId === id)) {
+          const lines = [...figure(artifact, fig.caption, artifact.markdownHref)];
+          for (const ref of artifact.annotationRefs || []) lines.push('', `${ref.label}. ${ref.description}`);
+          if (artifact.privacy?.demo?.sources?.api_mock || artifact.privacy?.demo?.sources?.fixture) lines.push('', t.simulated);
+          blocks.push([`figure.${id}.${artifact.part || 1}`, lines]);
+        }
+      }
+    }
+    return assemble(blocks, draft ? [...pack.headerComments, ''] : []);
+  }
   const location = [t.pageEntry(`[${pack.title}](${pack.route})`)];
   for (const artifact of pack.artifacts.filter((a) => !a.scenarioId)) location.push(...figure(artifact, pack.title, artifact.markdownHref));
   const blocks = [['overview', overview], ['location', location]];

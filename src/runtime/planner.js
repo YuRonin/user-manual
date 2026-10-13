@@ -192,6 +192,9 @@ function pageInputs({ page }) {
     observationRevision: pageObservationRevision(page),
     definitionRevision: definitionRevision('page', page),
     planErrors: errors,
+    needsLayout: !page.sections?.length && ((page.guide || []).length > 1 || require('../annotations/section-plan').operationsOf(page).length > 0 || (page.detectedActions || []).length > 1),
+    layoutRevision: page.sections?.length ? require('../annotations/section-plan').layoutRevision(page) : null,
+    layoutSummary: page.sections?.map(s => ({ id: s.id, title: s.title, figures: s.figureRefs })) || [],
   };
 }
 
@@ -219,7 +222,7 @@ function collectPlanningInputs({ projectRoot, config, base, targets, mode, cache
   for (const target of requested) {
     if (target.type === 'page' && !target.scenarioId) {
       const page = model.pages.find((p) => p.id === target.id);
-      for (const variant of page?.variants || []) {
+      for (const variant of [...new Map([...(page?.variants || []), ...(page?.figures || []).filter(f => f.scenarioId && f.scenarioId !== `page-${page.id}`).map(f => ({ scenarioId: f.scenarioId }))].map(v => [v.scenarioId, v])).values()]) {
         const entry = scenarios.find((s) => s.id === variant.scenarioId && s.variant && s.subject.type === 'page' && s.subject.id === page.id);
         if (!entry) throw new RuntimeError('invalid-scenario', `页面 ${page.id} 的变体 ${variant.scenarioId} 不存在或不属于该页面。`);
         resolved.push({ type: 'page', id: page.id, scenarioId: variant.scenarioId, ref: `scenario:${variant.scenarioId}`, dependencyFor: subjectKey(target) });
@@ -258,7 +261,7 @@ function collectPlanningInputs({ projectRoot, config, base, targets, mode, cache
         cachePolicy: config.cache, requireAnnotation: true, now,
       });
       cache = found.hit
-        ? { hit: true, reusedFrom: found.reusedFrom, observedAt: found.observedAt, stale: found.stale, uncertainty: found.uncertainty, imageInputs: found.entry.meta?.imageInputs || null, outputRefs: found.outputRefs }
+        ? { hit: true, reusedFrom: found.reusedFrom, observedAt: found.observedAt, stale: found.stale, uncertainty: found.uncertainty, layoutRevision: found.entry.meta?.layoutRevision || null, imageInputs: found.entry.meta?.imageInputs || null, outputRefs: found.outputRefs }
         : { hit: false, reason: found.reason || null, bypassed: found.bypassed || null, changedFields: found.changedFields || null,
           ...(found.reason === 'annotation-incomplete' ? { annotationFailures: found.failures || [], repairAttempts: found.repairAttempts || 0, failedImageInputs: found.imageInputs, failedOutputRefs: found.outputRefs, failedObservedAt: found.observedAt } : {}) };
       if (found.outputRefs) {
@@ -329,11 +332,23 @@ function plan(snapshot, policy) {
   const idOf = (kind, index) => (multi ? `${kind}-t${index + 1}` : kind);
   const add = (node) => { nodes.push({ retry: { maxAttempts: 3, replay: 'safe' }, reuse: null, ...node }); return node.id; };
 
+  const layouts = command === 'generate' ? snapshot.targets.filter(t => !t.scenarioId && snapshot.subjects[t.key || subjectKey(t)].needsLayout) : [];
+  if (layouts.length) {
+    for (const [index, target] of layouts.entries()) {
+      const s = snapshot.subjects[target.key || subjectKey(target)];
+      add({ id: `layout-${index + 1}`, kind: 'analyze', dependsOn: [], inputHash: revisionOf({ subject: s.subject, definition: s.definitionRevision }), input: { subject: s.subject, layout: true }, retry: { maxAttempts: 1, replay: 'requires-input' }, reason: 'grouped-layout-required' });
+      summary.waitingFor.push({ node: `layout-${index + 1}`, input: 'model', message: `页面 ${target.id} 需要按读者目标建立分类图文计划；提交后自动重新规划。` });
+    }
+    // Match the regular plan shape; no browser or writing action runs during migration planning.
+    const body = { version: PLAN_VERSION, modelRevision: snapshot.modelRevision, command, targets: snapshot.targets.filter(t => !t.dependencyFor).map(t => t.ref), policy: { copy, mode: snapshot.mode.name, acceptReview: !!policy.acceptReview, force: !!policy.force }, tasks: nodes, summary };
+    return { plan: body, planHash: revisionOf(body), errors };
+  }
   snapshot.targets.forEach((target, index) => {
     const s = snapshot.subjects[target.key || subjectKey(target)];
     const subject = s.subject;
     if (command !== 'capture' && target.scenarioId && !target.dependencyFor) errors.push(`scenario 目标只用于 capture：${target.ref}`);
     errors.push(...s.planErrors);
+    if (s.layoutSummary?.length) summary.actions.push(`分类图文 ${subject.id}：${s.layoutSummary.map(v => `${v.title}（${v.figures.length} 图）`).join('、')}`);
     for (const warning of s.qualityWarnings || []) summary.warnings.push(`${subjectKey(subject)}：${warning}`);
     const needed = subject.type === 'task' ? TASK_CAPABILITIES : CAPTURE_CAPABILITIES;
     const missing = missingCapabilities(snapshot.capabilities, needed);
@@ -393,7 +408,8 @@ function plan(snapshot, policy) {
           imageInputsChanged: !sameImageInputs(cache.failedImageInputs, snapshot.imageInputs) })
         : null;
       if (repair && ['review', 'unrepairable'].includes(repair.action)) { errors.push(repair.message); return; }
-      const needsDerive = repair?.action === 'derive' || (cache?.hit && !sameImageInputs(cache.imageInputs, snapshot.imageInputs));
+      const layoutChanged = !!(s.layoutRevision && cache?.hit && s.layoutRevision !== cache.layoutRevision);
+      const needsDerive = repair?.action === 'derive' || (cache?.hit && (!sameImageInputs(cache.imageInputs, snapshot.imageInputs) || layoutChanged));
       if (needsDerive && cache.rederiveAvailable === false) {
         const message = `rederive-unavailable: ${subjectKey(subject)} 未保留原图或派生输入，需要重新采集。`;
         if (s.executesWrites) { errors.push(`${message} 任务包含写步骤，确认业务状态后用 --refresh 显式重采，不自动重放。`); return; }
@@ -429,10 +445,10 @@ function plan(snapshot, policy) {
       } else {
         summary.actions.push(`复用 ${subjectKey(subject)} 的已有证据（观察于 ${reuse.observedAt}）`);
         // 隐私规则 / 主题 / 渲染器变化：raw 仍可用，只重新派生发布图；定向修复同样只重新派生。
-        if (reuse.repair || !sameImageInputs(cache.imageInputs, snapshot.imageInputs)) {
+        if (reuse.repair || !sameImageInputs(cache.imageInputs, snapshot.imageInputs) || layoutChanged) {
           derived = add({
             id: idOf('derive-image', index), kind: 'derive-image', dependsOn: [captureId],
-            inputHash: revisionOf({ capture: s.captureKey, imageInputs: snapshot.imageInputs }),
+            inputHash: revisionOf({ capture: s.captureKey, imageInputs: snapshot.imageInputs, layoutRevision: s.layoutRevision || null }),
             input: { subject, imageInputs: snapshot.imageInputs },
             reason: reuse.repair ? 'annotation-repair→derive-required' : 'image-inputs-changed→derive-required',
           });

@@ -118,6 +118,10 @@ function approvalMessage(state, taskId) {
 function pageObservationRevision(page) {
   const picked = pickDefinitionFields('page', page);
   const { title, purpose, detectedActions, includeInManual, ...observable } = picked;
+  if (page.sections?.length) {
+    const { features, guide, sections, figures, variants, ...structural } = observable;
+    return revision(JSON.parse(JSON.stringify({ ...structural, bindingLayout: require('../annotations/section-plan').bindingLayout(page), sourceRevision: page?.analysis?.sourceRevision ?? null })));
+  }
   // 源码指纹变化（同路径改了按钮文字、layout、全局样式……）同样让已有截图过期
   return revision({ ...observable, sourceRevision: page?.analysis?.sourceRevision ?? null });
 }

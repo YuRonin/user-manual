@@ -1,5 +1,7 @@
 # 架构与演进约定
 
+页面 schemaVersion 3 使用 `features.operations → sections → figures` 连接操作说明、分类图片与状态。浏览器 Binding 放在不可变 Capture 中；同状态一次采集可以经过完整隐私处理后派生多张局部图，各图独立编号。Runtime 通过 layout/binding 请求交接语义工作，正式发布核对所有已收录操作。字段、迁移和缓存边界见 [分类图文手册](GROUPED_MANUAL.md)。
+
 给后续版本的设计靶子。
 
 ## 职责划分
@@ -227,7 +229,7 @@ V0.2 只做 Next.js —— 先把一个框架做透，而不是每个框架都�
 
 ## 读者视图与维护视图分离
 
-Runtime 路径下，正文由事实包确定性渲染（`src/generate/render.js`，模板 `render-15`），模型只填写导语与步骤补充说明两类文案块，默认由宿主模型填写（`model-input-required`）；`--copy-default` 只用于粗稿。
+Runtime 路径下，正文由事实包确定性渲染（`src/generate/render.js`，模板 `render-16`），模型只填写导语与步骤补充说明两类文案块，默认由宿主模型填写（`model-input-required`）；`--copy-default` 只用于粗稿。
 
 正式文档按帮助中心的读法组织：标题 → 导语 → 前提条件 → 操作步骤（首行给入口链接，图片紧跟步骤并可点击放大）→ 如何确认已完成 → 常见问题 → 相关文档。目录页分“操作指南”与“功能介绍”两组，每项一行说明。
 
@@ -264,7 +266,5 @@ Runtime 路径下，正文由事实包确定性渲染（`src/generate/render.js`
 
 1. 非 Next.js 框架的自动扫描（其它框架只给出"暂不支持"提示）
 2. 跨进程常驻 daemon / 受控并发执行（Runtime 是单进程串行，一个 Run 内复用 Browser）
-3. 多个 Scenario 截图同时渲染进同一页面手册（变体证据目前只作为独立 Capture）
-4. 任务手册的视觉漂移比较（任务只做行为断言回放）
-5. 移动端 profile、操作系统凭据库加密认证缓存
-6. 业务站点部署或 PR 自动合并
+3. 操作系统凭据库加密认证缓存
+4. 业务站点部署或 PR 自动合并

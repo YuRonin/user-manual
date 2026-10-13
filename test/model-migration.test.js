@@ -121,7 +121,7 @@ test('dry-run 零写入，并列出版本变化、拟生成 ID、无法证明的
   const plan = r.json.plan;
   assert.deepStrictEqual(plan.config, { from: 1, to: 2 });
   assert.match(plan.projectId, /^[0-9a-f-]{36}$/);
-  assert.ok(plan.entities.some((e) => e.entity === 'page' && e.id === 'chat' && e.oldVersion === 1 && e.newVersion === 2));
+  assert.ok(plan.entities.some((e) => e.entity === 'page' && e.id === 'chat' && e.oldVersion === 1 && e.newVersion === 3));
   assert.ok(plan.entities.some((e) => e.entity === 'task' && e.id === 'edit-profile' && e.status === 'verified'));
   assert.deepStrictEqual(plan.legacyCaptures.map((c) => c.kind).sort(), ['page', 'task-step']);
   assert.ok(plan.unverifiable.some((u) => u.id === 'chat' && u.claim === 'browser.verified'));
@@ -149,7 +149,7 @@ test('仅页面流程：apply 使用同一份计划的 ID；旧 verified 降为 
   assert.match(fs.readFileSync(path.join(root, '.manual/config.yaml'), 'utf8'), /# Living User Manual/, '保留原配置注释');
 
   const chat = readYaml(root, '.manual/pages/chat.yaml');
-  assert.strictEqual(chat.schemaVersion, 2);
+  assert.strictEqual(chat.schemaVersion, 3);
   assert.strictEqual(chat.lifecycle, 'active');
   assert.strictEqual(chat.browser.verified, false);
   assert.strictEqual(chat.browser.identity, 'legacy-unknown');
@@ -290,7 +290,7 @@ test('新工具读取迁移后的项目：普通命令继续可用', (root) => {
   assert.strictEqual(cli(root, ['migrate', '--apply', '--json']).status, 0);
   const r = cli(root, ['describe', '--id', 'profile', '--purpose', '新的用途。', '--json']);
   assert.strictEqual(r.status, 0, r.stdout + r.stderr);
-  assert.strictEqual(readYaml(root, '.manual/pages/profile.yaml').schemaVersion, 2);
+  assert.strictEqual(readYaml(root, '.manual/pages/profile.yaml').schemaVersion, 3);
   const plan = planMigration(root, loadConfig(root).config, readYaml(root, '.manual/config.yaml'));
   assert.strictEqual(plan.config.from, 2);
 });

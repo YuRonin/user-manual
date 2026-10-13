@@ -198,6 +198,7 @@ function domCandidates({ semantic, inventory = [], page = null, ignore = [] }) {
   const known = new Set([
     ...inventory.flatMap((item) => [item.label, item.target?.name, item.target?.text]),
     ...(page?.guide || []).flatMap((guide) => [guide.title, guide.target?.name, guide.target?.text]),
+    ...require('./section-plan').operationsOf(page || {}).flatMap(op => [op.bindingIntent?.name, op.targetHint?.name, op.targetHint?.text]),
     ...(page?.detectedActions || []),
   ].filter(Boolean).map(key));
   const ignored = (name) => ignore.some((pattern) => pattern.endsWith('*') ? key(name).startsWith(key(pattern.slice(0, -1))) : key(name) === key(pattern));

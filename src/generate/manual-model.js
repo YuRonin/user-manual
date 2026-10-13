@@ -77,6 +77,17 @@ function pageSections(pack, proofs = new Map()) {
     section('overview', 'overview', { pageRefs }),
     section('location', 'location', { pageRefs, captureRefs: pack.artifacts.filter((a) => !a.scenarioId).map((a) => a.captureId) }),
   ];
+  if (pack.sections?.length) {
+    for (const s of pack.sections) {
+      const artifacts = pack.artifacts.filter(a => s.figureRefs.includes(a.figureId));
+      const captures = unique(artifacts.map(a => a.captureId));
+      const refs = captures.map(id => annotationRefsOf(id, proofs.get(id), item => s.figureRefs.includes(item.figure_id)));
+      out.push(section(`section.${s.id}`, 'instructions', { pageRefs, captureRefs: captures, annotationRefs: refs.flatMap(r => r.annotationRefs), featureRefs: refs.flatMap(r => r.featureRefs) }));
+      for (const f of pack.features.filter(f => s.featureRefs.includes(f.id ?? f.feature_id))) out.push(section(f.guideId ? `guide.${f.guideId}` : `feature.${f.id ?? f.feature_id}`, 'instructions', { pageRefs, taskRefs: f.taskId ? [f.taskId] : [] }));
+      for (const artifact of artifacts) out.push(section(`figure.${artifact.figureId}.${artifact.part || 1}`, 'figure', { pageRefs, captureRefs: [artifact.captureId], scenarioRefs: [artifact.scenarioId] }));
+    }
+    return out;
+  }
   for (const scenarioId of unique(pack.artifacts.map((a) => a.scenarioId))) {
     const captureRefs = unique(pack.artifacts.filter((a) => a.scenarioId === scenarioId).map((a) => a.captureId));
     const refs = captureRefs.map((id) => annotationRefsOf(id, proofs.get(id)));

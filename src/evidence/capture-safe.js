@@ -160,6 +160,12 @@ async function derivePublished({ captured, rawPath, sanitizedPath, publishedPath
   if (!detection.ok) throw captureError('privacy-uncertain', detection.errors.join('；'));
   const { geometry } = captured;
   const canvas = geometry.fullPage && geometry.documentSize ? geometry.documentSize : (geometry.viewport || captured.shot.meta.viewport);
+  if (captured.figures?.length) {
+    const privacy = buildPrivacyRecord({ redactions: detection.redactions, config: { privacy: redactionRules }, demo });
+    const image = await sharp(rawPath).metadata();
+    if (Math.abs(image.width - Math.round(canvas.width * (geometry.dpr || 1))) > 2 || Math.abs(image.height - Math.round(canvas.height * (geometry.dpr || 1))) > 2) throw captureError('geometry-scale-mismatch', '分类图片的原图与几何不一致');
+    return require('./grouped-figures').deriveGrouped({ captured, rawPath, sanitizedPath, publishedPath, theme, redactions: detection.redactions, privacy, canvas });
+  }
   // boundingBox 为空的目标不能当作已定位（null 展开成 {} 会被误当作矩形）
   const hasRect = (item) => item.rect && ['x', 'y', 'width', 'height'].every((key) => Number.isFinite(Number(item.rect[key])));
   const locatedTargets = (captured.targets || []).filter(hasRect);

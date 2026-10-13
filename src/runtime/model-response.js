@@ -101,10 +101,10 @@ function submitModelResponse({ projectRoot, config, runId, requestId, response }
   if (!task) throw invalid(`请求对应的任务 ${request.taskId} 不在 Run 中。`);
   const responseFile = responseFileFor(runDir, requestId);
   const text = JSON.stringify(response, null, 2) + '\n';
-  if (task.status === 'succeeded') {
+  if (task.status === 'succeeded' || (request.kind === 'binding' && task.status === 'pending' && fs.existsSync(responseFile))) {
     // 幂等：同一响应重复提交直接返回；不同内容不能覆盖已接受的结果。
     if (fs.existsSync(responseFile) && revisionOf(JSON.parse(fs.readFileSync(responseFile, 'utf8'))) === revisionOf(response)) {
-      return { ok: true, taskId: task.id, requestId, idempotent: true };
+      return { ok: true, taskId: task.id, requestId, idempotent: true, replan: request.kind === 'layout' };
     }
     throw invalid(`任务 ${task.id} 已接受过另一份响应，不能覆盖。`);
   }
@@ -117,6 +117,16 @@ function submitModelResponse({ projectRoot, config, runId, requestId, response }
     const copy = checkCopy(request, response.output);
     const findings = validateCopy(facts.factPack, copy);
     if (findings.blocked.length) throw invalid(`文案改写了受保护的事实：${formatFindings(findings.blocked, '拒绝').join('；')}`);
+  } else if (request.kind === 'layout') {
+    const allowed = new Set(request.output.allowedFields);
+    if (!response.output || Object.keys(response.output).some(k => !allowed.has(k))) throw invalid('分类计划含未授权字段');
+    require('../annotations/layout-migration').prepareLayouts({ projectRoot, config, payload: { pages: [{ id: request.subject.id, ...Object.fromEntries(Object.entries(response.output).filter(([k]) => k !== 'scenarios')) }], scenarios: response.output.scenarios || [] } });
+  } else if (request.kind === 'binding') {
+    const choices = response.output?.choices;
+    if (!choices || Object.keys(response.output).some(k => k !== 'choices')) throw invalid('绑定响应需要 output.choices');
+    const allowed = new Map(request.facts.unresolved.map(item => [item.key, item]));
+    for (const [key, choice] of Object.entries(choices)) if (!allowed.has(key) || !allowed.get(key).candidates.some(c => c.id === choice.candidateId) || Object.keys(choice).some(k => k !== 'candidateId')) throw invalid(`控件绑定候选无效: ${key}`);
+    if (request.facts.unresolved.some(i => !choices[i.key])) throw invalid('必须为所有待关联操作选择候选，无法选择时先修复计划');
   } else {
     checkAnalysis(request, response.output);
   }
@@ -124,6 +134,9 @@ function submitModelResponse({ projectRoot, config, runId, requestId, response }
 
   const { lease } = runStore.open(runId);
   try {
+    if (request.kind === 'layout') {
+      require('../annotations/layout-migration').applyLayouts({ projectRoot, config, payload: { pages: [{ id: request.subject.id, ...Object.fromEntries(Object.entries(response.output).filter(([k]) => k !== 'scenarios')) }], scenarios: response.output.scenarios || [] } });
+    }
     if (request.kind === 'analyze') {
       const projectStore = createProjectStore({ stateDirAbs, docsOutputDir: config.docs.outputDir });
       const base = projectStore.load();
@@ -138,7 +151,7 @@ function submitModelResponse({ projectRoot, config, runId, requestId, response }
     }
     fs.mkdirSync(path.dirname(responseFile), { recursive: true });
     writeFileAtomic(responseFile, text);
-    runStore.transition(runId, task.id, 'succeeded', {
+    runStore.transition(runId, task.id, request.kind === 'binding' ? 'pending' : 'succeeded', {
       lease,
       outputRefs: [{ kind: 'request', ref: path.relative(projectRoot, responseFile).replace(/\\/g, '/'), sha256: sha256Hex(text) }],
       reason: `model-response:${requestId}`,
@@ -146,7 +159,7 @@ function submitModelResponse({ projectRoot, config, runId, requestId, response }
   } finally {
     lease.release();
   }
-  return { ok: true, taskId: task.id, requestId, idempotent: false };
+  return { ok: true, taskId: task.id, requestId, idempotent: false, replan: request.kind === 'layout' };
 }
 
 /** rewrite 的响应中取出文案块（validate 阶段读取）。 */

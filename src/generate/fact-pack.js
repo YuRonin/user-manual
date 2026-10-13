@@ -133,19 +133,21 @@ function buildPageFactPack({ page, image = null, images = null, language, header
     language,
     templateRevision: templateRevision(language),
     inputRevision: revision({ definition: definitionRevision('page', page), sourceRevision: page.analysis?.sourceRevision ?? null, captureId: list[0]?.captureId ?? null,
-      ...(page.variants?.length ? { variantCaptures: list.filter((a) => a.scenarioId).map((a) => ({ scenarioId: a.scenarioId, captureId: a.captureId })) } : {}) }),
+      ...(page.sections?.length ? { figureCaptures: list.map(a => ({ figureId: a.figureId || null, part: a.part || 1, checkpointId: a.checkpointId || 'default', scenarioId: a.scenarioId || null, captureId: a.captureId || null, sha256: a.sha256 || null })) }
+        : page.variants?.length ? { variantCaptures: list.filter((a) => a.scenarioId).map((a) => ({ scenarioId: a.scenarioId, captureId: a.captureId })) } : {}) }),
     title: page.title,
     route: page.route,
     actions,
     guide: page.guide || [],
-    quality: { completeness: page.guide?.length ? 'instructions' : 'overview-only', warnings: page.guide?.length ? [] : ['page-instructions-missing'] },
+    ...(page.sections?.length ? { sections: page.sections, figures: page.figures, features: page.features } : {}),
+    quality: { completeness: page.sections?.length || page.guide?.length ? 'instructions' : 'overview-only', warnings: page.sections?.length || page.guide?.length ? [] : ['page-instructions-missing'] },
     artifacts,
     headerComments,
     blocks: { intro: { kind: 'intro', default: page.purpose || '' } },
-    allowedUiTerms: [...new Set([...actions.flatMap((a) => uiTerms(a.text)), ...uiTerms(page.purpose), ...(page.guide || []).flatMap(g => uiTerms(g.instruction))])],
+    allowedUiTerms: [...new Set([...actions.flatMap((a) => uiTerms(a.text)), ...uiTerms(page.purpose), ...(page.guide || []).flatMap(g => uiTerms(g.instruction)), ...require('../annotations/section-plan').operationsOf(page).flatMap(o => uiTerms(o.instruction))])],
     uiEvidence: uiEvidence({
       observed: observedTerms,
-      declared: [...actions.flatMap((a) => uiTerms(a.text)), ...uiTerms(page.purpose), ...(page.guide || []).flatMap((g) => uiTerms(g.instruction))],
+      declared: [...actions.flatMap((a) => uiTerms(a.text)), ...uiTerms(page.purpose), ...(page.guide || []).flatMap((g) => uiTerms(g.instruction)), ...require('../annotations/section-plan').operationsOf(page).flatMap(o => uiTerms(o.instruction))],
     }),
   });
 }

@@ -29,6 +29,11 @@ function validateModelLinks({ pages = [], tasks = [], changedPageIds = null, cha
       const ref = guide.featureId ?? guide.feature_id;
       if (ref && !known.has(ref)) errors.push(issue('missing-reference', `页面 ${page.id} 的 guide ${guide.id} 引用了不存在的功能 ${ref}`));
     }
+    for (const op of require('../annotations/section-plan').operationsOf(page)) {
+      if (!op.taskId) continue;
+      const task = tasks.find(t => t.id === op.taskId);
+      if (!task || (op.claimId && !require('../evidence/claims').claimsOf(task).some(c => c.id === op.claimId))) errors.push(issue('missing-reference', `页面 ${page.id} 操作 ${op.id} 引用了不存在的任务或声明 ${op.taskId}/${op.claimId || ''}`));
+    }
   }
   for (const task of tasks) {
     if (changedTaskIds && !changedTaskIds.has(task.id)) continue;

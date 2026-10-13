@@ -53,6 +53,8 @@ manual approve-tasks --input <决策.json>            # 用户确认后才批准
 
 ### 标注计划与待确认功能
 
+页面图文按读者目标分类：在 features.operations 声明操作与证据需求，用 sections/figures 组织相邻说明、局部图和独立状态图。默认每张 1～3 个标注、各图从 1 编号；菜单、拖拽提示和结果各有对应状态。首次建立或迁移分类计划时读取 [分类图文手册](docs/GROUPED_MANUAL.md)。旧 guide 保留 guideId 映射，缺定位的操作继续列入证据需求。
+
 Required 只来自 `describe --input` 里页面 `features` 的显式决定；带 target 的 guide、`detectedActions` 和截图时在页面上发现的按钮 / 标签页 / 菜单项都只是**待确认候选**（照常标注出图，但不算分母）。`inspect` / `describe` / 任务审批后读取 `.manual/feature-inventory.json` 的 `pending`，结合读者要完成的任务，在 `features` 里给每个候选写稳定的 `id`、`required|optional|skip` 决策和说明（名称或目标与候选一致即可覆盖它；guide 可用 `featureId` 显式对应）。public 手册存在未确认候选时定稿会被 `inventory-review-required` 阻断（internal 只提示）。没有已确认 Required 的页面覆盖率显示 N/A，不是 100%。Required 失败时按失败原因补计划或截图，再生成手册。字段与判定细节见 [标注覆盖率](docs/ANNOTATION_COVERAGE.md)。
 
 ## 3. 生成
@@ -64,8 +66,8 @@ manual generate task:<id> [task:<id2> page:<id> ...]
 多个目标共用一个 Run 和浏览器会话。Runtime 自动决定是否需要采集（可复用的有效证据直接用），然后生成事实草稿，**默认停下来请你写文案**（退出码 3，`model-input-required`）：
 
 1. 读请求文件 `.manual/runs/<runId>/model/<requestId>.request.json` 和其中 `files` 列出的文件；需要背景时只回看该页面模型及其列出的源码，用来理解已有事实，不添加新事实。
-2. 按[写作规范](references/manual-writing-style.md)填写 `allowedBlocks` 里的文案块：默认文字通常偏短，按第三节补全读者会问的“填什么、选哪个、点了会怎样”。写成响应 JSON（格式见规范第七节）。
-3. `manual resume <runId> --request <requestId> --input <响应.json>` 提交并继续，直到发布。
+2. 按请求 `kind` 处理：`layout` → 读 [分类图文手册](docs/GROUPED_MANUAL.md)，基于源码填写功能、操作、小节、图片与所需 Scenario，保留旧块映射；`binding` → 从请求候选中选择 candidateId，浏览器会重新验证；`analyze` → 补标题、用途和源码支持的操作；`rewrite` → 按[写作规范](references/manual-writing-style.md)填写 `allowedBlocks` 的文案。统一使用 requestId/inputHash/output 响应，格式见分类文档及写作规范第七节。
+3. `manual resume <runId> --request <requestId> --input <响应.json>` 提交并继续，直到发布。layout 提交后 Runtime 自动重新规划并可能返回新的 runId，后续使用返回的 Run；binding 最多两轮，无法消歧时修正状态或计划后重新规划。正式发布对 internal/public 都要求所有已收录操作有证据；草稿缺口不能视为成功。结果声明需要已有真实任务证据，入口观察和 Fixture 只证明各自范围。
 
 常用选项：
 

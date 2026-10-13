@@ -129,6 +129,8 @@ function renderPageYaml(page) {
     ...(page.features ? { features: page.features } : {}),
     ...(page.guide ? { guide: page.guide } : {}),
     ...(page.variants ? { variants: page.variants } : {}),
+    ...(page.sections ? { sections: page.sections } : {}),
+    ...(page.figures ? { figures: page.figures } : {}),
     entry: page.entry,
     source: page.source || [],
     dependencies: {

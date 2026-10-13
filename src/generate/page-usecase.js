@@ -92,6 +92,23 @@ function publishedFromRecord({ projectRoot, stateDirAbs, captureId, sourceRevisi
  */
 function draftPage({ projectRoot, config, pageId, noScreenshot = false }) {
   const { page, stateDirAbs, indexContext } = loadPage(projectRoot, config, pageId);
+  if (page.sections?.length) {
+    if (page.status?.sourceAnalysis !== ANALYSIS.COMPLETED) throw failure('analysis-required', [`页面 ${page.id} 的源码分析尚未完成，先补充标题与用途`]);
+    const result = require('./grouped-page').groupedImages({ projectRoot, config, page });
+    const finalPath = path.join(projectRoot, config.docs.outputDir, `${page.id}.md`);
+    const built = buildDraft(page, { docsOutputDir: config.docs.outputDir, pageFilePath: `${config.artifacts.stateDir}/pages/${page.id}.yaml`, images: result.images, language: config.docs.language,
+      observedTerms: result.records.flatMap(r => r.semantic?.items?.map(i => i.name).filter(Boolean) || []) });
+    built.pack.evidenceCoverage = result.coverage;
+    built.pack.resultEvidence = result.resultEvidence;
+    // Re-seal after attaching coverage; all downstream consumers see the same facts.
+    const { factsHash: ignored, ...body } = built.pack;
+    built.pack.factsHash = require('../util/hash').revisionOf(body);
+    built.facts.factsHash = built.pack.factsHash;
+    const { draftPath, factsFile } = draftPathsFor(stateDirAbs, page.id);
+    writeText(draftPath, built.markdown);
+    writeText(factsFile, JSON.stringify({ pageId: page.id, images: result.images, factPack: built.pack, factsHash: built.pack.factsHash, facts: built.facts }, null, 2));
+    return { page, draftPath, factsFile, finalPath, markdown: built.markdown, facts: built.facts, pack: built.pack, images: result.images, image: result.images[0] || null, indexContext, warnings: result.warnings };
+  }
   const coverageErrors = validateCaptureCoverage({ projectRoot, config, captureIds: [page.browser?.latestCaptureId] });
   if (coverageErrors.length) throw failure(coverageErrors[0].code, formatIssues(coverageErrors));
   const errors = [];
@@ -231,7 +248,13 @@ function pageObservedTerms(projectRoot, stateDirAbs, pageId, captureId) {
 /** 草稿之后页面定义、源码指纹、截图记录或模板变了：旧草稿不能再发布。 */
 function pageDraftStale(page, pack, language, { projectRoot, stateDirAbs } = {}) {
   if (!pack) return null;
-  if (projectRoot && page.variants?.length) {
+  if (projectRoot && page.sections?.length) {
+    try {
+      const current = require('./grouped-page').groupedImages({ projectRoot, config: require('../config/load').loadConfig(projectRoot).config, page });
+      if (JSON.stringify(current.images.map(i => [i.captureId, i.artifactPath])) !== JSON.stringify(pack.artifacts.map(i => [i.captureId, i.artifactPath]))) return 'draft-stale: 分类图片来源已经变化';
+    } catch (error) { return `draft-stale: ${error.message}`; }
+  }
+  if (projectRoot && !page.sections?.length && page.variants?.length) {
     const latestRefs = createCaptureStore({ projectRoot, stateDirAbs }).readLatest();
     for (const artifact of pack.artifacts.filter((a) => a.scenarioId)) {
       if (latestRefs[`scenario:${artifact.scenarioId}`] !== artifact.captureId) return `draft-stale: 变体 ${artifact.scenarioId} 的截图已更新，重新生成草稿。`;
@@ -241,7 +264,7 @@ function pageDraftStale(page, pack, language, { projectRoot, stateDirAbs } = {})
     }
   }
   const latest = page.browser?.latestCaptureId;
-  const current = buildPageFactPack({ page, images: pack.artifacts.map(({ id: _id, ...artifact }) => ({ ...artifact, captureId: artifact.scenarioId ? artifact.captureId : latest ?? artifact.captureId ?? null })), language, headerComments: pack.headerComments });
+  const current = buildPageFactPack({ page, images: pack.artifacts.map(({ id: _id, ...artifact }) => ({ ...artifact, captureId: page.sections?.length || artifact.scenarioId ? artifact.captureId : latest ?? artifact.captureId ?? null })), language, headerComments: pack.headerComments });
   const changed = ['inputRevision', 'templateRevision', 'language'].filter((key) => current[key] !== pack[key]);
   return changed.length ? `draft-stale: 草稿之后事实发生变化（${changed.join(', ')}），重新运行 \`manual generate ${page.id}\` 生成草稿。` : null;
 }
@@ -300,11 +323,19 @@ function preparePageFinal({ projectRoot, config, pageId, copy = null, markdown =
   const merge = reconcileDocument({ projectRoot, stateDirAbs, manualId: manualIdFor('page', page.id), documentFile: finalPath, generated, force, runId });
   if (merge.mode === 'untracked' && !force) throw failure('document-exists', [`正式文档已存在: ${displayPath(finalPath, projectRoot)}`, '加 --force 覆盖。']);
   const body = merge.markdown;
+  const layoutErrors = require('../annotations/section-plan').validateRenderedLayout(pack, body);
+  if (layoutErrors.length) throw failure(layoutErrors[0].code, layoutErrors.map(e => e.message));
   // 统一发布门槛（含 --fallback-draft）：图片引用、hash、产物位置与隐私记录都以草稿 facts 为准。
   if (!fs.existsSync(factsFile)) throw failure('draft-missing', [`缺少草稿事实文件: ${displayPath(factsFile, projectRoot)}`, `重新运行 \`manual generate ${page.id}\`。`]);
   const draftFacts = JSON.parse(fs.readFileSync(factsFile, 'utf8'));
   const coverageErrors = validateCaptureCoverage({ projectRoot, config, captureIds: [page.browser?.latestCaptureId] });
   if (coverageErrors.length) throw failure(coverageErrors[0].code, formatIssues(coverageErrors));
+  const records = recordsOf(projectRoot, stateDirAbs, draftFacts.images || []);
+  const claims = require('./result-evidence').resultEvidence({ projectRoot, config, page });
+  if (claims.errors.length) throw failure(claims.errors[0].code, claims.errors.map(e => e.message));
+  if (page.sections?.length && JSON.stringify(claims.claims) !== JSON.stringify(draftFacts.factPack.resultEvidence || [])) throw failure('draft-stale', ['结果任务证据在草稿之后变化，请重新生成草稿']);
+  const documentCoverage = require('../annotations/section-plan').documentCoverage(page, draftFacts.images || [], records, claims.claims);
+  if (!documentCoverage.ok) throw failure(documentCoverage.errors[0].code, documentCoverage.errors.map(e => e.message));
   const gate = validatePublication({ projectRoot, manualFile: finalPath, markdown: body, images: draftFacts.images || [], config });
   if (!gate.ok) throw failure(gate.errors[0]?.code || 'publication-gate', formatIssues(gate.errors));
   // internal 受众的待确认功能、旧证据覆盖度未知等：放行但必须说出来
@@ -337,7 +368,7 @@ function publishPageFinal({ projectRoot, config, prepared, force = false, runId 
       markdown: body,
       facts: draftFacts,
       // 拆图时多张图同属一条 Capture，只记一次
-      captureIds: [...new Set((draftFacts.images || []).map((image) => image.captureId).filter(Boolean))],
+      captureIds: [...new Set([...(draftFacts.images || []).map((image) => image.captureId), ...(draftFacts.factPack?.resultEvidence || []).flatMap(c => c.evidence.map(e => e.captureId))].filter(Boolean))],
       definitionRevisions: { [page.id]: definitionRevision('page', page) },
       definitionViews: { [page.id]: definitionViews('page', page) },
       force,

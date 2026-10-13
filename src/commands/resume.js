@@ -45,6 +45,7 @@ async function run(argv) {
   const projectRoot = path.resolve(values.projectRoot || process.cwd());
   const runId = positional[0];
   try {
+    let modelReplan = false;
     if (submitting) {
       let response;
       try { response = readResponse(values.input); } catch (error) {
@@ -52,9 +53,9 @@ async function run(argv) {
         return usageExit();
       }
       const { config } = openProject(projectRoot);
-      submitModelResponse({ projectRoot, config, runId, requestId: values.request, response });
+      modelReplan = submitModelResponse({ projectRoot, config, runId, requestId: values.request, response }).replan === true;
     }
-    return printRun({ json, result: await resumeRun({ projectRoot, runId, replan: values.replan === true }), label: 'resume', projectRoot });
+    return printRun({ json, result: await resumeRun({ projectRoot, runId, replan: values.replan === true || modelReplan }), label: 'resume', projectRoot });
   } catch (error) {
     return printRuntimeError({ json, error, label: 'resume' });
   }

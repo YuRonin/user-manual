@@ -1,5 +1,7 @@
 # Runtime 使用说明
 
+分类页面的 generate 会先交接 layout 请求，提交后自动创建后继 Run；控件歧义交接 binding 请求，宿主选候选后程序重新验证，最多两轮。各 Scenario 所需检查点进入采集任务；仅裁剪或编号变化优先重新派生。operationCoverage 单独报告正文操作证据，正式发布不因 internal/optional 放宽。详见 [分类图文手册](GROUPED_MANUAL.md)。
+
 本文按真实命令与 `--json` 输出说明一份手册从安装到长期维护的全过程。所有命令都可加 `--project-root <业务项目根>`，
 下文省略；每条命令的完整参数以 `manual <命令> --help` 为准。
 

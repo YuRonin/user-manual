@@ -73,7 +73,7 @@ function joinUrl(baseUrl, route) {
 
 /** 截图派生输入（几何、标注目标、敏感元素候选）：私有 sidecar，隐私规则变化时据此从同一份 raw 重新派生。 */
 function derivationSidecar(captured) {
-  return JSON.stringify({ version: 2, geometry: captured.geometry, targets: captured.targets || [], candidates: captured.candidates || [], shotMeta: captured.shot?.meta || null, inventory: captured.inventory || null, plan: captured.plan || null, featureCandidates: captured.featureCandidates || [] });
+  return JSON.stringify({ version: 2, geometry: captured.geometry, targets: captured.targets || [], candidates: captured.candidates || [], shotMeta: captured.shot?.meta || null, inventory: captured.inventory || null, plan: captured.plan || null, featureCandidates: captured.featureCandidates || [], figures: captured.figures || null, bindings: captured.bindings || [], stateVerified: captured.stateVerified || false });
 }
 
 /**
@@ -175,16 +175,20 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
   const expected = explicitScenario
     ? { statuses: scenario.expected?.httpStatuses, state: scenario.expected?.state || 'normal', allowRedirects: scenario.expected?.redirects?.length ? scenario.expected.redirects : undefined }
     : {};
-  const checkpoint = (scenario.checkpoints || []).find((c) => c.id === 'default') || scenario.checkpoints?.[0] || null;
+  const checkpoint = (scenario.checkpoints || []).find((c) => c.id === (options.checkpointId || 'default')) || scenario.checkpoints?.[0] || null;
   // 检查点声明的截图方式生效（B5-02）：capture.mode: fullPage 与命令行 --full-page 等价
+  if (options.checkpointId && checkpoint?.id !== options.checkpointId) throw new RuntimeError('invalid-scenario', `缺少检查点 ${options.checkpointId}`);
   const fullPage = options.fullPage === true || checkpoint?.capture?.mode === 'fullPage';
   // 变体的检查点状态断言（URL 以外）：setup 之后确认、截图之后复核
-  const stateAssertions = isDefaultScenario ? [] : (checkpoint?.assertions || []).filter((a) => a && a.type !== 'url');
+  const stateAssertions = (checkpoint?.assertions || []).filter((a) => a && a.type !== 'url');
   // 有 setup 的变体：打开时页面还是默认状态，先用页面默认身份断言，检查点断言在 setup 之后确认
   const hasSetup = (scenario.setup || []).length > 0;
   const identityAssertions = ((isDefaultScenario || hasSetup ? page.states?.default?.assertions : checkpoint?.assertions) || []).filter((a) => a && a.type !== 'url');
   const inventory = pageInventory({ page, scenarioId: scenario.id, checkpoint });
-  const annotationPlan = buildPlan({ inventory, page, annotations: isDefaultScenario ? null : (checkpoint?.capture?.annotations || []) });
+  const layout = require('../annotations/section-plan');
+  const figures = layout.figuresFor(page, scenario.id, checkpoint?.id || 'default');
+  const annotationPlan = layout.grouped(page) ? layout.layoutPlan(page, scenario.id, checkpoint?.id || 'default') : buildPlan({ inventory, page, annotations: isDefaultScenario ? null : (checkpoint?.capture?.annotations || []) });
+  const scopedInventory = layout.grouped(page) ? require('../annotations/coverage').buildInventory({ page, scenario: scenario.id }).map(i => ({ ...i, priority: 'optional' })) : inventory;
   const staging = captureStore.begin();
   const stagedRaw = staging.file(`raw.${format}`);
   const stagedSanitized = staging.file('sanitized.png');
@@ -238,40 +242,78 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
       if (hasSetup && stateAssertions.length) navigation.validations.push(...await runAssertions(provider, stateAssertions, { scope: 'scenario-state', idPrefix: checkpoint?.id || 'default', timeoutMs: assertOptions.timeoutMs }));
     }
     // 语义摘要与采集环境：在线验证据此判断内容漂移、视觉比较是否可比（P3-04）
+    if (provider.applyDemo) await provider.applyDemo();
     const semantic = provider.semanticSnapshot ? await provider.semanticSnapshot() : null;
+    const bindings = [];
+    const boundTargets = new Map();
+    if (layout.grouped(page)) {
+      const unresolved = [];
+      for (const item of annotationPlan) {
+        const key = `${item.figure_id}/${item.operation_id}`;
+        const binding = await require('../annotations/binding').bindOperation(provider, item, semantic, options.bindingChoices?.[key]);
+        if (binding.status !== 'verified') unresolved.push({ key, operationId: item.operation_id, figureId: item.figure_id, intent: item.bindingIntent, description: item.description, reason: binding.reason, candidates: binding.candidates });
+        else { boundTargets.set(key, binding.target); bindings.push({ operationId: item.operation_id, figureId: item.figure_id, status: 'verified', target: binding.target, source: binding.source, name: binding.name, role: binding.role, authProfile: scenario.authProfile, scenarioId: scenario.id, checkpointId: checkpoint?.id || 'default' }); }
+      }
+      if (unresolved.length) throw Object.assign(new Error('分类图片的控件绑定需要宿主模型消歧'), { code: 'binding-input-required', unresolved });
+    }
+    const resolvedFigures = [];
+    for (const f of figures) {
+      let regionRect = null;
+      if (f.frame?.mode === 'region') {
+        const region = await inspectWithRetry(provider, f.frame.target);
+        if (!region.rect || region.obscuredBy) throw Object.assign(new Error(`图片 ${f.id} 区域无法定位`), { code: 'figure-region-invalid' });
+        const geometry = fullPage ? await provider.collectGeometry({ fullPage: true }) : null;
+        regionRect = toCanvasRect(region.rect, { fullPage, geometry, pinned: region.pinned || null });
+      }
+      resolvedFigures.push({ ...f, ...(regionRect ? { regionRect } : {}) });
+    }
     const environment = provider.environmentInfo ? provider.environmentInfo({ fullPage }) : null;
     // 稳定截图 + 离线派生：原图只留在 rawDir，发布图由同一份原图遮罩后写入 annotatedDir。
     const captured = await captureStable(provider, { rawPath: stagedRaw, fullPage, format, stabilityMs: waits.stabilityMs,
       // 截图后复核状态（B5-05）：定位标注时的悬停 / 滚动可能把菜单、弹窗弄没
-      assertState: stateAssertions.length ? async () => runAssertions(provider, stateAssertions, { scope: 'scenario-state', idPrefix: 'after-shot', timeoutMs: 1500 }) : null,
+      assertState: stateAssertions.length ? async () => {
+        const validated = await runAssertions(provider, stateAssertions, { scope: 'scenario-state', idPrefix: 'after-shot', timeoutMs: 1500 });
+        navigation.validations.push(...validated);
+        return validated;
+      } : null,
       resolveTargets: async () => {
         const targets = [];
         const located = [];
-        for (const [i, item] of annotationPlan.entries()) {
+        for (const [i, planned] of annotationPlan.entries()) {
+          const item = layout.grouped(page) ? { ...planned, target: boundTargets.get(`${planned.figure_id}/${planned.operation_id}`) } : planned;
+          const extra = item.operation_id ? { operation_id: item.operation_id, figure_id: item.figure_id } : {};
           const label = item.label || String(i + 1);
-          if (item.rect) { targets.push({ feature_id: item.feature_id, label, rect: item.rect, resolution: { source: 'declared-rect' } }); continue; }
-          if (!item.target) { targets.push({ feature_id: item.feature_id, label, reason: 'target-not-declared' }); continue; }
+          if (item.rect) { targets.push({ ...extra, feature_id: item.feature_id, label, rect: item.rect, resolution: { source: 'declared-rect' } }); continue; }
+          if (!item.target) { targets.push({ ...extra, feature_id: item.feature_id, label, reason: 'target-not-declared' }); continue; }
           try {
             const found = await inspectWithRetry(provider, item.target);
-            if (found.obscuredBy) { targets.push({ feature_id: item.feature_id, label, reason: 'target-occluded', obscuredBy: found.obscuredBy }); continue; }
-            if (!found.rect) { targets.push({ feature_id: item.feature_id, label, reason: 'target-not-located' }); continue; }
+            if (found.obscuredBy) { targets.push({ ...extra, feature_id: item.feature_id, label, reason: 'target-occluded', obscuredBy: found.obscuredBy }); continue; }
+            if (!found.rect) { targets.push({ ...extra, feature_id: item.feature_id, label, reason: 'target-not-located' }); continue; }
             // 整页截图：与隐私遮罩同一套换算（滚动偏移、fixed 元素），框和遮罩不会相对错位（B4-04）
             const geometry = fullPage ? await provider.collectGeometry({ fullPage: true }) : null;
             const rect = toCanvasRect(found.rect, { fullPage, geometry, pinned: found.pinned || null });
             // 记录实际命中的定位策略（主目标或第几个备选），备选命中不再静默（B2-07）
-            targets.push({ feature_id: item.feature_id, label, rect, resolution: found.resolution || null });
+            targets.push({ ...extra, feature_id: item.feature_id, label, rect, resolution: found.resolution || null });
             located.push({ target: item.target, label, revealedBy: found.revealedBy || null });
-          } catch (error) { targets.push({ feature_id: item.feature_id, label, reason: locateReason(error) }); }
+          } catch (error) { targets.push({ ...extra, feature_id: item.feature_id, label, reason: locateReason(error) }); }
         }
         await confirmTargetsShown(provider, located);
+        // Region geometry must belong to the same stabilized scroll state as the targets.
+        for (const figure of resolvedFigures.filter(f => f.frame?.mode === 'region')) {
+          const region = await inspectWithRetry(provider, figure.frame.target);
+          if (!region.rect || region.obscuredBy) throw Object.assign(new Error(`图片 ${figure.id} 区域无法定位`), { code: 'figure-region-invalid' });
+          const geometry = fullPage ? await provider.collectGeometry({ fullPage: true }) : null;
+          figure.regionRect = toCanvasRect(region.rect, { fullPage, geometry, pinned: region.pinned || null });
+        }
         return targets;
       },
     });
     ready.warnings.push(...(captured.warnings || []));
-    captured.inventory = inventory;
-    captured.plan = annotationPlan;
+    captured.inventory = scopedInventory;
+    if (figures.length) Object.assign(captured, { figures: resolvedFigures, bindings, stateVerified: (checkpoint?.assertions || []).some(a => a.type !== 'url') });
+    captured.plan = layout.grouped(page) ? annotationPlan.map(item => ({ ...item, target: boundTargets.get(`${item.figure_id}/${item.operation_id}`) || item.target })) : annotationPlan;
     // 默认 Scenario 的整页截图：无障碍树里清单未覆盖的可交互元素作为待确认候选（变体只看本状态声明的项）
-    captured.featureCandidates = isDefaultScenario ? domCandidates({ semantic, inventory, page, ignore: config.inventory?.ignoreCandidates || [] }) : [];
+    captured.featureCandidates = isDefaultScenario ? domCandidates({ semantic, inventory, page, ignore: [...(config.inventory?.ignoreCandidates || []), ...bindings.map(b => b.name).filter(Boolean)] }) : [];
     fs.writeFileSync(stagedDerivation, derivationSidecar(captured));
     const safe = await derivePublished({
       captured,
@@ -281,7 +323,7 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
       theme: config.annotation.themes[config.annotation.activeTheme],
       redactionRules: config.privacy || {},
     });
-    const annotationOut = annotationArtifacts({ inventory, plan: annotationPlan, rendered: safe.rendered, candidates: captured.featureCandidates, coverage: safe.coverage });
+    const annotationOut = annotationArtifacts({ inventory: scopedInventory, figures: safe.figures, bindings: safe.bindings, plan: annotationPlan, rendered: safe.rendered, candidates: captured.featureCandidates, coverage: safe.coverage });
     fs.writeFileSync(stagedAnnotations, JSON.stringify(annotationOut.document, null, 2));
     safe.proof = annotationOut.proof;
     const fallbacks = safe.rendered.filter((item) => item.locator?.fallback).map((item) => `${item.feature_id}（备选 ${item.locator.strategyIndex}）`);
@@ -319,11 +361,12 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
     captureStore.abort(staging);
     // Demo 门禁失败没有 Capture 记录可留：单独记下原因码，generate 据此提示"重新采集被阻断、仍在用旧图"
     recordGateFailure(stateDirAbs, subjectKey(['page', pageId, scenario.id]), e);
+    if (e.code === 'binding-input-required') throw e;
     if (e.code === 'browser-crashed' || e.code === 'session-closed') throw e;
     const normalized = e instanceof CaptureError
       ? e
       // 标注 / 几何类失败是确定性的，保留原码，不能改写成可重试的 navigation-failed（B4-08）
-      : new CaptureError(e.code && (REASON_CODES.has(e.code) || /^(annotation|geometry|scenario|precondition|auth-identity)-/.test(e.code)) ? e.code : REASON.NAVIGATION_FAILED, String(e.message || e), { url });
+      : new CaptureError(e.code && (REASON_CODES.has(e.code) || /^(annotation|figure|binding|geometry|scenario|precondition|auth-identity)-/.test(e.code)) ? e.code : REASON.NAVIGATION_FAILED, String(e.message || e), { url });
     throw classifyAuthFailure(normalized, auth);
   }
   const { shot, ready, navigation, identity, safe, semantic, environment } = observed;
@@ -355,7 +398,8 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
         runId,
         scenarioId: scenario.id,
         scenarioRevision: scenario.revision,
-        checkpointId: 'default',
+        checkpointId: checkpoint?.id || 'default',
+        ...(layout.grouped(page) ? { bindingRevision: layout.bindingRevision(page), layoutRevision: layout.layoutRevision(page) } : {}),
         inputHash: revisionOf({ pageId, modelRevision, scenarioRevision: scenario.revision, url: sanitizeUrl(url), spec }),
         modelRevision,
         // 截图时的源码指纹：之后源码变化时据此判断这张图已过期（记录本身不改，只是不再适用）
@@ -387,7 +431,7 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
       artifacts,
     });
     // Scenario 变体的采集不替换页面默认截图
-    captureStore.setLatest({ [isDefaultScenario ? `page:${pageId}` : `scenario:${scenario.id}`]: record.id });
+    captureStore.setLatest({ [isDefaultScenario ? `page:${pageId}` : `scenario:${scenario.id}`]: record.id, [`figure-state:${scenario.id}:${checkpoint?.id || 'default'}`]: record.id });
     clearGateFailure(stateDirAbs, subjectKey(['page', pageId, scenario.id]));
   } catch (e) {
     captureStore.abort(staging);

@@ -232,13 +232,16 @@ function writeCaptureCache(ctx, task, current, outputs, records, observedAt) {
     kind: 'capture', key: current.captureKey, input: current.captureKeyInput, uncertainty: current.captureUncertainty,
     subject: `capture:${subjectKey(task.input.subject)}`, outputRefs: outputs, observedAt,
     validationScopes: scopesPassed(records), privacy: privacySummary(records), annotation,
-    meta: { imageInputs: imageInputsOf(ctx.config), repairAttempts },
+    meta: { imageInputs: imageInputsOf(ctx.config), layoutRevision: current.layoutRevision || null, repairAttempts },
   });
 }
 
 /** 复用时把任务 / 页面投影指回缓存中的证据（例如期间用旧命令重新采集过）。 */
 function restoreProjection(ctx, subject, outputs, observedAt, current) {
   // 变体证据不是默认投影：缓存命中时同样不能改写页面 / 任务的默认截图指针
+  const captureStore = createCaptureStore({ projectRoot: ctx.projectRoot, stateDirAbs: ctx.stateDirAbs });
+  const cached = outputs.filter(r => r.kind === 'capture').map(r => captureStore.read(r.ref)).filter(Boolean);
+  captureStore.setLatest(Object.fromEntries(cached.filter(r => r.kind === 'page').flatMap(r => [[`figure-state:${r.scenarioId}:${r.checkpointId || 'default'}`, r.id], [r.scenarioId === `page-${r.subject.pageId}` ? `page:${r.subject.pageId}` : `scenario:${r.scenarioId}`, r.id]])));
   if (subject.scenarioId) return;
   const projectStore = loadModel(ctx);
   const base = projectStore.load();
@@ -300,14 +303,30 @@ async function capture(ctx, task) {
   }
 
   if (subject.type === 'page') {
-    const result = await capturePage({
+    const modelResponses = path.join(ctx.runDir, 'model');
+    const choices = {};
+    let bindingAttempts = 0;
+    if (fs.existsSync(modelResponses)) for (const { name, request } of fs.readdirSync(modelResponses).filter(n => n.endsWith('.request.json')).map(name => ({ name, request: JSON.parse(fs.readFileSync(path.join(modelResponses, name), 'utf8')) })).sort((a, b) => a.request.createdAt.localeCompare(b.request.createdAt))) {
+      const responseFile = path.join(modelResponses, name.replace('.request.json', '.response.json'));
+      if (request.taskId === task.id && request.kind === 'binding' && fs.existsSync(responseFile)) { Object.assign(choices, JSON.parse(fs.readFileSync(responseFile, 'utf8')).output.choices); bindingAttempts++; }
+    }
+    let result;
+    const modelPage = loadModel(ctx).load().model.pages.find(p => p.id === subject.id);
+    const requestedCheckpoints = [...new Set((modelPage.figures || []).filter(f => (f.scenarioId || `page-${modelPage.id}`) === current.scenario.id).map(f => f.checkpointId || 'default'))];
+    const checkpoints = requestedCheckpoints.length ? requestedCheckpoints : ['default'];
+    const results = [];
+    try { for (const checkpointId of checkpoints) { result = await capturePage({
       projectRoot: ctx.projectRoot, config: ctx.config, pageId: subject.id, session: ctx.session(), runId: ctx.runId,
-      options: subject.scenarioId ? { scenario: current.scenarioDefinition } : {},
-    });
+      options: { ...(subject.scenarioId ? { scenario: current.scenarioDefinition } : {}), bindingChoices: choices, checkpointId },
+    }); results.push(result); } } catch (error) {
+      if (error.code !== 'binding-input-required') throw error;
+      if (bindingAttempts >= 2) throw new RuntimeError('binding-unresolved', '两次关联后仍未找到控件；修正图文计划或页面状态后重新生成');
+      return requestModel(ctx, 'binding', task, { ...error, attempt: bindingAttempts });
+    }
     checkpoint('capture-committed');
-    const outputs = [{ kind: 'capture', ref: result.record.id }];
-    writeCaptureCache(ctx, task, current, outputs, [result.record], result.record.observedAt);
-    return { outputs, warnings: [...warnings, ...result.ready.warnings], actions: 1 };
+    const outputs = results.map(r => ({ kind: 'capture', ref: r.record.id }));
+    writeCaptureCache(ctx, task, current, outputs, results.map(r => r.record), result.record.observedAt);
+    return { outputs, warnings: [...warnings, ...results.flatMap(r => r.ready.warnings)], actions: results.length };
   }
   const result = await captureTask({ projectRoot: ctx.projectRoot, config: ctx.config, taskId: subject.id, session: ctx.session(), runId: ctx.runId,
     ...(subject.scenarioId ? { scenario: current.scenarioDefinition } : {}) });
@@ -365,9 +384,9 @@ async function deriveImage(ctx, task) {
   for (const record of readRecords(ctx, captureIds)) {
     if (!record.annotationProof) continue;
     const stale = staleness(record.annotationProof, currentScope(model, record, { stateDirAbs: ctx.stateDirAbs }), record);
-    if (stale.length) throw new RuntimeError('annotation-plan-changed', `Capture ${record.id}: ${stale.map((p) => p.message).join('；')}；需要重新采集（generate --refresh）。`);
+    if (stale.length && !(record.bindingRevision && record.bindingRevision === require('../annotations/section-plan').bindingRevision(model.pages.find(p => p.id === subject.id)))) throw new RuntimeError('annotation-plan-changed', `Capture ${record.id}: ${stale.map((p) => p.message).join('；')}；需要重新采集（generate --refresh）。`);
   }
-  const { records, mapping } = await rederiveCaptures({ projectRoot: ctx.projectRoot, config: ctx.config, captureIds, runId: ctx.runId });
+  const { records, mapping } = await rederiveCaptures({ projectRoot: ctx.projectRoot, config: ctx.config, captureIds, runId: ctx.runId, layoutPage: subject.type === 'page' ? model.pages.find(p => p.id === subject.id) : null });
   const projectStore = loadModel(ctx);
   const base = projectStore.load();
   let outputs;
@@ -375,7 +394,8 @@ async function deriveImage(ctx, task) {
     const page = base.model.pages.find((p) => p.id === subject.id);
     const record = records[0].record;
     if (!subject.scenarioId && isLiveRecord(record, ctx)) projectStore.commit({ base, kind: 'observation', changes: { pages: [pageProjection(page, record)] } });
-    outputs = [{ kind: 'capture', ref: record.id }];
+    outputs = records.map(r => ({ kind: 'capture', ref: r.record.id }));
+    createCaptureStore({ projectRoot: ctx.projectRoot, stateDirAbs: ctx.stateDirAbs }).setLatest(Object.fromEntries(records.flatMap(({ record: r }) => [[`figure-state:${r.scenarioId}:${r.checkpointId || 'default'}`, r.id], [r.scenarioId === `page-${r.subject.pageId}` ? `page:${r.subject.pageId}` : `scenario:${r.scenarioId}`, r.id]])));
   } else {
     const manifestRef = source.find((r) => r.kind === 'file').ref;
     const { file } = remapManifest(ctx, manifestRef, mapping, records);
@@ -396,6 +416,7 @@ async function deriveImage(ctx, task) {
 // ---------------------------------------------------------------- analyze / draft / rewrite / publish
 
 function analyze(ctx, task) {
+  if (task.input.layout) return requestModel(ctx, 'layout', task);
   const subject = task.input.subject;
   const page = loadModel(ctx).load().model.pages.find((p) => p.id === subject.id);
   if (page?.status?.sourceAnalysis === ANALYSIS.COMPLETED) {

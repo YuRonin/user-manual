@@ -18,6 +18,10 @@ const { spawnSync } = require('child_process');
 const path = require('path');
 
 const FILES = [
+  'grouped-manual.test.js',
+  'grouped-geometry.test.js',
+  'grouped-manual-browser.test.js',
+  'grouped-runtime.test.js',
   'annotation-coverage.test.js',
   'model-links.test.js',
   'manual-quality.test.js',
@@ -114,6 +118,8 @@ const FILES = [
 
 // 启动真实 Chromium 或测试服务器的文件；其余为 unit。新增浏览器测试时加到这里（test-groups.test 会核对）。
 const BROWSER = new Set([
+  'grouped-manual-browser.test.js',
+  'grouped-runtime.test.js',
   'role-demo.test.js',
   'variant-manual.test.js',
   'auth-identity.test.js', 'browser-session.test.js', 'cache-policy.test.js', 'capture.test.js', 'drift-report.test.js',

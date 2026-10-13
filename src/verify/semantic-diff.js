@@ -13,7 +13,7 @@ const { sha256Hex } = require('../util/hash');
 const ROLES = new Set([
   'heading', 'button', 'link', 'dialog', 'alertdialog', 'tab', 'tabpanel', 'menuitem', 'checkbox', 'radio',
   'combobox', 'textbox', 'searchbox', 'switch', 'slider', 'spinbutton', 'navigation', 'banner', 'main', 'form',
-  'table', 'columnheader', 'alert', 'status',
+  'table', 'columnheader', 'alert', 'status', 'region', 'group',
 ]);
 
 // 与 privacy/detector 同类的模式：摘要里绝不保留这些值
@@ -33,12 +33,17 @@ function redact(text) {
 /** 解析 Playwright ariaSnapshot 文本：`- role "name" [attrs]: 内容`。只取角色、名称与 level。 */
 function parseAriaSnapshot(text) {
   const items = [];
+  const containers = [];
   for (const line of String(text || '').split('\n')) {
     const match = /^\s*- ([a-z]+)(?: "((?:[^"\\]|\\.)*)")?((?: \[[^\]]+\])*)/.exec(line);
     if (!match || !ROLES.has(match[1])) continue;
+    const indent = /^\s*/.exec(line)[0].length;
+    while (containers.length && containers[containers.length - 1].indent >= indent) containers.pop();
     const name = match[2] === undefined ? '' : redact(match[2].replace(/\\"/g, '"'));
     const level = /\[level=(\d)\]/.exec(match[3] || '')?.[1];
-    items.push({ role: match[1], name, ...(level ? { level: Number(level) } : {}) });
+    const parent = containers[containers.length - 1];
+    items.push({ role: match[1], name, ...(level ? { level: Number(level) } : {}), ...(parent ? { within: { role: parent.role, name: parent.name, exact: true } } : {}) });
+    if (name && !name.includes('[redacted]') && ['region', 'group', 'dialog', 'form', 'navigation', 'tabpanel'].includes(match[1])) containers.push({ role: match[1], name, indent });
   }
   return items;
 }

@@ -89,7 +89,7 @@ function artifactsFor(root, config, target) {
   if (target.type === 'page') {
     const result = verifyPageArtifacts({ root, config, pageId: target.id });
     if (!result.ok) errors = result.errors;
-    else extra = { manual: result.manual, images: result.images, warnings: result.warnings || [], annotationCoverage: require('../verify/artifacts').annotationCoverageForImages(root, config, result.release.facts?.images || []), demo: demoSafetyForImages(root, config, result.release.facts?.images || []) };
+    else extra = { manual: result.manual, images: result.images, warnings: result.warnings || [], ...(result.operationCoverage ? { operationCoverage: result.operationCoverage } : {}), annotationCoverage: require('../verify/artifacts').annotationCoverageForImages(root, config, result.release.facts?.images || []), demo: demoSafetyForImages(root, config, result.release.facts?.images || []) };
   } else {
     const input = loadVerify(root, config, target.id);
     if (!input.ok) errors = input.errors;

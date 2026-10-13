@@ -1,5 +1,7 @@
 # 命令细节与兼容流程
 
+分类图文使用 features.operations、sections、figures，并通过 layout/binding Runtime 请求提交语义分类或控件候选选择。独立迁移命令 `manual migrate --layout --dry-run/--apply --input <分类计划.json>`，回退用 `--layout --rollback <UUID>`；已有分类定义可以 describe 更新。多状态 Scenario 与旧 guide 映射的完整契约见 [分类图文手册](../docs/GROUPED_MANUAL.md)。
+
 需要初始化与扫描的细节、登录与截图参数、高级命令时阅读本文件。日常生成按 `SKILL.md` 的主流程。
 
 ## `$manual-init` / `/manual-init` —— 初始化配置

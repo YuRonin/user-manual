@@ -95,6 +95,23 @@ async function prepare(root, server, env) {
   try {
     await step('准备：任务与页面手册已发布', () => prepare(root, server, env));
 
+    await step('分类页面结果只能引用动作后的真实已发布任务证据，模拟或未执行结果不满足要求', async () => {
+      const { config } = require('../src/config/load').loadConfig(root);
+      const { resultEvidence, frozenClaimValid } = require('../src/generate/result-evidence');
+      const page = { id: 'task-profile', features: [{ id: 'result', operations: [{ id: 'view-editor', evidenceRequirement: 'result', taskId: 'edit-profile', claimId: 'editor-opened' }] }], sections: [{ featureRefs: ['result'] }] };
+      const result = resultEvidence({ projectRoot: root, config, page });
+      assert.deepStrictEqual(result.errors, []);
+      assert.equal(result.claims[0].status, 'verified');
+      const frozen = resultEvidence({ projectRoot: root, config, page, frozen: result.claims });
+      assert.deepStrictEqual(frozen.errors, []);
+      assert.deepStrictEqual(frozen.claims, result.claims);
+      const store = require('../src/evidence/store').createCaptureStore({ projectRoot: root, stateDirAbs: state });
+      assert(!frozenClaimValid(root, store, { ...result.claims[0], status: 'simulated' }));
+      assert(!frozenClaimValid(root, store, { ...result.claims[0], evidence: result.claims[0].evidence.map(e => ({ ...e, captureId: null })) }));
+      page.features[0].operations[0].claimId = 'saved';
+      assert.equal(resultEvidence({ projectRoot: root, config, page }).errors[0].code, 'manual-result-unverified');
+    });
+
     await step('artifacts 与 live 范围分开：artifacts 不访问浏览器、onlineChecked=false', async () => {
       const artifacts = await expectExit(root, ['verify', 'task:edit-profile'], 0, env);
       assert.strictEqual(artifacts.scope, 'artifacts');

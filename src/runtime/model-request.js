@@ -98,12 +98,33 @@ function analyzeContent(ctx, task) {
   };
 }
 
+function layoutContent(ctx, task) {
+  const { page } = require('../generate/page-usecase').loadPage(ctx.projectRoot, ctx.config, task.input.subject.id);
+  const candidates = [page.entry, ...(page.dependencies?.files || []), ...(page.source || [])].filter(Boolean);
+  const modelFile = `${ctx.config.artifacts.stateDir}/pages/${page.id}.yaml`;
+  const files = [fileEntry(ctx.projectRoot, modelFile), ...[...new Set(candidates)].slice(0, LIMITS.maxFiles - 1).map(f => fileEntry(ctx.projectRoot, f))].filter(Boolean);
+  return {
+    inputHash: revisionOf({ task: task.inputHash, files }), files,
+    facts: { page: require('../model/revision').pickDefinitionFields('page', page), migration: require('../annotations/layout-migration').proposalFor(page), schemaReference: 'docs/GROUPED_MANUAL.md' },
+    output: { type: 'manual-layout', allowedFields: ['title', 'purpose', 'features', 'sections', 'figures', 'states', 'variants', 'scenarios'], shape: '{ "features": [...], "sections": [...], "figures": [...], "scenarios": [...] }' },
+    instructions: '阅读 docs/GROUPED_MANUAL.md，按读者目标分类。保留每项旧 guide 的 feature.guideId 和功能身份，不删减原有操作。每个已收录功能用 operations 定义动作及证据需求；图片引用操作、Scenario、检查点。默认每张 1～3 个标注，优先局部区域，不机械复制整页。菜单、拖放、产物使用不同真实状态。显式 targetHint 是线索，无法确定时用 bindingIntent 描述待选控件。concept/reference 的无图说明必须有来源和理由。只提交源码支持的事实，风险动作沿用任务授权；新 Scenario 只能做 read/local setup，不能执行业务写入。不能修改已有 Scenario，使用新 id 或引用已有定义。',
+  };
+}
+
+function bindingContent(ctx, task, payload) {
+  return { inputHash: revisionOf({ task: task.inputHash, unresolved: payload.unresolved, attempt: payload.attempt || 0 }), files: [],
+    facts: { unresolved: payload.unresolved },
+    output: { type: 'control-binding', shape: '{ "choices": { "<figureId>/<operationId>": { "candidateId": "control-..." } } }' },
+    instructions: '为每个 unresolved 操作选择列出的唯一候选，依据功能目的、角色和名称判断。只提交 candidateId，不编坐标、selector 或成功声明。无法确定保持缺口并说明；程序将重新在相同角色和状态验证。',
+  };
+}
+
 /**
  * 为等待中的模型任务取得请求：同一任务、同一 inputHash 的未完成请求直接复用（resume 不产生新请求）。
  * @returns {{ waiting: { code, message, request } }}
  */
-function requestModel(ctx, kind, task) {
-  const content = kind === 'rewrite' ? rewriteContent(ctx, task) : analyzeContent(ctx, task);
+function requestModel(ctx, kind, task, payload = null) {
+  const content = kind === 'layout' ? layoutContent(ctx, task) : kind === 'binding' ? bindingContent(ctx, task, payload) : kind === 'rewrite' ? rewriteContent(ctx, task) : analyzeContent(ctx, task);
   const dir = modelDirFor(ctx.runDir);
   if (fs.existsSync(dir)) {
     for (const name of fs.readdirSync(dir).filter((n) => n.endsWith('.request.json')).sort()) {
@@ -130,6 +151,11 @@ function requestModel(ctx, kind, task) {
     limits: LIMITS,
     responsePath: rel(ctx.projectRoot, responseFileFor(ctx.runDir, requestId)),
   };
+  if (kind === 'layout') {
+    const reference = 'docs/GROUPED_MANUAL.md';
+    const file = path.resolve(__dirname, '..', '..', reference);
+    if (fs.existsSync(file)) request.files.push({ path: reference, sha256: sha256Hex(fs.readFileSync(file)), root: 'tool' });
+  }
   fs.mkdirSync(dir, { recursive: true });
   writeFileAtomic(requestFileFor(ctx.runDir, requestId), JSON.stringify(request, null, 2) + '\n');
   if (kind === 'rewrite') checkpoint('rewrite-requested');

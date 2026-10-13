@@ -173,6 +173,7 @@ function createCaptureStore({ projectRoot, stateDirAbs }) {
       return {
         kind: artifact.kind,
         ...(Number.isInteger(artifact.part) ? { part: artifact.part } : {}),
+        ...(artifact.figureId ? { figureId: artifact.figureId } : {}),
         path: artifactPath,
         sha256: sha,
         bytes: bytes.length,
@@ -259,7 +260,7 @@ function createCaptureStore({ projectRoot, stateDirAbs }) {
 function publishedEntries(safe, { file, dir, prefix }) {
   if (!safe?.published) return [];
   if (!safe.parts) return [{ kind: 'published', file, dir, prefix }];
-  return safe.parts.map(({ part, file: partFile }) => ({ kind: 'published', part, file: partFile, dir, prefix: part === 1 ? prefix : `${prefix}--part-${part}` }));
+  return safe.parts.map(({ part, file: partFile, figureId }) => ({ ...(figureId ? { figureId } : {}), kind: 'published', part, file: partFile, dir, prefix: part === 1 ? prefix : `${prefix}--part-${part}` }));
 }
 
 /** 记录中的全部发布图，按 part 排序（未拆图的记录只有一张）。 */

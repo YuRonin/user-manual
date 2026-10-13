@@ -1,5 +1,7 @@
 # 迁移与兼容说明
 
+分类图文迁移使用页面 schemaVersion 3，入口为 `manual migrate --layout --dry-run/--apply --input <分类计划.json>`，或由 generate 的 layout 请求自动完成并重新规划。旧 guide 块身份、人工内容及当前正式文档保留；快照、回退和模型格式见 [分类图文手册](GROUPED_MANUAL.md)。
+
 ## 从 v1 项目迁移（Phase 1）
 
 ```bash
