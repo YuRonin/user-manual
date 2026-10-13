@@ -1,6 +1,6 @@
 # 架构与演进约定
 
-页面 schemaVersion 3 使用 `features.operations → sections → figures` 连接操作说明、分类图片与状态。浏览器 Binding 放在不可变 Capture 中；同状态一次采集可以经过完整隐私处理后派生多张局部图，各图独立编号。Runtime 通过 layout/binding 请求交接语义工作，正式发布核对所有已收录操作。字段、迁移和缓存边界见 [分类图文手册](GROUPED_MANUAL.md)。
+页面 schemaVersion 3 使用 `features.operations → sections → figures` 连接操作说明、分类图片与状态。浏览器 Binding 放在不可变 Capture 中；同状态一次采集可以经过完整隐私处理后派生多张原尺寸分类图，各图独立编号。Runtime 通过 layout/binding 请求交接语义工作，正式发布核对所有已收录操作。字段、迁移和缓存边界见 [分类图文手册](GROUPED_MANUAL.md)。
 
 给后续版本的设计靶子。
 
@@ -172,6 +172,7 @@ close()                                                            必须可重�
   `getAnimations()` 返回空集，计数永远是 0，等于没有可观测性。
 - `caret-color: transparent` 去掉光标闪烁，`scroll-behavior: auto` 去掉平滑滚动
 - 采集时检查几何稳定（`captureStable` 多次取几何比较，仍在变化报 `geometry-unstable`）
+- 截图前加载截图范围内的图片（懒加载图片改为立即加载，等解码完成）；等不到报 `media-not-loaded`，加载失败（如 404）报 `media-broken`，两者都不产出发布图
 
 "是否变了"不靠字节比较判断：缓存按输入 key 复用（C09），在线验证用语义摘要 + 同规格、同隐私版本的像素比较
 （`src/verify/visual-diff.js`），规格不同直接报 environment-incompatible。

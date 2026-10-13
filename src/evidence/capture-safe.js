@@ -103,6 +103,7 @@ async function confirmTargetsShown(provider, located) {
  */
 async function captureStable(provider, { rawPath, fullPage = false, format = 'png', resolveTargets = async () => [], maxAttempts = MAX_ATTEMPTS, stabilityMs = undefined, assertState = null }) {
   let quiet = null;
+  let media = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     // 先等页面静置再取几何：否则收尾渲染期间的连续重试会全部落在同一段变化里。
     // DOM 在等待上限内仍在变化（如回复仍在逐字输出）时这一轮不截图，进入下一次尝试。
@@ -110,6 +111,9 @@ async function captureStable(provider, { rawPath, fullPage = false, format = 'pn
     if (quiet?.dom === 'max-wait') continue;
     // 整页截图从页面顶部开始：client 坐标即文档坐标，sticky 元素回到自然位置（B4-04）
     if (fullPage && provider.scrollToTop) await provider.scrollToTop();
+    // 截图范围内的图片先加载完：懒加载图片在整页截图里不会进入视口，不处理就是一片空白占位
+    media = provider.loadMedia ? await provider.loadMedia({ fullPage }) : null;
+    if (media?.pending || media?.broken) continue;
     // Demo：截图前把 data-redact 区域换成演示值；之后的几何快照以替换后的 DOM 为基准
     if (provider.applyDemo) await provider.applyDemo();
     const before = provider.collectGeometry ? await provider.collectGeometry({ fullPage }) : null;
@@ -142,6 +146,13 @@ async function captureStable(provider, { rawPath, fullPage = false, format = 'pn
       const warnings = quiet?.network === 'busy' ? [`screenshot-network-busy: 截图时仍有 ${quiet.pendingRequests} 个数据请求未结束，内容可能尚未加载完成。`] : [];
       return { shot, geometry, targets, candidates, attempts: attempt, warnings, demo };
     }
+  }
+  // 加载失败的图片（如 404）在截图里是一块空白或破图：发布出去读者只会看到空框，不产出发布图
+  if (media?.broken) {
+    throw captureError('media-broken', `截图范围内有 ${media.broken} 张图片加载失败（共 ${media.total} 张），重试 ${maxAttempts} 次后放弃；不会产出带空白图片的发布图。检查图片地址是否存在（例如页面展示的图片由构建步骤生成，还没重新生成）。`);
+  }
+  if (media?.pending) {
+    throw captureError('media-not-loaded', `截图范围内仍有 ${media.pending} 张图片没有加载完（共 ${media.total} 张），重试 ${maxAttempts} 次后放弃；不会产出空白占位的发布图。检查图片地址与网络守卫是否放行了图片请求。`);
   }
   const state = quiet?.dom === 'max-wait' ? `DOM 持续变化${quiet.network === 'busy' ? `，仍有 ${quiet.pendingRequests} 个数据请求未结束` : ''}` : '截图前后几何不一致';
   throw captureError('geometry-unstable', `截图前页面一直不稳定（${state}），重试 ${maxAttempts} 次后放弃；不会产出发布图。`);

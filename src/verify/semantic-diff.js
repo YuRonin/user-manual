@@ -36,9 +36,12 @@ function parseAriaSnapshot(text) {
   const containers = [];
   for (const line of String(text || '').split('\n')) {
     const match = /^\s*- ([a-z]+)(?: "((?:[^"\\]|\\.)*)")?((?: \[[^\]]+\])*)/.exec(line);
-    if (!match || !ROLES.has(match[1])) continue;
+    if (!match) continue;
+    // 先按缩进退出已结束的容器，再按角色过滤：不跟踪的角色（如 menu、list）同样会结束同级容器，
+    // 否则前一个同级 region 会被误当成后面整棵子树的 within，定位永远命中 0 个
     const indent = /^\s*/.exec(line)[0].length;
     while (containers.length && containers[containers.length - 1].indent >= indent) containers.pop();
+    if (!ROLES.has(match[1])) continue;
     const name = match[2] === undefined ? '' : redact(match[2].replace(/\\"/g, '"'));
     const level = /\[level=(\d)\]/.exec(match[3] || '')?.[1];
     const parent = containers[containers.length - 1];

@@ -38,6 +38,8 @@ const POLICIES = {
   'browser-crashed': RETRY,
   'browser-launch-failed': RETRY,
   'geometry-unstable': RETRY,
+  'media-not-loaded': RETRY,
+  'media-broken': RETRY,
   // 运行环境拦截网络：确定性失败，重试只会浪费时间。
   'network-access-denied': FAIL,
   // 标注排版失败是确定性的：同一页面重拍结果不变

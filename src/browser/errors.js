@@ -30,6 +30,8 @@ const REASON = {
   UNEXPECTED_STATE: 'unexpected-page-state',
   PAGE_IDENTITY_FAILED: 'page-identity-failed',
   GEOMETRY_UNSTABLE: 'geometry-unstable',
+  MEDIA_NOT_LOADED: 'media-not-loaded',
+  MEDIA_BROKEN: 'media-broken',
   PRIVACY_UNCERTAIN: 'privacy-uncertain',
   ANNOTATION_LAYOUT_FAILED: 'annotation-layout-failed',
   ANNOTATION_HOVER_CONFLICT: 'annotation-hover-conflict',

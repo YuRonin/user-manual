@@ -532,7 +532,8 @@ function plan(snapshot, policy) {
   const body = {
     version: PLAN_VERSION,
     command,
-    targets: snapshot.targets.map((t) => t.ref),
+    // 只记用户给的目标：页面变体展开出的 scenario 依赖会在重新规划时再次展开，记进来反而会被当成独立目标拒绝
+    targets: snapshot.targets.filter((t) => !t.dependencyFor).map((t) => t.ref),
     modelRevision: snapshot.modelRevision,
     // resume --replan 用同一策略重新规划；缓存模式也记在这里，恢复时沿用。
     policy: { copy, acceptReview: !!policy.acceptReview, force: !!policy.force, mode: snapshot.mode.name },

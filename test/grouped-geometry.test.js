@@ -25,7 +25,10 @@ const { DEFAULT_THEME } = require('../src/config/annotation');
       assert(safe.rendered.every(r => r.visible && r.drawn && r.located));
       const crop = safe.figures[0].crop;
       assert.equal(crop.dpr, dpr);
-      assert(crop.width < 900 * dpr && crop.height < 800 * dpr);
+      // auto 不裁图：分图后每张仍是原尺寸截图，只是各自标注不同的控件
+      assert.deepEqual(safe.figures.map(f => [f.crop.x, f.crop.y, f.crop.width, f.crop.height]), [[0, 0, 900 * dpr, 800 * dpr], [0, 0, 900 * dpr, 800 * dpr]], 'auto figures must keep the original image size');
+      const meta = await sharp(publishedPath).metadata();
+      assert.deepEqual([meta.width, meta.height], [900 * dpr, 800 * dpr], 'published auto figure must not be cropped');
       // A mask well away from the annotated controls must survive the full-image crop.
       const { data, info } = await sharp(publishedPath).raw().toBuffer({ resolveWithObject: true });
       const x = Math.floor(320 * dpr - crop.x), y = Math.floor(245 * dpr - crop.y);

@@ -246,6 +246,8 @@ manual gc --apply --expect <planHash>          # 项目锁内重新核对后删�
 | `analysis-required`（`--copy-default`，warnings） | `--copy-default` 不会补写页面标题与用途，Run 会停在 analyze 等待输入：无人值守前先 `manual describe --input`，或补齐后 `resume` |
 | `capture-required:annotation-incomplete` | 上次采集标注覆盖失败、没有发布图，或是没有覆盖记录的旧证据：不会复用，按提示修正 guide / 功能目标后重新采集 |
 | `source-freshness-unknown`（warnings） | 生成前重扫源码失败，按上次 inspect 的指纹规划；先 `manual inspect` 确认扫描正常 |
+| `media-not-loaded` | 截图范围内的图片一直没加载完（整页截图里的懒加载图片已自动改为立即加载）；检查图片地址、`capture.demo.network` 是否放行图片请求 |
+| `media-broken` | 截图范围内有图片加载失败（如 404），截出来是空框；检查图片地址。页面展示的图片若由构建步骤生成（例如帮助中心把手册截图转成 WebP），先重新生成再采集 |
 | `geometry-unstable` | 截图前页面一直在变（回复仍在输出、轮询刷新）；确认步骤断言等到了真正的完成状态，必要时放宽 `capture.waits.stabilityMs` |
 | `readiness-timeout` / `page-reloaded`（warnings） | 入口长时间加载中：已自动刷新一次；仍失败时检查接口，或放宽 `capture.waits.readinessMs` |
 | `annotation-layout-crowded`（覆盖失败原因） | 编号找不到安全位置（目标过密或被遮罩包围）：减少同图标注、调小主题的 `maxMarkersPerImage` 让它拆图，或调整 `markerSize` 后重新派生 |

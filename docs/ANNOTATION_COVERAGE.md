@@ -46,7 +46,7 @@
 - **编号位置**：依次尝试目标框左侧（与上边线居中）、右侧、上方、下方、左右居中、上下靠右，外侧都放不下时才放进框内角。候选位置必须完整落在画布内，且不能压住已放置的编号、其他目标的元素矩形和隐私遮罩。全部不可用时这一项不画，记 `annotation-layout-crowded`，不会硬塞到重叠位置。贴边目标的框会裁剪到画布边缘，不会整体平移、指向旁边的元素。
 - **拆图**：标注数超过主题的 `maxMarkersPerImage`（默认 5）时，按顺序拆成多张发布图（第 1 张 1–5，第 2 张 6–10……）。编号全局连续，正文编号不变。同一条 Capture 记录里每张图是一个 `part: N` 的 `published` 产物，第 2 张起文件名带 `--part-N`；逐项结果与精简证明记录每项在哪张图。页面手册和任务步骤按顺序引用全部分图。
 - **坐标**：整页截图前先回到页面顶部；`position: fixed` 的元素不加滚动偏移，贴底的落到文档底部。标注框和隐私遮罩用同一套换算。截图像素尺寸与画布 × DPR 不一致时报 `geometry-scale-mismatch`，不出发布图。
-- **主题**：`primary`、`halo` / `haloWidth`、`labelBackground` / `markerStrokeWidth`（编号描边）、`markerText`、`markerSize` / `fontScale`（字号 = 编号直径 × fontScale）、`outlineWidth`、`targetPadding`、`targetRadius` 全部生效。`primaryDark`、`labelText`、`focusMask`、`fallbackColor` 没有消费者，配置里出现时提示 `annotation-theme-deprecated`。布局与主题变化通过渲染器版本（`sharp-svg-3`）和主题修订号触发重新派生，不需要重新登录或采集。
+- **主题**：`primary`、`halo` / `haloWidth`、`labelBackground` / `markerStrokeWidth`（编号描边）、`markerText`、`markerSize` / `fontScale`（字号 = 编号直径 × fontScale）、`outlineWidth`、`targetPadding`、`targetRadius` 全部生效。`primaryDark`、`labelText`、`focusMask`、`fallbackColor` 没有消费者，配置里出现时提示 `annotation-theme-deprecated`。布局与主题变化通过渲染器版本（`sharp-svg-4`）和主题修订号触发重新派生，不需要重新登录或采集。
 
 ## 在线验证的视觉比较
 

@@ -36,6 +36,9 @@ function isAlreadyObscured(value) {
 function classifyCandidate(candidate, policy) {
   const text = String(candidate.text || '');
   const label = String(candidate.label || '');
+  // 空的表单控件里没有任何用户内容（显示的只是占位提示，属于界面文案）：不打码。
+  // 否则空密码框会按「值宽度 + 2px」得到一条窄矩形，再被扩成一小块马赛克盖在占位文字上，毫无意义。
+  if (candidate.source === 'form-control' && !text.trim()) return null;
   if (candidate.inputType === 'password' || CREDENTIAL_LABEL.test(label)) {
     return { kind: 'credential', confidence: 'high', forced: true };
   }

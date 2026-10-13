@@ -53,7 +53,7 @@ manual approve-tasks --input <决策.json>            # 用户确认后才批准
 
 ### 标注计划与待确认功能
 
-页面图文按读者目标分类：在 features.operations 声明操作与证据需求，用 sections/figures 组织相邻说明、局部图和独立状态图。默认每张 1～3 个标注、各图从 1 编号；菜单、拖拽提示和结果各有对应状态。首次建立或迁移分类计划时读取 [分类图文手册](docs/GROUPED_MANUAL.md)。旧 guide 保留 guideId 映射，缺定位的操作继续列入证据需求。
+页面图文按读者目标分类：在 features.operations 声明操作与证据需求，用 sections/figures 组织相邻说明、分类图和独立状态图。图片默认是原尺寸截图，只画标注不裁剪；默认每张 1～3 个标注、各图从 1 编号；菜单、拖拽提示和结果各有对应状态。首次建立或迁移分类计划时读取 [分类图文手册](docs/GROUPED_MANUAL.md)。旧 guide 保留 guideId 映射，缺定位的操作继续列入证据需求。
 
 Required 只来自 `describe --input` 里页面 `features` 的显式决定；带 target 的 guide、`detectedActions` 和截图时在页面上发现的按钮 / 标签页 / 菜单项都只是**待确认候选**（照常标注出图，但不算分母）。`inspect` / `describe` / 任务审批后读取 `.manual/feature-inventory.json` 的 `pending`，结合读者要完成的任务，在 `features` 里给每个候选写稳定的 `id`、`required|optional|skip` 决策和说明（名称或目标与候选一致即可覆盖它；guide 可用 `featureId` 显式对应）。public 手册存在未确认候选时定稿会被 `inventory-review-required` 阻断（internal 只提示）。没有已确认 Required 的页面覆盖率显示 N/A，不是 100%。Required 失败时按失败原因补计划或截图，再生成手册。字段与判定细节见 [标注覆盖率](docs/ANNOTATION_COVERAGE.md)。
 

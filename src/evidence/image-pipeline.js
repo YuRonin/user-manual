@@ -19,7 +19,7 @@ const { sha256Hex, revisionOf } = require('../util/hash');
 const { writeFileAtomic } = require('../util/atomic-write');
 
 // 3：避让碰撞的布局（B4-01）、拆图（B4-02）、主题参数全部生效（B4-03）
-const RENDERER_VERSION = 'sharp-svg-3';
+const RENDERER_VERSION = 'sharp-svg-4';
 const MIN_MASK = { width: 24, height: 8 };
 
 /** CSS 矩形 → 图像像素矩形（取整向外扩，保证完全覆盖），裁剪到图像范围；完全落在图外返回 null。 */

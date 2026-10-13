@@ -8,8 +8,12 @@ const { sha256Hex, revisionOf } = require('../util/hash');
 const { writeFileAtomic } = require('../util/atomic-write');
 const { verifyCoverage } = require('../annotations/coverage');
 
+// 图片取景：默认（auto）保留原尺寸截图，只在上面画标注，读者能看到控件在整页中的位置；
+// 只有显式声明 region 时才裁到命名区域。viewport 用于整页截图里取当时可见的那一屏。
 function frameFor(figure, targets, canvas, geometry = {}) {
-  if (figure.frame?.mode === 'viewport') {
+  const mode = figure.frame?.mode || 'auto';
+  if (mode === 'auto') return { x: 0, y: 0, width: canvas.width, height: canvas.height };
+  if (mode === 'viewport') {
     const width = Math.min(canvas.width, geometry.viewport?.width || canvas.width);
     const height = Math.min(canvas.height, geometry.viewport?.height || canvas.height);
     return { x: geometry.fullPage ? Math.max(0, Math.min(canvas.width - width, geometry.scroll?.x || 0)) : 0, y: geometry.fullPage ? Math.max(0, Math.min(canvas.height - height, geometry.scroll?.y || 0)) : 0, width, height };

@@ -71,6 +71,12 @@ const cli = (root, args) => {
       assert.equal(correct.status, 'verified');
       assert.equal(correct.name, '发送');
       assert.equal(correct.role, 'button');
+      // 重复控件（每张卡片一个）在全局候选里不唯一；限定区域后能唯一定位，就按显式提示通过
+      const noCandidates = { items: [] };
+      const scopedRepeat = await require('../src/annotations/binding').bindOperation(provider, { target: { role: 'button', name: '选择模板', within: { selector: 'section[aria-label="学校模板"]' } }, operation_id: 'template', figure_id: 'template' }, noCandidates);
+      assert.equal(scopedRepeat.status, 'verified', 'a scoped hint for a repeated control must verify without a global candidate');
+      const unscopedRepeat = await require('../src/annotations/binding').bindOperation(provider, { target: { role: 'button', name: '发送' }, operation_id: 'send', figure_id: 'input' }, noCandidates);
+      assert.equal(unscopedRepeat.reason, 'binding-identity-mismatch', 'an unscoped hint still needs an observed candidate');
       const sendCandidate = require('../src/annotations/binding').candidatesOf(semantic).find(c => c.name === '发送');
       const repaired = await bind({ role: 'textbox', name: '教学需求' }, intent, { candidateId: sendCandidate.id });
       assert.equal(repaired.status, 'verified', 'an accepted candidate must override a mismatched old hint');
@@ -81,10 +87,12 @@ const cli = (root, args) => {
       assert(unnamed.found.rect && unnamed.source === 'explicit-hint');
     } finally { await provider.close(); }
     if (process.env.MANUAL_QA_IMAGE) fs.copyFileSync(path.join(root, initial.record.artifacts.find(a => a.kind === 'published').path), process.env.MANUAL_QA_IMAGE);
-    for (const image of initial.record.artifacts.filter(a => a.kind === 'published')) {
-      const meta = await sharp(path.join(root, image.path)).metadata();
-      assert(meta.width < initial.record.spec.viewport.width * initial.record.spec.dpr, 'category figure should be cropped');
-    }
+    // 分类图默认（auto）保留原尺寸截图只画标注；显式 region 才裁到命名区域
+    const fullWidth = initial.record.spec.viewport.width * initial.record.spec.dpr;
+    const crops = new Map(initial.record.annotationProof.figures.map(f => [f.figureId, f.crop]));
+    for (const id of ['attachments', 'school-entry']) assert.equal(crops.get(id)?.width, fullWidth, `auto figure ${id} must keep the original screenshot width`);
+    assert(crops.get('input')?.width < fullWidth, 'region figure is still cropped to its named region');
+    for (const image of initial.record.artifacts.filter(a => a.kind === 'published')) assert((await sharp(path.join(root, image.path)).metadata()).width > 0);
     const draftMissing = draftPage({ projectRoot: root, config, pageId: 'chat' });
     assert.equal(draftMissing.pack.evidenceCoverage.total, 4);
     assert.throws(() => preparePageFinal({ projectRoot: root, config, pageId: 'chat' }), e => e.code === 'manual-operation-uncovered');

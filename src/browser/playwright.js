@@ -194,8 +194,9 @@ function probePage() {
     elementCount: body ? body.querySelectorAll('*').length : 0,
     // 软 404：状态码 200，但标题/主标题说明这是「不存在」页
     notFoundHint: /(^|\D)404(\D|$)|not found|页面不存在|找不到(该)?页面/i.test(identityText),
-    // 仍在加载：只认语义标记，不猜 spinner 类名
-    busy: [...document.querySelectorAll('[aria-busy="true"],[role="progressbar"]')].some(visible),
+    // 仍在加载：只认语义标记，不猜 spinner 类名。带 aria-valuenow 的确定进度条是页面内容（如任务完成进度），
+    // 只有不确定进度条（没有当前值）才表示还在加载
+    busy: [...document.querySelectorAll('[aria-busy="true"],[role="progressbar"]:not([aria-valuenow])')].some(visible),
     errorAlert: [...document.querySelectorAll('[role="alert"]')].some((el) => visible(el) && /错误|出错|失败|异常|error|failed/i.test(el.innerText || '')),
   };
 }
@@ -1063,6 +1064,42 @@ class PlaywrightBrowserProvider extends BrowserProvider {
       dom = 'error';
     }
     return { dom, network, pendingRequests: this.inflight?.size || 0 };
+  }
+
+  /**
+   * 截图前把画面里的图片加载完。`loading="lazy"` 的图片在整页截图时不会进入视口，
+   * 浏览器从不发起请求，截出来是一块空白占位——这里先改成立即加载，再等截图范围内的图片解码完成。
+   * 截图范围：整页截图是整个文档，视口截图是当前可见区域；范围外的图片不等待。
+   * @returns {{ pending: number, broken: number, total: number }}
+   *   pending：等待上限内仍未加载完；broken：加载结束但解码失败（如 404，截图里是空白或破图）。两者都会让 captureStable 重试，最终不产出发布图。
+   */
+  async loadMedia({ fullPage = false, timeoutMs = 15000 } = {}) {
+    if (!this.page) return { pending: 0, broken: 0, total: 0 };
+    try {
+      return await this.page.evaluate(async ({ fullPage, timeoutMs }) => {
+        const inScope = (img) => {
+          const rect = img.getBoundingClientRect();
+          if (!rect.width || !rect.height) return false;
+          if (getComputedStyle(img).visibility === 'hidden') return false;
+          if (fullPage) return true;
+          return rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth;
+        };
+        const images = [...document.images].filter(inScope);
+        for (const img of images) if (img.loading === 'lazy') img.loading = 'eager';
+        const settled = (img) => img.complete && (img.naturalWidth > 0 || !img.currentSrc);
+        const deadline = Date.now() + timeoutMs;
+        while (images.some((img) => !img.complete) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
+        // 已加载的图片等解码完成，避免截到渐进绘制的半张图
+        await Promise.all(images.filter((img) => img.complete && img.naturalWidth > 0 && img.decode).map((img) => img.decode().catch(() => {})));
+        return {
+          total: images.length,
+          pending: images.filter((img) => !img.complete).length,
+          broken: images.filter((img) => img.complete && !settled(img)).length,
+        };
+      }, { fullPage, timeoutMs });
+    } catch (_) {
+      return { pending: 0, broken: 0, total: 0 };
+    }
   }
 
   /**

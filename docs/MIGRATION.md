@@ -45,7 +45,7 @@ manual migrate --rollback <迁移 id>             # 用完整备份恢复
 
 | 变化 | 影响 | 需要做什么 |
 |---|---|---|
-| 渲染器升级为 `sharp-svg-3`（编号避让、拆图、主题参数全部生效） | 已有发布图在下次 `generate` 时重新派生一次（沿用原图，不重新登录或采集）；`verify --live` 对旧图报 `baseline-incompatible` 直到重新发布 | 无 |
+| 渲染器升级为 `sharp-svg-4`（分类图默认保留原尺寸截图，不再裁到标注区域；`sharp-svg-3` 引入编号避让、拆图、主题参数） | 已有发布图在下次 `generate` 时重新派生一次（沿用原图，不重新登录或采集）；`verify --live` 对旧图报 `baseline-incompatible` 直到重新发布 | 无 |
 | 超过 `maxMarkersPerImage` 不再报 `marker-limit-exceeded`，改为拆成多张图 | 一条 Capture 可有多张 `published`（`part: N`，文件名带 `--part-N`）；页面与任务手册按顺序引用 | 无 |
 | 主题新增 `haloWidth`、`markerStrokeWidth`、`markerText`、`fontScale`；`primaryDark`、`labelText`、`focusMask`、`fallbackColor` 弃用 | 旧配置照常读取，出现弃用字段时提示 `annotation-theme-deprecated` | 删除弃用字段即可 |
 | 整页截图前回到页面顶部，fixed 元素按贴边方向换算 | 整页截图里 fixed / sticky 元素上的框与遮罩位置更准；截图尺寸与画布 × DPR 不一致时报 `geometry-scale-mismatch` | 无 |

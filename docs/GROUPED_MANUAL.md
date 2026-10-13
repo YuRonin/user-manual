@@ -1,6 +1,6 @@
 # 分类图文手册
 
-页面 schemaVersion 3 在 `features` 中定义功能与操作，`sections` 组织读者目标，`figures` 声明需要的状态与局部图。浏览器产生 Binding 与 Capture，程序负责裁剪、编号和图文装配。旧页面保持兼容读取，旧截图不会自动升级为完整证据。
+页面 schemaVersion 3 在 `features` 中定义功能与操作，`sections` 组织读者目标，`figures` 声明需要的状态与图片。浏览器产生 Binding 与 Capture，程序负责编号和图文装配；图片默认保留原尺寸截图，只在上面画标注。旧页面保持兼容读取，旧截图不会自动升级为完整证据。
 
 ## 日常生成
 
@@ -52,9 +52,9 @@ layout 请求的 `output` 是单页补丁，可包含 title、purpose、features
 | Operation | 页面内唯一安全 slug id；instruction；evidenceRequirement；可选 targetHint（现有 Target schema）、bindingIntent（role、name）、risk、sourceRefs、taskId、claimId、noImageReason |
 | Section | 唯一 slug id；title、goal；featureRefs、figureRefs。一个功能归属一个小节，多状态图放同一小节；required 必须收录，skip/undecided 不能进入正文 |
 | Figure | 唯一 slug id；sectionId；operationRefs；caption；purpose 为 entry/state/overview；scenarioId 默认 page-<id>，checkpointId 默认 default；frame |
-| Frame | auto：目标集合加上下文留白；region：必须给可定位的命名区域 target；viewport：保留完整视口。padding 为 32～200 CSS px |
+| Frame | auto（默认）：保留原尺寸截图，只画标注、不裁剪；region：显式裁到可定位的命名区域 target，仅在读者确实只需看某个区域时使用；viewport：整页截图时取当时可见的一屏。padding 只作用于 region，为 32～200 CSS px |
 
-类别按读者目标划分。每张图优先 1～3 个相关标注，硬上限沿用主题 maxMarkersPerImage（默认 5），超过时在同一小节中分图。标注号在每张图从 1 开始，与 guide 下标、步骤序号、稳定 ID 分离。优先局部区域；必须保留整页时在 caption 写明理解所需的上下文。
+类别按读者目标划分。每张图优先 1～3 个相关标注，硬上限沿用主题 maxMarkersPerImage（默认 5），超过时在同一小节中分图。标注号在每张图从 1 开始，与 guide 下标、步骤序号、稳定 ID 分离。同一屏的不同小节各出一张原尺寸图、各自标注本节的操作，不要把图裁成只剩标注区，读者需要看到控件在整页中的位置。
 
 ## 证据要求
 
@@ -90,4 +90,4 @@ manual migrate --layout --rollback <迁移 UUID>
 
 文案变化复用图；裁剪、标注集合或顺序变化在绑定与状态不变且原图/几何仍有效时重新派生；绑定、状态或来源变化补采。相关缓存键分别包含 bindingRevision 与 layoutRevision，原图回收时明确重采。
 
-`verify --artifacts` 从发布时冻结事实重新核对操作与图片证据；`verify --live` 按分类 Scenario 和检查点回放状态、核对已发布绑定并比较局部图。通过入口核验不会升级为业务结果成功。
+`verify --artifacts` 从发布时冻结事实重新核对操作与图片证据；`verify --live` 按分类 Scenario 和检查点回放状态、核对已发布绑定并比较分类图。通过入口核验不会升级为业务结果成功。

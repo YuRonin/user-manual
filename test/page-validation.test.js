@@ -217,6 +217,7 @@ async function main() {
       ['/soft-404', ['soft-not-found'], '200 软 404'],
       ['/spa-redirect', ['login-required', 'auth-missing'], 'SPA 延迟跳登录'],
       ['/loading-forever', ['readiness-timeout'], 'Loading 永不结束'],
+      ['/loading-progressbar', ['readiness-timeout'], '不确定进度条一直显示'],
       ['/error-state', ['unexpected-page-state'], '页面显示错误提示'],
       ['/cross-origin', ['unexpected-redirect'], '跳到其他 origin'],
     ]) {
@@ -229,6 +230,33 @@ async function main() {
         assert.ok(!fs.existsSync(raw), '失败时不能产出截图');
       });
     }
+
+    await test('真浏览器：带当前值的确定进度条是页面内容，不算仍在加载', async () => {
+      if (fs.existsSync(raw)) fs.rmSync(raw);
+      const result = await captureUrl('/static-progress');
+      assert.strictEqual(result.status, 0, result.stdout + result.stderr);
+      assert.ok(fs.existsSync(JSON.parse(result.stdout).screenshotAbsolute), '确定进度条页面应正常截图');
+    });
+
+    await test('真浏览器：整页截图前把首屏以下的懒加载图片加载完，不截出空白占位', async () => {
+      const before = (await (await fetch(`${server.baseUrl}/img/lazy-hits`)).json()).hits;
+      const result = await captureUrl('/lazy-images', ['--full-page']);
+      assert.strictEqual(result.status, 0, result.stdout + result.stderr);
+      const after = (await (await fetch(`${server.baseUrl}/img/lazy-hits`)).json()).hits;
+      assert.ok(after > before, '懒加载图片必须在截图前被请求');
+      // 图片是半透明红色：截图里必须真的出现这块颜色，而不是白色占位
+      const { data, info } = await require('sharp')(JSON.parse(result.stdout).screenshotAbsolute).raw().toBuffer({ resolveWithObject: true });
+      let pink = 0;
+      for (let i = 0; i < data.length; i += info.channels) if (data[i] > 200 && data[i + 1] < 180 && data[i + 2] < 180) pink++;
+      assert.ok(pink > 1000, `截图里应能看到已加载的图片，实际只有 ${pink} 个图片像素`);
+    });
+
+    await test('真浏览器：截图范围内有图片 404 时报 media-broken，不产出截图', async () => {
+      if (fs.existsSync(raw)) fs.rmSync(raw);
+      const result = await captureUrl('/broken-image');
+      assert.strictEqual(result.status, 1, result.stdout + result.stderr);
+      assert.strictEqual(JSON.parse(result.stdout).reason, 'media-broken', result.stdout);
+    });
 
     await test('真浏览器：--wait-for 等不到即 readiness-timeout', async () => {
       const result = await captureUrl('/chat', ['--wait-for', '#never-appears']);

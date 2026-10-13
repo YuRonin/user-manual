@@ -332,6 +332,13 @@ ${['新建', '导入', '导出', '分享', '打印', '归档', '删除'].map((na
 
   // 加载永远不结束（语义标记 aria-busy）
   '/loading-forever': html('<h1>报表</h1><div aria-busy="true">加载中…</div>'),
+  // 不确定进度条（没有当前值）= 仍在加载；确定进度条（带 aria-valuenow）是页面内容
+  '/loading-progressbar': html('<h1>报表</h1><div role="progressbar" aria-label="加载报表" style="height:6px;width:200px;background:#ccc"></div>'),
+  // 首屏以下的懒加载图片：整页截图不会把它滚进视口，必须在截图前改成立即加载（命中次数见 /img/lazy-hits）
+  '/lazy-images': html(`<h1>帮助文章</h1><div style="height:2600px">很长的正文</div><img id="lazy" loading="lazy" src="/img/lazy.png" width="300" height="200" alt="懒加载截图">`),
+  // 图片地址 404（例如帮助中心展示的截图还没由构建步骤生成）：截出来是空框，不能发布
+  '/broken-image': html('<h1>帮助文章</h1><img src="/img/missing.png" width="300" height="200" alt="缺失的截图">'),
+  '/static-progress': html('<h1>新手入门</h1><div role="progressbar" aria-label="入门进度" aria-valuenow="2" aria-valuemin="0" aria-valuemax="4" style="height:6px;background:#ccc"></div><p>2 / 4</p>'),
 
   // 渲染的是错误提示而不是正常内容
   '/error-state': html('<h1>报表</h1><div role="alert">加载失败，请稍后重试</div>'),
@@ -348,6 +355,7 @@ ${'<p>设置项说明文字，用来把正文长度撑过登录页判据的阈�
  * @returns {Promise<{ port, baseUrl, close }>}
  */
 function startServer() {
+  let lazyHits = 0;
   const state = { ...DEFAULT_STATE };
   const writes = [];
   const server = http.createServer((req, res) => {
@@ -416,6 +424,21 @@ function startServer() {
     if (pathname === '/sw.js') {
       res.writeHead(200, { 'Content-Type': 'application/javascript' });
       res.end("self.addEventListener('fetch', () => {});");
+      return;
+    }
+
+    if (pathname === '/img/lazy.png') {
+      lazyHits++;
+      // 故意慢一点：不等图片加载完就截图的话，画面里只有空白占位
+      setTimeout(() => {
+        res.writeHead(200, { 'Content-Type': 'image/png' });
+        res.end(TINY_PNG);
+      }, 800);
+      return;
+    }
+    if (pathname === '/img/lazy-hits') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ hits: lazyHits }));
       return;
     }
 

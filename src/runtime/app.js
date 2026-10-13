@@ -160,12 +160,20 @@ async function executePlanned({ projectRoot, project, command, targets, planned,
   return { runId: run.id, plan: planned.plan, planHash: planned.planHash, summary };
 }
 
+/**
+ * 原计划的用户目标。旧版计划把页面变体展开出的 scenario 依赖也记进了 targets；
+ * 非 capture 命令不接受独立的 scenario 目标，重新规划时去掉它们，由页面目标重新展开。
+ */
+function userTargets(plan) {
+  return plan.command === 'capture' ? plan.targets : plan.targets.filter((ref) => !String(ref).startsWith('scenario:'));
+}
+
 /** 按原计划的策略重新规划，比较尚未成功的任务输入。 */
 function changedInputs({ projectRoot, project, state }) {
   const original = state.plan;
   const policy = original.policy || { copy: { mode: 'model' }, mode: 'default' };
   const replanned = planTargets({
-    projectRoot, project, command: original.command, targets: original.targets, flags: flagsFromMode(policy.mode),
+    projectRoot, project, command: original.command, targets: userTargets(original), flags: flagsFromMode(policy.mode),
     copy: policy.copy, acceptReview: policy.acceptReview, force: policy.force,
   });
   const next = new Map(replanned.plan.tasks.map((t) => [t.id, t]));
@@ -190,7 +198,7 @@ async function resumeRun({ projectRoot, runId, replan = false }) {
   const policy = state.plan.policy || { copy: { mode: 'model' }, mode: 'default' };
   if (replan) {
     const result = await startRun({
-      projectRoot, command: state.plan.command, targets: state.plan.targets, flags: flagsFromMode(policy.mode),
+      projectRoot, command: state.plan.command, targets: userTargets(state.plan), flags: flagsFromMode(policy.mode),
       copy: policy.copy.mode === 'file' ? copyPolicy({ copy: policy.copy.path }) : policy.copy,
       acceptReview: policy.acceptReview, force: policy.force, predecessor: runId,
     });
@@ -278,4 +286,4 @@ function recordCapture({ projectRoot, subject, captureIds, extraRefs = [], obser
   }
 }
 
-module.exports = { INTERRUPT_MESSAGE, openProject, copyPolicy, planTargets, startRun, executePlanned, resumeRun, runStatus, recordCapture, changedInputs };
+module.exports = { INTERRUPT_MESSAGE, openProject, copyPolicy, planTargets, startRun, executePlanned, resumeRun, runStatus, recordCapture, changedInputs, userTargets };

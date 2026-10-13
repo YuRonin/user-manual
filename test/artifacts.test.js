@@ -56,6 +56,17 @@ test('公开模式遮盖模糊个人字段但跳过已脱敏内容', () => {
   assert.ok(!JSON.stringify(result).includes('secret-token'));
 });
 
+test('空的密码框 / 表单控件不打码（只有占位提示），填了内容的密码框照常遮盖', () => {
+  const { detectRedactions } = require('../src/privacy/detector');
+  const result = detectRedactions([
+    { text: '', label: '密码', inputType: 'password', rect: { x: 0, y: 0, width: 2, height: 20 }, source: 'form-control' },
+    { text: '   ', label: '学校', rect: { x: 0, y: 30, width: 2, height: 20 }, source: 'form-control' },
+    { text: 'abc12345', label: '密码', inputType: 'password', rect: { x: 0, y: 60, width: 60, height: 20 }, source: 'form-control' },
+  ], { audience: 'public', rules: { redact: [], preserve: [] } });
+  assert.strictEqual(result.ok, true);
+  assert.deepStrictEqual(result.redactions.map((item) => [item.kind, item.rect.y]), [['credential', 60]]);
+});
+
 test('含省略号的文字仍检测其中完整的手机号/邮箱，已整段脱敏的值才跳过', () => {
   const { detectRedactions } = require('../src/privacy/detector');
   const rect = { x: 0, y: 0, width: 50, height: 20 };

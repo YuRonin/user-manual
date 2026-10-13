@@ -22,6 +22,8 @@ const FILES = [
   'grouped-geometry.test.js',
   'grouped-manual-browser.test.js',
   'grouped-runtime.test.js',
+  'replan-targets.test.js',
+  'semantic-scope.test.js',
   'annotation-coverage.test.js',
   'model-links.test.js',
   'manual-quality.test.js',
@@ -120,6 +122,8 @@ const FILES = [
 const BROWSER = new Set([
   'grouped-manual-browser.test.js',
   'grouped-runtime.test.js',
+  'replan-targets.test.js',
+  'semantic-scope.test.js',
   'role-demo.test.js',
   'variant-manual.test.js',
   'auth-identity.test.js', 'browser-session.test.js', 'cache-policy.test.js', 'capture.test.js', 'drift-report.test.js',
