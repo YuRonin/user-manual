@@ -367,6 +367,8 @@ docs:
 
 链接规则：文档互链 → 相对 `.html`；`images/…/*.png|jpg` → `.webp`（gif/webp 原样）；站内绝对路径原样（或拼 `appBaseUrl`）；`http(s)` 外链新标签页打开；其它协议与 `//host` 丢弃链接只留文字。只发布被正文引用到的截图。输出目录里的 `.manual-site.json` 记录生成过的文件，清理只针对清单内文件。
 
+正文中的 `「控件名」` 在 HTML 中显示为加粗的“控件名”，不显示括号；原始 Markdown 保留 `「」` 供文案校验使用。代码片段不转换。
+
 ## 发布恢复与迁移
 
 - 发布按 journal 推进（prepared → assets → document → release → completed）。进程中断后运行 `manual publication status --json` 查看，`manual publication repair` 对账恢复；文档被人工修改时报 `publication-conflict` 并保留修改，不自动覆盖。

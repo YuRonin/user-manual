@@ -165,6 +165,8 @@ function createRenderer(fromRel, known, used) {
 
   // 手册里的斜体只用于截图说明
   md.renderer.rules.em_open = () => '<em class="caption">';
+  md.renderer.rules.text = (tokens, index) => md.utils.escapeHtml(tokens[index].content)
+    .replace(/「([^「」\n]+)」/g, '<strong>$1</strong>');
   return md;
 }
 

@@ -139,6 +139,13 @@ const read = (root, rel) => fs.readFileSync(path.join(root, '.manual/site', rel)
     assert.deepStrictEqual([...used], ['images/annotated/shot.png']);
   });
 
+  await test('正文渲染：控件名去掉「」并加粗，不改代码或普通括号', () => {
+    const html = renderArticleBody('点击「发送」，再选「新对话」。保留「未闭合与 `「代码」`。\n\n点击「<发送>」。', 'credits.md', known, new Set(), LABELS);
+    assert.match(html, /点击<strong>发送<\/strong>，再选<strong>新对话<\/strong>/);
+    assert.match(html, /保留「未闭合与 <code>「代码」<\/code>/);
+    assert.match(html, /<strong>&lt;发送&gt;<\/strong>/);
+  });
+
   await test('配置校验：非十六进制颜色、非法 URL、输出目录与手册重叠或越界都被拒绝', () => {
     const ctx = { stateDir: '.manual', docsOutputDir: 'docs/manual', language: 'zh-CN', audience: 'internal' };
     const ok = resolveSiteConfig(undefined, ctx);
