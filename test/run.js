@@ -40,6 +40,11 @@ const FILES = [
   'auth-command.test.js',
   'auth-identity.test.js',
   'import-graph.test.js',
+  'route-discovery.test.js',
+  'react-router.test.js',
+  'vue-router.test.js',
+  'route-inputs.test.js',
+  'route-audit.test.js',
   'source-fingerprint.test.js',
   'index-builder.test.js',
   'index-store.test.js',
@@ -120,6 +125,7 @@ const FILES = [
 
 // 启动真实 Chromium 或测试服务器的文件；其余为 unit。新增浏览器测试时加到这里（test-groups.test 会核对）。
 const BROWSER = new Set([
+  'route-audit.test.js',
   'grouped-manual-browser.test.js',
   'grouped-runtime.test.js',
   'replan-targets.test.js',

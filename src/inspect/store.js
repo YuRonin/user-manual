@@ -140,6 +140,7 @@ function renderPageYaml(page) {
       scope: page.dependencies?.scope || [],
       unresolved: page.dependencies?.unresolved || [],
       completeness: page.dependencies?.completeness || 'unknown',
+      ...(page.dependencies?.route ? { route: page.dependencies.route } : {}),
     },
     // 源码指纹：依赖文件字节 + 依赖集合 + 全局配置 + 解析器版本（由 inspect 计算）
     analysis: page.analysis ?? null,
@@ -193,6 +194,8 @@ function renderProjectYaml(meta, pages) {
       router: meta.router,
       appDir: meta.appDir ?? null,
       pagesDir: meta.pagesDir ?? null,
+      // 路由发现的来源、完整性与计数（旧索引没有这一项）
+      ...(meta.discovery ? { discovery: meta.discovery } : {}),
     },
     summary: {
       total: pages.length,

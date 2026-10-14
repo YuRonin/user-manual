@@ -47,13 +47,21 @@ function fileOwners(...graphs) {
   return owners;
 }
 
-function isGlobalFile(file) {
-  return GLOBAL_FILES.includes(file);
+/** 全局文件：内置清单 ∪ 适配器贡献并已登记进图的全局配置（如 vite.config.*）。 */
+function globalFileMatcher(...graphs) {
+  const extra = new Set(graphs.flatMap((graph) => Object.keys(graph?.globals || {})));
+  return (file) => GLOBAL_FILES.includes(file) || extra.has(file);
+}
+
+/** 路由定义文件（docs/MULTI_FRAMEWORK_PLAN.md §8）：变化触发重新发现，影响由图的增删改给出。 */
+function routeSourceMatcher(...graphs) {
+  const files = new Set(graphs.flatMap((graph) => Object.keys(graph?.routeSources || {})));
+  return (file) => files.has(file);
 }
 
 function isSourceLike(file) {
   const ext = path.posix.extname(file).toLowerCase();
-  return SOURCE_EXTENSIONS.includes(ext) || ASSET_EXTENSIONS.includes(ext);
+  return SOURCE_EXTENSIONS.includes(ext) || ext === '.vue' || ASSET_EXTENSIONS.includes(ext);
 }
 
 /**
@@ -88,7 +96,7 @@ function analyzeImpact({ projectRoot, config, detection, baseGraph = null, curre
   if (detection.fallback) {
     return {
       mode: detection.mode, base: detection.base || null, fallback: detection.fallback, reason: detection.reason,
-      confidence: CONFIDENCE.CONSERVATIVE, changes: [], excluded: [], unowned: [], broadImpact: [],
+      confidence: CONFIDENCE.CONSERVATIVE, changes: [], excluded: [], unowned: [], broadImpact: [], routeDefinitions: [],
       pages: [], scenarios: [], sections: [], runtimeFreshness, warnings: detection.warnings || [],
     };
   }
@@ -97,7 +105,12 @@ function analyzeImpact({ projectRoot, config, detection, baseGraph = null, curre
   // 内容二次确认只能用与基线同一时刻的图；显式 --base 时没有对应图，不做确认（宁可多报）。
   const baselineHashes = graphFileHashes(confirmGraph);
   // 显式登记的依赖即使位于默认排除目录下也保留（例如页面直接 import 了 docs 下的 JSON）。
-  const keep = new Set([...owners.keys(), ...Object.keys(baseGraph?.globals || {}), ...Object.keys(currentGraph.globals || {})]);
+  const keep = new Set([
+    ...owners.keys(), ...Object.keys(baseGraph?.globals || {}), ...Object.keys(currentGraph.globals || {}),
+    ...Object.keys(baseGraph?.routeSources || {}), ...Object.keys(currentGraph.routeSources || {}),
+  ]);
+  const isGlobalFile = globalFileMatcher(baseGraph, currentGraph);
+  const isRouteSource = routeSourceMatcher(baseGraph, currentGraph);
   const filtered = filterChanges(detection.changes, { excludes: [docsDir, stateDir], keep });
 
   const changes = [];
@@ -124,8 +137,12 @@ function analyzeImpact({ projectRoot, config, detection, baseGraph = null, curre
   const broadImpact = [];
   const ignoredGlobal = [];
   const unowned = [];
+  const routeDefinitions = [];
   for (const change of changes) {
     const paths = [change.oldPath, change.path].filter(Boolean);
+    // 路由定义文件改了不等于它管理的全部页面都变了：真实影响由重新发现后的图给出
+    // （页面新增 / 删除 / 单条记录 hash 变化），这里只登记，不按"无法归属的源码"扩散。
+    if (paths.some(isRouteSource)) { routeDefinitions.push(change.path); continue; }
     const global = paths.find(isGlobalFile);
     if (global) {
       // 只改 scripts 之类不影响运行的字段、或 lockfile 里运行关键依赖未变：不让全部页面重采（B5-09）
@@ -237,6 +254,7 @@ function analyzeImpact({ projectRoot, config, detection, baseGraph = null, curre
     excluded: filtered.excluded,
     unowned: [...new Set(unowned)].sort(),
     broadImpact: [...new Set(broadImpact)].sort(),
+    routeDefinitions: [...new Set(routeDefinitions)].sort(),
     ignoredGlobal: [...new Set(ignoredGlobal)].sort(),
     pages,
     scenarios: [...scenarios.values()].sort((a, b) => a.id.localeCompare(b.id)),
@@ -345,6 +363,7 @@ function analyzeProject({ projectRoot, config, base = null }) {
     unpublishedPages: scanned.result.pages.filter((p) => p.lifecycle !== 'retired' && p.includeInManual !== false && !publishedPages.has(p.id)).map((p) => p.id).sort(),
     renameCandidates: scanned.result.renameCandidates || [],
     unowned: [...new Set(groups.flatMap((g) => g.report.unowned || []))].sort(),
+    routeDefinitions: [...new Set(groups.flatMap((g) => g.report.routeDefinitions || []))].sort(),
     ignoredGlobal: [...new Set(groups.flatMap((g) => g.report.ignoredGlobal || []))].sort(),
   };
   return {

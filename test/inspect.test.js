@@ -425,14 +425,29 @@ test('未 init 就 inspect：提示先跑 init', () => {
   });
 });
 
-test('非 Next.js 项目：给出准确的「暂不支持」提示', () => {
+test('认出了路由体系但找不到路由表：明确失败并说明怎么补，不扫出 0 个页面冒充成功', () => {
   withFixture(fx.vueFixture, (root) => {
     initProject(root);
     const r = run('inspect', root);
     assert.strictEqual(r.status, 1);
-    assert.match(r.stderr, /只支持 Next\.js/);
     assert.match(r.stderr, /Vue Router/, '应报出实际检测到的框架');
+    assert.match(r.stderr, /createRouter/);
+    assert.match(r.stderr, /routes\.override\.yaml/);
   });
+});
+
+test('完全不认识的技术栈：报出检测到的框架与当前支持范围', () => {
+  const root = fx.makeTempDir();
+  try {
+    fx.writeFile(root, 'package.json', JSON.stringify({ dependencies: { nuxt: '^3.0.0' } }));
+    initProject(root);
+    const r = run('inspect', root);
+    assert.strictEqual(r.status, 1);
+    assert.match(r.stderr, /只支持 Next\.js/);
+    assert.match(r.stderr, /Nuxt/);
+  } finally {
+    fx.cleanup(root);
+  }
 });
 
 test('是 Next.js 但没有路由目录：提示可能指错了根目录', () => {

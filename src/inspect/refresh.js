@@ -35,11 +35,11 @@ function coded(code, message, extra = {}) {
  * @param {boolean} [p.prune]   删除代码里已不存在的路由对应的页面文件（retired 除外）
  */
 function refreshModel({ projectRoot, config, prune = false }) {
-  const scanned = scanSource(projectRoot);
-  if (!scanned.ok) throw coded('scan-failed', scanned.errors.join('；'), { errors: scanned.errors });
-  const { detected, scan, dependencyWarnings } = scanned;
-
   const stateDirAbs = path.join(projectRoot, config.artifacts.stateDir);
+  const scanned = scanSource(projectRoot, { stateDirAbs });
+  if (!scanned.ok) throw coded('scan-failed', scanned.errors.join('；'), { errors: scanned.errors });
+  const { detected, scan, dependencyWarnings, summary } = scanned;
+
   const projectStore = createProjectStore({ stateDirAbs, docsOutputDir: config.docs.outputDir });
   let base;
   try {
@@ -54,7 +54,7 @@ function refreshModel({ projectRoot, config, prune = false }) {
   const graphFile = path.join(store.indexDirFor(stateDirAbs), 'graph.json');
   let previousGraph = null;
   try { previousGraph = fs.existsSync(graphFile) ? JSON.parse(fs.readFileSync(graphFile, 'utf8')) : null; } catch (_) { previousGraph = null; }
-  const fingerprinted = applyFingerprints(projectRoot, result.pages, previousGraph);
+  const fingerprinted = applyFingerprints(projectRoot, result.pages, previousGraph, scanned.fingerprintOptions);
   result.pages = fingerprinted.pages;
   const staleIds = new Set(result.stale.map((p) => p.id));
   for (const change of fingerprinted.changed) {
@@ -75,6 +75,8 @@ function refreshModel({ projectRoot, config, prune = false }) {
     router: detected.router,
     appDir: detected.appDir,
     pagesDir: detected.pagesDir,
+    // 路由发现的来源与完整性：不能因为扫出了 N 个合法页面就断言项目只有 N 个页面
+    discovery: summary,
     generatedAt: new Date().toISOString(),
   };
 
@@ -118,7 +120,7 @@ function refreshModel({ projectRoot, config, prune = false }) {
 
   return {
     detected, scan, dependencyWarnings, stateDirAbs, result, fingerprinted, impact, staleTasks,
-    prunedIds, pruned, indexPages, meta, graphRevision, written, projectFile, featureInventory,
+    prunedIds, pruned, indexPages, meta, graphRevision, written, projectFile, featureInventory, discovery: summary,
   };
 }
 

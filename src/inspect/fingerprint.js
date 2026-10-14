@@ -18,6 +18,33 @@ const { revision } = require('../model/revision');
 // 3：package.json / package-lock.json 只按运行相关内容计入指纹（B5-09）
 const PARSER_VERSION = 'regex-import-graph-3';
 
+// 按能力区分的解析器版本（docs/MULTI_FRAMEWORK_PLAN.md §9）：页面只纳入它实际用到的能力，
+// 升级某一种语言或路由适配器的规则，不会让无关页面全部失效。
+// 只用到 js-ts 的页面（所有 Next 页面）的版本串就是 PARSER_VERSION，与改造前逐字节一致。
+const CAPABILITY_VERSIONS = {
+  'vue-sfc': 'vue-sfc-1',
+  'route:react-router-objects': 'rr-objects-1',
+  'route:vue-router-objects': 'vr-objects-1',
+};
+
+/** 页面依赖文件里用到的语言能力（js-ts 是基线，不单列）。 */
+function languageCapabilities(files) {
+  const out = new Set();
+  for (const file of files) if (/\.vue$/i.test(file)) out.add('vue-sfc');
+  return out;
+}
+
+/** 页面的解析器版本串：基线 + 额外用到的能力（排序后拼接）。 */
+function parserVersionFor({ files = [], routeCapability = null } = {}) {
+  const extra = languageCapabilities(files);
+  if (routeCapability) extra.add(routeCapability);
+  const parts = [...extra].sort().map((id) => {
+    if (!CAPABILITY_VERSIONS[id]) throw new Error(`未登记的解析能力版本: ${id}`);
+    return CAPABILITY_VERSIONS[id];
+  });
+  return [PARSER_VERSION, ...parts].join('+');
+}
+
 // 影响所有页面的全局文件：变化时每个页面的指纹都会变（broad impact）。
 const GLOBAL_FILES = [
   'tsconfig.json', 'jsconfig.json',
@@ -46,9 +73,9 @@ function hashFile(projectRoot, relative) {
  * 全局文件的指纹（B5-09）：package.json 只取影响运行的字段，package-lock.json 只取运行关键依赖的解析版本；
  * 只改 scripts、描述或无关依赖时指纹不变，不会让所有页面重新采集。其余全局文件按全文 hash。
  */
-function globalFileHashes(projectRoot) {
+function globalFileHashes(projectRoot, extraFiles = []) {
   const out = {};
-  for (const file of GLOBAL_FILES) {
+  for (const file of [...new Set([...GLOBAL_FILES, ...extraFiles])]) {
     if (fs.existsSync(path.join(projectRoot, file))) out[file] = contentHash(projectRoot, file);
   }
   return out;
@@ -135,38 +162,50 @@ function expandSourcePatterns(projectRoot, patterns, lister = createFileLister(p
 
 /**
  * @param {string} projectRoot
- * @param {{ entry, files, assets, explicit, globals }} input
- * @returns {{ sourceRevision, fileHashes }}
+ * @param {{ entry, files, assets, explicit, globals, routeRecord, routeCapability }} input
+ *   routeRecord：路由表写在代码里的框架，该页面对应路由记录的 { recordId, recordHash }；
+ *   Next 页面没有它，指纹输入与改造前完全相同。
+ * @returns {{ sourceRevision, fileHashes, parserVersion }}
  */
-function pageFingerprint(projectRoot, { entry, files = [], assets = [], explicit = [], globals = {} }) {
+function pageFingerprint(projectRoot, { entry, files = [], assets = [], explicit = [], globals = {}, routeRecord = null, routeCapability = null }) {
   const members = [...new Set([entry, ...files, ...assets, ...explicit].filter(Boolean))].sort();
   const fileHashes = {};
   for (const file of members) fileHashes[file] = hashFile(projectRoot, file);
-  const sourceRevision = revision({ parserVersion: PARSER_VERSION, entry: entry || null, files: fileHashes, globals });
-  return { sourceRevision, fileHashes };
+  const parserVersion = parserVersionFor({ files: members, routeCapability: routeRecord ? routeCapability : null });
+  const input = { parserVersion, entry: entry || null, files: fileHashes, globals };
+  if (routeRecord) input.routeRecord = { recordId: routeRecord.recordId, recordHash: routeRecord.recordHash };
+  const sourceRevision = revision(input);
+  return { sourceRevision, fileHashes, parserVersion };
 }
 
 /**
  * 给合并后的页面计算指纹并与上一次比较。只写 page.analysis，不改定义字段。
  * 指纹变化且源码分析曾完成 → sourceAnalysis 变为 stale（分析结论需要复核），并给出原因。
+ * @param {object} [options]
+ * @param {string[]} [options.extraGlobalFiles]  适配器贡献的全局配置（如 vite.config.*）
+ * @param {string[]} [options.routeSources]      路由定义文件：变化触发重新发现，不作为普通依赖扩散（§8）
+ * @param {string|null} [options.routeCapability] 发现页面的路由适配器能力 id
  * @returns {{ pages, changed: Array<{ id, reasons }>, graph }}
  */
-function applyFingerprints(projectRoot, pages, previousGraph = null) {
-  const globals = globalFileHashes(projectRoot);
+function applyFingerprints(projectRoot, pages, previousGraph = null, { extraGlobalFiles = [], routeSources = [], routeCapability = null } = {}) {
+  const globals = globalFileHashes(projectRoot, extraGlobalFiles);
   const lister = createFileLister(projectRoot);
   const graph = { version: 1, parserVersion: PARSER_VERSION, generatedAt: new Date().toISOString(), globals, pages: {} };
+  // 只在有路由定义文件时写入：Next 项目的 graph.json 结构不变
+  if (routeSources.length > 0) graph.routeSources = Object.fromEntries(routeSources.map((file) => [file, hashFile(projectRoot, file)]));
   const changed = [];
   const out = pages.map((page) => {
     const deps = page.dependencies || {};
     const explicitPatterns = (page.source || []).filter((item) => item !== page.entry);
     const explicit = expandSourcePatterns(projectRoot, explicitPatterns, lister);
-    const { sourceRevision, fileHashes } = pageFingerprint(projectRoot, {
+    const { sourceRevision, fileHashes, parserVersion } = pageFingerprint(projectRoot, {
       entry: page.entry, files: deps.files, assets: deps.assets, explicit: explicit.files, globals,
+      routeRecord: deps.route || null, routeCapability,
     });
     const partial = deps.completeness === 'partial' || explicit.unmatched.length > 0 || explicit.truncated;
     const analysis = {
       sourceRevision,
-      parserVersion: PARSER_VERSION,
+      parserVersion,
       origin: 'source',
       completeness: partial ? 'partial' : (deps.completeness || 'unknown'),
       ...(explicit.unmatched.length ? { unmatchedSources: explicit.unmatched } : {}),
@@ -174,6 +213,7 @@ function applyFingerprints(projectRoot, pages, previousGraph = null) {
     graph.pages[page.id] = {
       route: page.route, lifecycle: page.lifecycle || 'active', sourceRevision, completeness: analysis.completeness,
       files: fileHashes, unresolved: deps.unresolved || [],
+      ...(deps.route ? { routeRecord: { recordId: deps.route.recordId, recordHash: deps.route.recordHash } } : {}),
     };
     const previous = page.analysis?.sourceRevision;
     let next = { ...page, analysis };
@@ -202,6 +242,10 @@ function changeReasons(before, after, globalsBefore = {}, globalsAfter = {}) {
   const globals = new Set([...Object.keys(globalsBefore || {}), ...Object.keys(globalsAfter || {})]);
   for (const file of [...globals].sort()) {
     if ((globalsBefore || {})[file] !== (globalsAfter || {})[file]) reasons.push(`global-changed:${file}`);
+  }
+  // 单条路由记录变化（path / 入口 / props / 布局链）：只影响这一个页面
+  if (before.routeRecord && after.routeRecord && before.routeRecord.recordHash !== after.routeRecord.recordHash) {
+    reasons.push(`route-record-changed:${after.routeRecord.recordId}`);
   }
   return reasons.length ? reasons : ['parser-or-config-changed'];
 }
@@ -241,6 +285,6 @@ function sourceHashOf(page) {
 
 module.exports = {
   sourceHashOf,
-  PARSER_VERSION, GLOBAL_FILES, hashFile, contentHash, globalFileHashes, createFileLister, globToRegex, expandSourcePatterns, pageFingerprint,
+  PARSER_VERSION, CAPABILITY_VERSIONS, parserVersionFor, GLOBAL_FILES, hashFile, contentHash, globalFileHashes, createFileLister, globToRegex, expandSourcePatterns, pageFingerprint,
   applyFingerprints, changeReasons, impactReport,
 };

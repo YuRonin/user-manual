@@ -18,9 +18,11 @@ const { exitCodeFor, usageExit } = require('../cli/output');
 const { loadConfig } = require('../config/load');
 const { ANALYSIS } = require('../inspect/model');
 const { refreshModel } = require('../inspect/refresh');
+const { scanSource } = require('../inspect/source-graph');
+const { submitCandidates } = require('../inspect/route-inputs');
 const { displayPath } = require('../util/fsx');
 
-const KNOWN_FLAGS = new Set(['projectRoot', 'prune', 'json', 'help']);
+const KNOWN_FLAGS = new Set(['projectRoot', 'prune', 'routesInput', 'json', 'help']);
 
 const HELP = `
 manual inspect —— 扫描项目，建立页面模型（Project Model）
@@ -39,11 +41,18 @@ manual inspect —— 扫描项目，建立页面模型（Project Model）
 选项:
   --project-root <路径>   项目根目录，默认当前工作目录
   --prune                 删除「代码里已不存在的路由」对应的页面文件（默认只报告不删）
+  --routes-input <文件>   提交 AI 读路由源码后整理的路由候选（JSON），只能补充未解析的路由记录
+                          或新增静态扫描没发现的路由；校验通过后写入 .manual/routes.candidates.yaml
+                          再扫描。格式：{ "routes": [ { "recordId?", "route", "entry", "layout?", "evidence?", "reason" } ] }
   --json                  以 JSON 输出结果，含待分析页面的工作清单
   --help                  显示本帮助
 
-支持的框架:
-  Next.js（App Router + Pages Router）。其它框架在后续版本支持。
+支持的路由体系:
+  Next.js（App Router + Pages Router，按文件约定扫描）
+  React Router 6 / 7 data mode 的对象路由（createBrowserRouter 等）
+  Vue Router 4 的路由表（createRouter({ routes })），含 .vue 单文件组件依赖
+  静态扫描确定不了的路由会列为「未解析」，完整性标为不完整；可用 --routes-input（AI 候选）
+  或 .manual/routes.override.yaml（人工覆盖，优先级最高）补充。
 
 示例:
   manual inspect
@@ -77,6 +86,24 @@ function buildWorklist(pages) {
     }));
 }
 
+const COMPLETENESS_LABEL = { complete: '完整', partial: '不完整', unsupported: '不支持' };
+
+/** 路由发现的完整性：扫出 N 个合法页面不代表项目只有 N 个页面，未确认的记录要显式列出。 */
+function renderDiscovery(discovery) {
+  if (!discovery) return [];
+  const { counts } = discovery;
+  const L = [];
+  L.push(`  路由发现    ${discovery.adapter} · ${COMPLETENESS_LABEL[discovery.completeness] || discovery.completeness}` +
+    ` · 记录 ${counts.routeRecords}（页面 ${counts.pageRecords} / 跳过 ${counts.skipped} / 未解析 ${counts.unresolved}）`);
+  for (const item of discovery.unresolved.slice(0, 10)) {
+    const where = item.location?.file ? `${item.location.file}${item.location.line ? `:${item.location.line}` : ''}` : item.recordId;
+    L.push(`    ? ${where}  ${item.reason}${item.detail ? `：${item.detail}` : ''}`);
+  }
+  if (discovery.unresolved.length > 10) L.push(`    … 另有 ${discovery.unresolved.length - 10} 条未解析记录`);
+  for (const d of discovery.diagnostics || []) L.push(`    ! ${d}`);
+  return L;
+}
+
 function renderSummary(ctx) {
   const { meta, pages, added, updated, removed, excluded, stale, worklist, projectRoot, projectFile, pruned, renamed = [], renameCandidates = [] } = ctx;
   const L = [];
@@ -85,12 +112,14 @@ function renderSummary(ctx) {
   L.push('[manual inspect] 项目地图已生成。');
   L.push('');
   L.push(`  项目        ${meta.name}`);
+  const nextRouter = ['app', 'pages', 'hybrid'].includes(meta.router);
   L.push(
     `  技术栈      ${meta.framework}${meta.frameworkVersion ? ` ${meta.frameworkVersion}` : ''}` +
-    ` (${meta.router} router)`
+    (nextRouter ? ` (${meta.router} router)` : '')
   );
   const dirs = [meta.appDir, meta.pagesDir].filter(Boolean).map((d) => `${d}/`);
-  L.push(`  路由目录    ${dirs.join('  ')}`);
+  if (dirs.length > 0) L.push(`  路由目录    ${dirs.join('  ')}`);
+  L.push(...renderDiscovery(meta.discovery));
   L.push('');
   L.push(`  发现页面    ${pages.length} 个` +
     (added.length ? `（新增 ${added.length}）` : '') +
@@ -163,6 +192,22 @@ function renderSummary(ctx) {
   return L.join('\n');
 }
 
+/** --routes-input：先按当前发现结果校验候选，全部通过才写入候选文件（全或全无）。 */
+function submitRoutesInput({ projectRoot, config, file }) {
+  if (typeof file !== 'string' || !file) return { ok: false, errors: ['--routes-input 需要一个 JSON 文件路径。'] };
+  let input;
+  try {
+    input = JSON.parse(fs.readFileSync(path.resolve(file), 'utf8'));
+  } catch (error) {
+    return { ok: false, errors: [`读取路由候选失败：${error.message}`] };
+  }
+  const stateDirAbs = path.join(projectRoot, config.artifacts.stateDir);
+  const scanned = scanSource(projectRoot, { stateDirAbs });
+  if (!scanned.discovery) return { ok: false, errors: scanned.errors };
+  const result = submitCandidates({ projectRoot, stateDirAbs, discovery: scanned.discovery, input });
+  return result.ok ? result : { ok: false, errors: ['路由候选未通过校验，没有写入任何文件：', ...result.errors.map((e) => `  ${e}`)] };
+}
+
 function run(argv) {
   const { values, unknownFlags } = parseArgs(argv, { known: KNOWN_FLAGS });
   const json = values.json === true;
@@ -183,6 +228,11 @@ function run(argv) {
   const loaded = loadConfig(projectRoot);
   if (!loaded.ok) return fail(loaded.errors, { json });
   const { config } = loaded;
+
+  if (values.routesInput !== undefined) {
+    const submitted = submitRoutesInput({ projectRoot, config, file: values.routesInput });
+    if (!submitted.ok) return fail(submitted.errors, { json });
+  }
 
   let refreshed;
   try {
@@ -210,6 +260,8 @@ function run(argv) {
           router: detected.router,
           appDir: detected.appDir,
           pagesDir: detected.pagesDir,
+          // 路由发现：适配器、完整性（complete / partial / unsupported）、记录去向计数与未解析项
+          discovery: refreshed.discovery,
           counts: {
             total: result.pages.length,
             added: result.added.length,

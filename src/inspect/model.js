@@ -118,6 +118,17 @@ function isBrowserVerified(page) {
   return !!page?.status?.browserVerified; // 老文件兜底
 }
 
+function normalizeRouteRecord(route) {
+  return {
+    adapter: route.adapter ?? null,
+    recordId: route.recordId ?? null,
+    recordHash: route.recordHash ?? null,
+    source: route.source ?? null,
+    // 只记定义文件，不记行号：格式化不应让页面文件产生差异
+    file: route.file ?? route.location?.file ?? null,
+  };
+}
+
 function normalizeDependencies(dependencies) {
   const unresolved = Array.isArray(dependencies?.unresolved) ? dependencies.unresolved : [];
   return {
@@ -129,6 +140,8 @@ function normalizeDependencies(dependencies) {
     unresolved,
     // 旧文件没有这个字段：按是否有未解析项推断，不能默认成 complete
     completeness: dependencies?.completeness || (unresolved.length > 0 ? 'partial' : 'unknown'),
+    // 路由表写在代码里的框架：对应路由记录的来源与 hash（Next 页面没有这一项）
+    ...(dependencies?.route ? { route: normalizeRouteRecord(dependencies.route) } : {}),
   };
 }
 

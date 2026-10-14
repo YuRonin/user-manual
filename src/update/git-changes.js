@@ -112,6 +112,8 @@ function graphFileHashes(graph) {
     for (const [file, hash] of Object.entries(node.files || {})) out[file] = hash;
   }
   for (const [file, hash] of Object.entries(graph?.globals || {})) out[file] = hash;
+  // 路由定义文件：非 Git 项目也要能发现它被改了（再由重新发现给出真实影响）
+  for (const [file, hash] of Object.entries(graph?.routeSources || {})) out[file] = hash;
   return out;
 }
 

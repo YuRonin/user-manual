@@ -12,6 +12,8 @@
     "node": ">=20.9.0"
   },
   "dependencies": {
+    "@babel/parser": "7.29.9",
+    "@vue/compiler-sfc": "3.5.43",
     "js-yaml": "^4.1.0",
     "markdown-it": "15.0.2",
     "playwright": "1.63.0",

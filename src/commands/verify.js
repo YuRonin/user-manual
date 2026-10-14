@@ -20,11 +20,12 @@ const { createBrowserSession } = require('../browser/session');
 const { activePublishedManualIds } = require('../update/baseline');
 const { loadVerify, prepareVerify, verifyPageArtifacts, checksFromErrors } = require('../verify/artifacts');
 const { verifyLive } = require('../verify/live');
+const { auditRoutes } = require('../verify/route-audit');
 const { demoSafetyForImages, demoSafetyErrors } = require('../verify/demo-safety');
 const { writeReport, exitCodeForReports } = require('../verify/report');
 const releases = require('../publication/release-store');
 
-const KNOWN_FLAGS = new Set(['projectRoot', 'live', 'artifacts', 'all', 'json', 'help']);
+const KNOWN_FLAGS = new Set(['projectRoot', 'live', 'artifacts', 'all', 'routes', 'authProfile', 'maxPages', 'json', 'help']);
 
 const HELP = `
 manual verify —— 检查已发布的手册
@@ -32,6 +33,7 @@ manual verify —— 检查已发布的手册
 用法:
   manual verify <目标> [--artifacts | --live] [--json]
   manual verify --all [--artifacts | --live] [--json]
+  manual verify --routes [--auth-profile <档案>] [--max-pages <n>] [--json]
       目标：task:<id> / page:<id> / manual:<manualId> / 无前缀 id（先按任务、再按页面解析）
 
 范围:
@@ -44,6 +46,11 @@ manual verify —— 检查已发布的手册
                 页面手册还会与发布时的采集比较：语义摘要（标题 / 按钮 / 链接等可访问名称）不同 → content-changed（drift）；
                 只有像素不同 → visual-only（报告差异比例与差异图，不否定已验证行为）；浏览器 / 视口 / DPR 等规格不同 →
                 environment-incompatible（不比较）。动态区域用 config 的 verify.visual.dynamicRegions 声明，只用于比较。
+
+  --routes      浏览器路由审计：用认证档案（默认当前档案）打开站点，收集页面里的站内链接；Vue 3 应用另外读取
+                运行时路由表（含 addRoute 动态添加的路由），与页面模型对照，只报告没有登记的路由（疑似遗漏）。
+                不修改页面模型；确认后写进 .manual/routes.override.yaml。--max-pages 限制打开的页面数（默认 20）。
+                React Router 没有公开的运行时入口，只能对照 <a href> 链接，onClick 跳转的菜单看不到。
 
 输出:
   每次验证写入新的不可变报告 .manual/verifications/<id>.json（基线发布、观察时间、输入 revision、逐条检查与结果）。
@@ -124,8 +131,38 @@ function artifactsFor(root, config, target) {
   return { report: written?.report || report, file: written?.file || null, errors, extra };
 }
 
+/** --routes：浏览器路由审计。有疑似遗漏退出码 4（与手册不一致），打不开站点退出码 1。 */
+async function runRouteAudit(values, { json, fail }) {
+  const root = path.resolve(values.projectRoot || process.cwd());
+  const loaded = loadConfig(root);
+  if (!loaded.ok) return fail(loaded.errors);
+  const maxPages = values.maxPages === undefined ? undefined : Number(values.maxPages);
+  if (maxPages !== undefined && (!Number.isInteger(maxPages) || maxPages < 1)) return usageExit(fail('--max-pages 必须是正整数。'));
+  const session = createBrowserSession();
+  let report;
+  try {
+    report = await auditRoutes({ projectRoot: root, config: loaded.config, session, authProfile: typeof values.authProfile === 'string' ? values.authProfile : null, ...(maxPages ? { maxPages } : {}) });
+  } catch (error) {
+    return fail(`${error.code || error.reason || 'route-audit-failed'}: ${error.message}`);
+  } finally {
+    await session.close().catch(() => {});
+  }
+  const ok = report.unmatched.length === 0 && report.visited.length > 0;
+  if (json) process.stdout.write(JSON.stringify({ ok, scope: 'routes', report }, null, 2) + '\n');
+  else {
+    process.stdout.write(`[manual verify --routes] 打开 ${report.visited.length} 个页面，观察到站内链接 ${report.observed.links} 个${report.sources.vueRouter ? `、运行时路由 ${report.observed.vueRoutes} 条` : ''}。\n`);
+    if (report.unmatched.length === 0) process.stdout.write('  没有发现页面模型之外的路由。\n');
+    for (const item of report.unmatched) process.stdout.write(`  ? ${item.path}  （${item.source === 'link' ? `链接，见于 ${item.from}` : '运行时路由表'}）\n`);
+    if (report.unmatched.length) process.stdout.write('  确认是遗漏后写进 .manual/routes.override.yaml，或排查静态扫描为什么没有发现它。\n');
+    for (const note of report.notes) process.stdout.write(`  注意：${note}\n`);
+    for (const e of report.errors) process.stderr.write(`[manual verify --routes] ${e}\n`);
+  }
+  if (report.visited.length === 0) return 1;
+  return report.unmatched.length ? 4 : 0;
+}
+
 async function run(argv) {
-  const { values, positional, unknownFlags } = parseArgs(argv, { known: KNOWN_FLAGS, booleans: ['live', 'artifacts', 'all'] });
+  const { values, positional, unknownFlags } = parseArgs(argv, { known: KNOWN_FLAGS, booleans: ['live', 'artifacts', 'all', 'routes'] });
   const json = values.json === true;
   if (values.help) { process.stdout.write(HELP + '\n'); return 0; }
   const fail = (e) => {
@@ -135,6 +172,10 @@ async function run(argv) {
     return exitCodeFor(a);
   };
   if (unknownFlags.length) return usageExit(fail(`未知参数: ${unknownFlags.join(', ')}`));
+  if (values.routes) {
+    if (values.live || values.artifacts || values.all || positional.length) return usageExit(fail('--routes 是独立的路由审计，不能与目标、--all、--live、--artifacts 同用。'));
+    return runRouteAudit(values, { json, fail });
+  }
   if (values.live && values.artifacts) return usageExit(fail('--live 与 --artifacts 只能选一个。'));
   if (values.all ? positional.length !== 0 : positional.length !== 1) return usageExit(fail('需要一个目标（task:<id> / page:<id>），或用 --all 验证全部已发布手册。'));
   const root = path.resolve(values.projectRoot || process.cwd());
