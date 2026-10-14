@@ -1,6 +1,6 @@
 ---
 name: manual
-description: Use when a Web project (currently Next.js) needs a living user manual: 初始化、扫描页面、用真实浏览器截图、生成或更新图文使用手册与任务操作指南、核对手册是否仍与线上一致；also when the user invokes /manual or /manual-<command>.
+description: Use when a Web project (Next.js, React Router or Vue Router, incl. Vite apps) needs a living user manual: 初始化、扫描页面、用真实浏览器截图、生成或更新图文使用手册与任务操作指南、核对手册是否仍与线上一致；also when the user invokes /manual or /manual-<command>.
 ---
 
 # manual —— DocWitness
@@ -32,11 +32,11 @@ description: Use when a Web project (currently Next.js) needs a living user manu
 ```text
 manual init --base-url <站点地址> --audience <public|internal>
 manual auth login --profile default          # 有登录保护的站点；先在 config.yaml 配好 auth.verifyPath 与 auth.identityAssertions
-manual inspect                                # 扫描 Next.js 路由与源码依赖，输出要读的文件清单
+manual inspect                                # 扫描路由与源码依赖，输出要读的文件清单与路由发现完整性
 manual describe --input <分析.json>           # 你读完源码后，写回每页的标题、用途、主要操作和 guide
 ```
 
-`inspect` 目前只支持 Next.js（App Router 与 Pages Router）；其它框架会明确提示暂不支持。`describe` 的输入格式见[命令细节](references/command-workflows.md)。`purpose` 和 `guide` 会原样进入手册，按[写作规范](references/manual-writing-style.md)第一、三节写：说清用途、选项区别和操作后的变化，「」只给要操作的控件；套话、“您”、连串「」会被拒绝。
+`inspect` 支持 Next.js（App Router 与 Pages Router）、React Router 对象路由与 Vue Router 路由表；其它框架会明确提示暂不支持。看 `--json` 的 `discovery`：完整性不是 `complete` 时，按 `discovery.unresolved` 读对应的路由源码，整理成候选用 `manual inspect --routes-input <候选.json>` 提交（只能补未解析的记录或新增未发现的路由，格式见[命令细节](references/command-workflows.md)），不要直接改页面文件里的 route / entry。`describe` 的输入格式见[命令细节](references/command-workflows.md)。`purpose` 和 `guide` 会原样进入手册，按[写作规范](references/manual-writing-style.md)第一、三节写：说清用途、选项区别和操作后的变化，「」只给要操作的控件；套话、“您”、连串「」会被拒绝。
 
 ## 2. 建模：要写哪些任务
 

@@ -2,7 +2,7 @@
 
 ## 快速开始
 
-需要 Node.js **20.9.0 或更新版本**，以及能启动 Chromium 的环境。先安装工具，再在要编写手册的 Next.js 项目中启动应用。
+需要 Node.js **20.9.0 或更新版本**，以及能启动 Chromium 的环境。先安装工具，再在要编写手册的项目（Next.js、React Router 或 Vue Router，含 Vite 项目）中启动应用。
 
 ### 1. 安装
 

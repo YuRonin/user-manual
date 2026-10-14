@@ -190,9 +190,18 @@ Playwright、sharp、markdown-it 都是本工具 `package.json` 里精确固定�
 
 ## 框架支持
 
-V0.2 只做 Next.js —— 先把一个框架做透，而不是每个框架都做一半。`detect.js` 认得出 Nuxt / Remix / SvelteKit / Angular / React Router / Vue Router，但只用于给出准确的「暂不支持」提示。
+框架相关的只有「路由发现」与「隐式依赖」，由 `src/inspect/adapters/` 下的适配器提供；页面模型、依赖图、指纹与合并都与框架无关。完整设计与决策见 [多框架支持](MULTI_FRAMEWORK_PLAN.md)。
 
-加新框架时：写一个 `src/inspect/<framework>.js`，导出同样形状的 `{ pages, skipped, conflicts }`，`pages[]` 每项形如 `{ route, dynamic, params, entry, router }`。`model.js` 的合并逻辑与框架无关，不用动。
+| 层级 | 适配器 / 输入 | 说明 |
+|---|---|---|
+| L1 约定式 | `nextjs` | 文件路由，指纹与改造前逐字节一致 |
+| L2 AST | `react-router-objects`、`vue-router-objects` | 共用 `route-table.js`（`@babel/parser`，延迟加载） |
+| L3 AI 候选 | `.manual/routes.candidates.yaml` | `inspect --routes-input` 校验后写入；依据的源码变化即过期 |
+| L4 人工覆盖 | `.manual/routes.override.yaml` | 优先级最高；可选的 `verify --routes` 浏览器审计只报告差异 |
+
+每条路由记录恰好一个去向（page / skipped / unresolved），`records.js` 统一判定冲突与完整性（complete / partial / unsupported）。路由定义文件进源码图的 `routeSources`，同时是依赖图边界；单条记录的 hash 进对应页面指纹，所以改一条路由只影响一个页面。解析器版本按能力区分（`CAPABILITY_VERSIONS`），只用到 JS/TS 的页面版本串保持不变。
+
+加新的路由体系时：在 `src/inspect/adapters/` 写一个适配器（`detect` / `discover` / `implicitDependencies` / `globalFiles`），用 `finalizeDiscovery` 产出结果并在 `adapters/index.js` 注册；新的源码语言在 `src/inspect/lang/` 加解析器，并在 `fingerprint.js` 登记能力版本。
 
 ## 中文自然化：为什么要留中间草稿
 
@@ -265,7 +274,7 @@ Runtime 路径下，正文由事实包确定性渲染（`src/generate/render.js`
 
 尚未提供（不要当作已支持）：
 
-1. 非 Next.js 框架的自动扫描（其它框架只给出"暂不支持"提示）
+1. Next.js / React Router 对象路由 / Vue Router 路由表之外的路由体系的自动扫描（JSX `<Routes>`、React Router framework mode、文件路由插件等只给出不支持的提示，可用 L3 / L4 补充）
 2. 跨进程常驻 daemon / 受控并发执行（Runtime 是单进程串行，一个 Run 内复用 Browser）
 3. 操作系统凭据库加密认证缓存
 4. 业务站点部署或 PR 自动合并

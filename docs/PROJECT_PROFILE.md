@@ -3,7 +3,7 @@
 可将以下内容填入 GitHub 仓库右侧的 **About**：
 
 - **Description**: Generate and maintain evidence-backed user guides from real browser interactions.
-- **Topics**: `documentation`, `nextjs`, `playwright`, `user-guide`, `claude-code`, `codex`, `ai-skill`
+- **Topics**: `documentation`, `nextjs`, `react-router`, `vue`, `vite`, `playwright`, `user-guide`, `claude-code`, `codex`, `ai-skill`
 - **Website**: 有 DocWitness 自身的公开文档站后再填写。
 - **Social preview**: 上传 [`assets/social-preview.png`](../assets/social-preview.png)（1280 × 640）。
 

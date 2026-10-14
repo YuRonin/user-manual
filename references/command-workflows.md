@@ -74,9 +74,66 @@ node <skill>/bin/manual.js inspect --project-root <项目根> --json
 
 CLI 会识别技术栈、扫出全部页面、递归追踪项目内静态依赖，写 `.manual/project.yaml`、`.manual/pages/<id>.yaml`、`.manual/index/forward.json` 与 `.manual/index/reverse.json`，并在 `worklist` 里给出**每个待分析页面该读哪些文件**。
 
-依赖扫描支持静态 `import`、re-export、字面量 `require()`，以及 `tsconfig.json` / `jsconfig.json` 的 `baseUrl`、`paths`。第三方包、样式和静态资源会被忽略；无法解析的项目内依赖写入页面模型的 `dependencies.unresolved` 并作为 warning 报告，不中断其它页面。
+依赖扫描支持静态 `import`、re-export、字面量 `require()`，以及 `tsconfig.json` / `jsconfig.json` 的 `baseUrl`、`paths`（根配置只有 `references` 时读被引用的子配置，如 `tsconfig.app.json`）。注释掉的 import 不算依赖；Vite 的 `?url` / `?raw` 后缀会被去掉再解析。第三方包被忽略，项目内样式和静态资源计入页面指纹；无法解析的项目内依赖写入页面模型的 `dependencies.unresolved` 并作为 warning 报告，不中断其它页面。
 
-当前只支持 **Next.js**（App Router + Pages Router）。Vite + Vue 等其它框架会被识别，但会给出准确的「暂不支持」提示。
+支持的路由体系（详见 [多框架支持](../docs/MULTI_FRAMEWORK_PLAN.md)）：
+
+| 路由体系 | 怎么发现页面 | 布局依赖 |
+|---|---|---|
+| Next.js App Router / Pages Router | 按文件约定 | 祖先 layout / template 等、`_app` / `_document` |
+| React Router 6 / 7 data mode | 解析 `createBrowserRouter` / `createHashRouter` / `createMemoryRouter` / `useRoutes` 的路由数组：嵌套 `children`、`index`、无 path 的布局路由、`Component` / `element` / `lazy`（含 `dynamic(() => import())` 这类封装）、`...xxx` 展开 | 父路由组件 |
+| Vue Router 4 | 解析 `createRouter({ routes })`：嵌套 `children`、跨文件展开、`component` / `components.default`、`redirect`、`/:pathMatch(.*)*` 兜底、静态 `props` / `meta` | 父路由组件 |
+
+Vue 项目还会解析 `.vue` 单文件组件：`<script>` / `<script setup>` 的 import、`<style>` 的 `@import`、模板里由 `unplugin-vue-components` 自动导入的本地组件（按 `components.d.ts` 映射；找不到这个文件时，来源不明的组件记为未解析，页面依赖覆盖标为 partial）。
+
+**发现完整性**。每条路由记录恰好有一个去向：成为页面、按规则跳过（`redirect` / `catch-all` / `layout-only` / `excluded` 等），或未解析（path 不是字面量、组件追不到、展开的数组追不到、运行时 `addRoute()` / `patchRoutesOnNavigation`）。`--json` 的 `discovery` 给出适配器、完整性（`complete` / `partial` / `unsupported`）、计数与每条未解析记录的位置。扫出 N 个合法页面不代表项目只有 N 个页面；看完整性，不看页面数量。
+
+**明确不支持**（报告为 partial / unsupported，不会扫出 0 条路由冒充成功）：JSX `<Routes>` 声明式路由、`createRoutesFromElements`、React Router framework mode（`@react-router/dev`）、`unplugin-vue-router` 文件路由；Vue 2（vue-router 3）按规则扫描但标为 partial。其它框架（Nuxt、SvelteKit、Angular 等）会被识别并给出暂不支持的提示。
+
+**路由定义文件**（`src/routes.ts`、`src/router/index.ts` 等）记在源码图的 `routeSources` 里，同时是依赖图的边界：页面 `import router` 做跳转，不会把整张路由表算进页面依赖。改路由文件时由重新发现给出真实影响——新增 / 删除的页面、单条路由 path / 入口 / props / 布局链的变化只影响对应页面；只改注释或路由守卫不影响任何页面（`update` 报告里列为「路由定义」）。
+
+### 补充静态扫描确定不了的路由
+
+两种输入都只是**扫描的输入**，每次 inspect 合并进发现结果，不直接写页面文件：
+
+- **AI 候选（L3）**：读未解析记录指向的源码，整理成 JSON，再用 `--routes-input` 提交：
+
+  ```json
+  { "routes": [
+    { "recordId": "src/routes.tsx#/admin > ...", "route": "/admin/reports/:id", "entry": "src/pages/report.tsx",
+      "layout": ["src/components/guard/index.tsx"], "evidence": ["src/config.ts"], "reason": "PREFIX 是 src/config.ts 里的常量 /admin" }
+  ] }
+  ```
+
+  ```
+  node <skill>/bin/manual.js inspect --project-root <项目根> --routes-input <候选.json> --json
+  ```
+
+  `recordId` 取自 `discovery.unresolved`；不写 `recordId` 表示新增静态扫描没发现的路由。候选不能改写已由静态扫描确定的路由，任一条不合法则整批不写。校验通过的候选写入 `.manual/routes.candidates.yaml`，并记下所依据源码（入口、布局、未解析记录所在文件、`evidence`）的 hash：这些文件一变，候选自动过期，记录重新回到未解析。
+- **人工覆盖（L4）**：`.manual/routes.override.yaml`，优先级高于 AI 候选，每条都要写 `reason`：
+
+  ```yaml
+  version: 1
+  routes:
+    - exclude: "src/routes.tsx#/debug"      # 排除一条记录（不进手册）
+      reason: 调试页
+    - recordId: "src/routes.tsx#/admin > ..."  # 修正 / 补全一条记录
+      route: /manage/reports/:id
+      entry: src/pages/report.tsx
+      reason: 人工确认的真实前缀
+    - route: /help                           # 新增运行时注册的路由
+      entry: src/pages/help.tsx
+      layout: [src/components/guard/index.tsx]
+      reason: 由插件在运行时注册
+  ```
+
+静态扫描完全不支持的项目（如 JSX `<Routes>`）在没有任何补充时 inspect 会失败并说明原因；补充之后可以继续，但完整性最高只能是 `partial`。想知道有没有漏掉的路由，用浏览器路由审计：
+
+```
+node <skill>/bin/manual.js verify --routes --project-root <项目根> [--auth-profile <档案>] [--max-pages 20] --json
+```
+
+它用认证档案打开根路由和静态页面，收集站内链接；Vue 3 应用另外读取 `$router.getRoutes()`（能看到 `addRoute()` 动态添加的路由）。与页面模型对照后只报告没有登记的路由，不修改页面模型；退出码 4 表示有疑似遗漏。React Router 没有公开的运行时入口，只能对照 `<a href>`，用 onClick 跳转的菜单看不到。
 
 ### 2. 读源码，分析语义
 
