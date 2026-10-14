@@ -150,6 +150,34 @@ test('删除页面：给出下线建议，不删除文档；经过它的任务�
   assert.ok(fs.existsSync(path.join(root, 'docs/manual/chat.md')));
 });
 
+test('页面标为 retired：update 不再重新生成它，文档还在时给出下线建议，删除后不再报；verify --all 不再核验它', (root) => {
+  prepare(root);
+  const desc = cli(root, ['describe', '--input', writeJson(root, 'retire.json', { pages: [{ id: 'profile', lifecycle: 'retired', includeInManual: false }] })]);
+  assert.strictEqual(desc.status, 0, desc.out);
+  fx.writeFile(root, 'app/profile/page.tsx', 'export default function Page() { return <i>改了</i> }\n');
+  // 发布记录里的页面定义已过期（下线前改过分类计划 / 场景）：不过滤的话会被当成 model-changed 重新生成
+  const stale = releases.readCurrentRelease(stateDir(root), 'page-profile');
+  const restated = { ...stale, id: newUuid(), definitionRevisions: { profile: `sha256:${'b'.repeat(64)}` } };
+  releases.writeRelease(stateDir(root), restated);
+  releases.setCurrent(stateDir(root), restated);
+
+  let r = cli(root, ['update', '--plan', '--json']);
+  assert.strictEqual(r.status, 0, r.out);
+  assert.ok(!r.json.targets.some((t) => t.manualId === 'page-profile'), `已下线的页面不能被重新生成: ${JSON.stringify(r.json.targets)}`);
+  assert.deepStrictEqual(r.json.retirement.map((x) => [x.manualId, x.status]), [['page-profile', 'pending-retirement']]);
+
+  fs.rmSync(path.join(root, 'docs/manual/profile.md'));
+  r = cli(root, ['update', '--plan', '--json']);
+  assert.strictEqual(r.status, 0, r.out);
+  assert.ok(!r.json.targets.some((t) => t.manualId === 'page-profile'), JSON.stringify(r.json.targets));
+  assert.deepStrictEqual(r.json.retirement, [], '文档已删除，下线完成，不再提示');
+  assert.ok(!r.json.blocked.some((b) => b.manualId === 'page-profile'), JSON.stringify(r.json.blocked));
+
+  const verify = cli(root, ['verify', '--all', '--json']);
+  assert.ok(verify.json && Array.isArray(verify.json.reports), verify.out);
+  assert.ok(!verify.json.reports.some((x) => x.target === 'page:profile'), `verify --all 不应核验已下线的手册: ${verify.out}`);
+});
+
 test('没有任何发布记录：no-baseline，提示用 generate', (root) => {
   fx.writeFile(root, 'app/chat/page.tsx', 'export default function Page() { return null }\n');
   assert.strictEqual(cli(root, ['init', '--base-url', 'http://localhost:3000']).status, 0);

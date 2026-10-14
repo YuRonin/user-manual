@@ -16,6 +16,7 @@
  *   - 无基线 → fallback=full-rebuild-required，不返回空影响。
  */
 
+const fs = require('fs');
 const path = require('path');
 
 const { GLOBAL_FILES, contentHash: hashFile, impactReport } = require('../inspect/fingerprint');
@@ -267,7 +268,8 @@ function analyzeProject({ projectRoot, config, base = null }) {
   const { buildSourceGraph } = require('../inspect/source-graph');
   const { readCurrentGraph } = require('../inspect/index-store');
   const { detectChanges } = require('./git-changes');
-  const { groupBaselines, publishedManualIds } = require('./baseline');
+  const { groupBaselines, publishedManualIds, isWithdrawnPage } = require('./baseline');
+  const releases = require('../publication/release-store');
 
   const stateDirAbs = path.join(projectRoot, config.artifacts.stateDir);
   const committed = createProjectStore({ stateDirAbs, docsOutputDir: config.docs.outputDir }).readCommitted();
@@ -283,7 +285,11 @@ function analyzeProject({ projectRoot, config, base = null }) {
   }
   const currentGraph = scanned.fingerprinted.graph;
   const model = { pages: [...scanned.result.pages, ...scanned.result.removed], tasks: committed.model.tasks };
-  const published = publishedManualIds(stateDirAbs);
+  const allPublished = publishedManualIds(stateDirAbs);
+  // 页面已下线（retired / 不进手册）：它的发布记录不再参与重新生成，只在文档还在时给出下线建议
+  const pagesById = new Map(model.pages.map((page) => [page.id, page]));
+  const withdrawn = allPublished.filter((id) => id.startsWith('page-') && isWithdrawnPage(pagesById.get(id.slice(5))));
+  const published = allPublished.filter((id) => !withdrawn.includes(id));
 
   const groups = [];
   const warnings = [...scanned.dependencyWarnings];
@@ -323,9 +329,15 @@ function analyzeProject({ projectRoot, config, base = null }) {
     if (existing) existing.reasonPaths.push(...section.reasonPaths);
     else sections.push(section);
   }
+  for (const manualId of withdrawn) {
+    const documentPath = releases.readCurrentRelease(stateDirAbs, manualId)?.documentPath;
+    if (!documentPath || !fs.existsSync(path.join(projectRoot, documentPath))) continue;
+    sections.push({ manualId, kind: 'page', subjectId: manualId.slice(5), documentPath, confidence: CONFIDENCE.EXACT, baseline: 'model',
+      retirement: true, reasonPaths: [['(.manual)', 'page-withdrawn', manualId]] });
+  }
   const fallbackGroups = groups.filter((g) => g.report.fallback).flatMap((g) => g.manualIds);
   const rebuild = [...new Set([...missing, ...fallbackGroups])].sort();
-  if (published.length === 0) return { ...fullRebuild('no-baseline', '还没有任何发布记录，没有可比较的基线：先用 manual generate <目标> 生成手册。'), currentGraph, model };
+  if (allPublished.length === 0) return { ...fullRebuild('no-baseline', '还没有任何发布记录，没有可比较的基线：先用 manual generate <目标> 生成手册。'), currentGraph, model };
   const conservative = groups.some((g) => g.report.confidence === CONFIDENCE.CONSERVATIVE) || rebuild.length > 0;
   // 不在任何已发布手册里、update 不会处理的变化，也要让人看见（B5-10）：新页面、疑似改名、无法归属的改动
   const publishedPages = new Set(published.filter((id) => id.startsWith('page-')).map((id) => id.slice(5)));

@@ -52,7 +52,7 @@ function selectTargets({ projectRoot, stateDirAbs, analysis }) {
         manualId: section.manualId,
         documentPath: section.documentPath,
         status: 'pending-retirement',
-        suggestion: `页面 ${target.id} 已不存在：确认下线后删除或重定向 ${section.documentPath}；工具不会自动删除文档和旧图片。`,
+        suggestion: `页面 ${target.id} 已删除或下线：确认后删除或重定向 ${section.documentPath}；工具不会自动删除文档和旧图片。`,
       });
       continue;
     }

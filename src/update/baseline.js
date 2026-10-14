@@ -35,6 +35,24 @@ function publishedManualIds(stateDirAbs) {
     .sort();
 }
 
+/** 页面已下线：显式 retired，或标为不进手册。它的旧发布记录不再需要维护。 */
+function isWithdrawnPage(page) {
+  return Boolean(page) && (page.lifecycle === 'retired' || page.includeInManual === false);
+}
+
+/** 读取页面模型判断 page-<id> 是否已下线；读不到模型时按未下线处理（不静默跳过）。 */
+function isWithdrawnManual(stateDirAbs, manualId) {
+  const match = /^page-(.+)$/.exec(manualId);
+  if (!match) return false;
+  const file = path.join(stateDirAbs, 'pages', `${match[1]}.yaml`);
+  try { return isWithdrawnPage(require('js-yaml').load(fs.readFileSync(file, 'utf8'))); } catch (_) { return false; }
+}
+
+/** 仍需维护的已发布手册：排除页面已下线的那些。 */
+function activePublishedManualIds(stateDirAbs) {
+  return publishedManualIds(stateDirAbs).filter((manualId) => !isWithdrawnManual(stateDirAbs, manualId));
+}
+
 /**
  * 按基线分组当前发布：同一 (gitCommit, graphRevision) 的手册共享一次影响分析。
  * 旧发布记录没有 sourceBaseline → 归入 missing 组（需要全量重建）。
@@ -58,4 +76,4 @@ function groupBaselines(stateDirAbs, manualIds = publishedManualIds(stateDirAbs)
   return { groups: [...groups.values()], missing };
 }
 
-module.exports = { currentSourceBaseline, publishedManualIds, groupBaselines };
+module.exports = { currentSourceBaseline, publishedManualIds, activePublishedManualIds, isWithdrawnPage, groupBaselines };

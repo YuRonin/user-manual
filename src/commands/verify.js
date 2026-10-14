@@ -17,7 +17,7 @@ const { parseArgs } = require('../cli/args');
 const { exitCodeFor, usageExit } = require('../cli/output');
 const { loadConfig } = require('../config/load');
 const { createBrowserSession } = require('../browser/session');
-const { publishedManualIds } = require('../update/baseline');
+const { activePublishedManualIds } = require('../update/baseline');
 const { loadVerify, prepareVerify, verifyPageArtifacts, checksFromErrors } = require('../verify/artifacts');
 const { verifyLive } = require('../verify/live');
 const { demoSafetyForImages, demoSafetyErrors } = require('../verify/demo-safety');
@@ -54,7 +54,7 @@ manual verify —— 检查已发布的手册
 function resolveTargets(root, config, raw, all) {
   const state = path.join(root, config.artifacts.stateDir);
   if (all) {
-    return publishedManualIds(state).map((manualId) => {
+    return activePublishedManualIds(state).map((manualId) => {
       const match = /^(page|task)-(.+)$/.exec(manualId);
       return match ? { type: match[1], id: match[2] } : null;
     }).filter(Boolean);
