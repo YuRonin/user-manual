@@ -24,6 +24,7 @@ const TEMPLATES = {
     actionsInferred: '主要功能',
     actionsInferredNote: '> 以下功能根据页面整理，具体以实际界面为准。',
     guideLink: '查看详细步骤',
+    tip: '提示：',
     // 完成声明的两个标签必须互不包含：等级由程序按证据决定，定稿校验按前缀区分。
     verified: '完成标志：',
     expected: '预期结果：',
@@ -54,6 +55,7 @@ const TEMPLATES = {
     actionsInferred: 'Main features',
     actionsInferredNote: '> These features are summarized from the page; the actual interface takes precedence.',
     guideLink: 'See detailed steps',
+    tip: 'Tip: ',
     verified: 'You will see: ',
     expected: 'Expected result: ',
     simulated: '> Note: the data in the screenshots is sample data. Your page shows your own content.',
@@ -76,7 +78,9 @@ const TEMPLATES = {
 // render-13：面向读者的帮助中心结构——入口并入步骤，正文不暴露采集与验证范围等维护信息。
 // render-14：页面指南标题恢复编号，与截图标注 ①②③ 对应。
 // render-15：任务步骤有 title 时，在 step 注释后写 <!-- step-title: … -->，供帮助中心目录使用；正文不变。
-const TEMPLATE_VERSION = 'render-16';
+// render-17：分类页面每节一组连续编号的步骤（标注号即步骤号），图片紧跟相关步骤且不再重复图例；
+//            步骤可带结果说明，小节可带提示，页面末尾可带常见问题。
+const TEMPLATE_VERSION = 'render-17';
 
 class TemplateError extends Error {
   constructor(language) {
@@ -228,6 +232,53 @@ function renderTask(pack, copy = {}) {
   return assemble(blocks);
 }
 
+/** 分类页面里一个功能的正文块 id：保留旧 guide 块身份，三方合并才能继续保护人工编辑。 */
+function stepBlockId(feature) {
+  return feature.guideId ? `guide.${feature.guideId}` : `feature.${feature.id ?? feature.feature_id}`;
+}
+
+/**
+ * 分类页面的一个小节：标题与使用场景 → 连续编号的步骤（结果说明缩进在步骤下）→ 相关截图 → 补充说明 → 提示。
+ * 截图跟在它标注的最后一个步骤（或以它为结果图的步骤）所在的功能块之后；图上标注号就是步骤号，图下不再列图例。
+ */
+function sectionBlocks(pack, section, t) {
+  const { sectionSteps } = require('../annotations/section-plan');
+  const steps = sectionSteps(pack, section);
+  const blocks = [[`section.${section.id}`, [`## ${section.title}`, '', section.goal]]];
+  const figures = section.figureRefs.map((id) => pack.figures.find((f) => f.id === id)).filter(Boolean);
+  // 每张图挂在哪个功能块后面：取它关联的最大步骤号所在的功能
+  const anchorOf = new Map(figures.map((fig) => {
+    const related = steps.filter((s) => s.step && (fig.operationRefs.includes(s.op.id) || s.op.outcomeFigure === fig.id));
+    return [fig.id, related.length ? related[related.length - 1].op.featureId : null];
+  }));
+  const figureBlocks = (fig) => pack.artifacts.filter((a) => a.figureId === fig.id).map((artifact) => {
+    const lines = [...figure(artifact, fig.caption, artifact.markdownHref)];
+    if (artifact.privacy?.demo?.sources?.api_mock || artifact.privacy?.demo?.sources?.fixture) lines.push('', t.simulated);
+    return [`figure.${fig.id}.${artifact.part || 1}`, lines];
+  });
+  for (const id of section.featureRefs) {
+    const feature = pack.features.find((f) => (f.id ?? f.feature_id) === id);
+    const own = steps.filter((s) => s.op.featureId === id);
+    const lines = [''];
+    for (const { op, step } of own.filter((s) => s.step)) {
+      lines.push(`${step}. ${op.instruction}`);
+      // 列表项的续行缩进到序号之后，Markdown 才会把结果说明归到这一步里
+      if (op.outcome) lines.push('', `${' '.repeat(String(step).length + 2)}${op.outcome}`);
+    }
+    // 说明类内容不进编号步骤，写成步骤之后的普通段落
+    for (const { op } of own.filter((s) => !s.step)) {
+      lines.push('', op.instruction);
+      if (op.outcome) lines.push('', op.outcome);
+    }
+    if (feature.taskId) lines.push('', `[${t.guideLink}](tasks/${feature.taskId}.md)`);
+    blocks.push([stepBlockId(feature), lines]);
+    for (const fig of figures.filter((f) => anchorOf.get(f.id) === id)) blocks.push(...figureBlocks(fig));
+  }
+  for (const fig of figures.filter((f) => !anchorOf.get(f.id))) blocks.push(...figureBlocks(fig));
+  if (section.tips?.length) blocks.push([`tips.${section.id}`, section.tips.flatMap((tip) => ['', `> ${t.tip}${tip}`])]);
+  return blocks;
+}
+
 /** 页面手册。detectedActions 没有逐项浏览器证据：只在没有 guide 时列出，并提示以实际界面为准。 */
 function renderPage(pack, copy = {}, { draft = false } = {}) {
   const t = templateFor(pack.language);
@@ -236,25 +287,8 @@ function renderPage(pack, copy = {}, { draft = false } = {}) {
   if (intro) overview.push('', intro);
   if (pack.sections?.length) {
     const blocks = [['overview', overview], ['location', [t.pageEntry(`[${pack.title}](${pack.route})`)]]];
-    const byFeature = new Map(pack.features.map(f => [f.id ?? f.feature_id, f]));
-    for (const section of pack.sections) {
-      blocks.push([`section.${section.id}`, [`## ${section.title}`, '', section.goal]]);
-      for (const id of section.featureRefs) {
-        const feature = byFeature.get(id);
-        const operations = feature.operations || [];
-        // Retain old guide block identities so three-way merging preserves human edits.
-        blocks.push([feature.guideId ? `guide.${feature.guideId}` : `feature.${id}`, ['', ...operations.map(op => op.instruction), ...(feature.taskId ? ['', `[${t.guideLink}](tasks/${feature.taskId}.md)`] : [])]]);
-      }
-      for (const id of section.figureRefs) {
-        const fig = pack.figures.find(f => f.id === id);
-        for (const artifact of pack.artifacts.filter(a => a.figureId === id)) {
-          const lines = [...figure(artifact, fig.caption, artifact.markdownHref)];
-          for (const ref of artifact.annotationRefs || []) lines.push('', `${ref.label}. ${ref.description}`);
-          if (artifact.privacy?.demo?.sources?.api_mock || artifact.privacy?.demo?.sources?.fixture) lines.push('', t.simulated);
-          blocks.push([`figure.${id}.${artifact.part || 1}`, lines]);
-        }
-      }
-    }
+    for (const section of pack.sections) blocks.push(...sectionBlocks(pack, section, t));
+    if (pack.faq?.length) blocks.push(['faq', [`## ${t.branches}`, ...pack.faq.flatMap((item) => ['', `**${item.question}**`, '', item.answer])]]);
     return assemble(blocks, draft ? [...pack.headerComments, ''] : []);
   }
   const location = [t.pageEntry(`[${pack.title}](${pack.route})`)];
@@ -280,4 +314,4 @@ function renderPage(pack, copy = {}, { draft = false } = {}) {
   return assemble(blocks, draft ? [...pack.headerComments, ''] : []);
 }
 
-module.exports = { BLOCK_CLOSE, blockOpen, TEMPLATES, TEMPLATE_VERSION, TemplateError, templateFor, templateRevision, actionSentence, visibleTargetName, claimLabel, renderTask, renderPage };
+module.exports = { BLOCK_CLOSE, blockOpen, TEMPLATES, TEMPLATE_VERSION, TemplateError, templateFor, templateRevision, actionSentence, visibleTargetName, claimLabel, renderTask, renderPage, stepBlockId };

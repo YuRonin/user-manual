@@ -210,7 +210,7 @@ function validateEntry(entry, index, knownIds, errors) {
     else { patch.features = entry.features; touched = true; }
   }
 
-  for (const field of ['sections', 'figures', 'states']) if (entry[field] !== undefined) { patch[field] = entry[field]; touched = true; }
+  for (const field of ['sections', 'figures', 'states', 'faq']) if (entry[field] !== undefined) { patch[field] = entry[field]; touched = true; }
 
   if (entry.source !== undefined) {
     if (!Array.isArray(entry.source) || entry.source.some((s) => typeof s !== 'string')) {
@@ -251,7 +251,7 @@ function validateEntry(entry, index, knownIds, errors) {
 function applyPatch(page, patch) {
   const next = {
     ...page,
-    ...Object.fromEntries(['sections', 'figures', 'states'].filter(k => patch[k] !== undefined).map(k => [k, patch[k]])),
+    ...Object.fromEntries(['sections', 'figures', 'states', 'faq'].filter(k => patch[k] !== undefined).map(k => [k, patch[k]])),
     ...(patch.guide !== undefined ? { guide: patch.guide } : {}),
     ...(patch.variants !== undefined ? { variants: patch.variants } : {}),
     ...(patch.features !== undefined ? { features: patch.features } : {}),

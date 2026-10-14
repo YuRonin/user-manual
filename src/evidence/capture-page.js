@@ -169,6 +169,10 @@ async function capturePage({ projectRoot, config, pageId, options = {}, session 
   const isDefaultScenario = scenario.id === `page-${page.id}`;
   // Fixture：先过环境策略（生产 / 未登记环境拒绝），再决定拦截路由；在打开浏览器之前完成
   const data = prepareScenarioData({ stateDirAbs, config, scenario, runId });
+  // 模拟写操作只能由 mock Fixture 承接：hook / live 数据下真的点下去，就是一次真实写入
+  if ((scenario.setup || []).some((action) => action?.mocked === true) && data.mode !== 'simulated') {
+    throw new RuntimeError('mock-write-unbacked', `Scenario ${scenario.id} 的 setup 含 mocked: true 的写操作，但没有使用 kind: mock 的 Fixture，不能采集。`);
+  }
   // 每个 Scenario 用自己的身份：匿名 / 成员 / 管理员互不共享认证状态
   const auth = prepareAuth(config, { profile: scenario.authProfile });
   // 派生的默认 Scenario 沿用通用导航规则；显式 Scenario 按声明的状态码 / 预期状态（Empty / Error / Loading）/ 跳转校验

@@ -21,7 +21,8 @@ const { DEFAULT_THEME } = require('../src/config/annotation');
       const mask = { rect: { x: 305, y: 240, width: 50, height: 12 }, kind: 'password', result: 'neutral-mosaic' };
       const safe = await deriveGrouped({ captured, rawPath, sanitizedPath, publishedPath, theme: { ...DEFAULT_THEME, maxMarkersPerImage: 5 }, redactions: [mask], privacy: { status: 'passed' }, canvas: captured.geometry.documentSize });
       assert.equal(safe.parts.length, 2, 'marker limit must split figures');
-      assert.deepEqual(safe.figures.map(f => f.annotationRefs.map(r => r.label)), [['1', '2', '3', '4', '5'], ['1', '2']]);
+      // 标注号沿用计划里的步骤号：分图后第二张接着画 6、7，与正文第 6、7 步对应
+      assert.deepEqual(safe.figures.map(f => f.annotationRefs.map(r => r.label)), [['1', '2', '3', '4', '5'], ['6', '7']]);
       assert(safe.rendered.every(r => r.visible && r.drawn && r.located));
       const crop = safe.figures[0].crop;
       assert.equal(crop.dpr, dpr);
@@ -42,6 +43,6 @@ const { DEFAULT_THEME } = require('../src/config/annotation');
       assert(viewport.rendered.every(r => r.visible && r.drawn), 'viewport crop must retain its visible targets');
       if (dpr === 2 && process.env.MANUAL_QA_IMAGE) fs.copyFileSync(publishedPath, process.env.MANUAL_QA_IMAGE);
     }
-    console.log('grouped-geometry: DPR 1/2, full-page coordinates, safe crops and local numbering passed');
+    console.log('grouped-geometry: DPR 1/2, full-page coordinates, safe crops and step numbering passed');
   } finally { fx.cleanup(root); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

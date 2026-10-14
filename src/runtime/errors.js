@@ -60,6 +60,8 @@ const POLICIES = {
   'annotation-layout-crowded': FAIL,
   'manual-operation-uncovered': FAIL,
   'manual-result-unverified': FAIL,
+  'manual-outcome-unproven': FAIL,
+  'mock-write-unbacked': FAIL,
   'binding-unresolved': FAIL,
   // Demo 门禁：缺演示数据 / 发现风险 / 写请求被中止都是确定性的，重拍结果不变，需要补 Fixture 或配置
   'demo-needs-fixture': FAIL,

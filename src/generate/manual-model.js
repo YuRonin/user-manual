@@ -85,7 +85,9 @@ function pageSections(pack, proofs = new Map()) {
       out.push(section(`section.${s.id}`, 'instructions', { pageRefs, captureRefs: captures, annotationRefs: refs.flatMap(r => r.annotationRefs), featureRefs: refs.flatMap(r => r.featureRefs) }));
       for (const f of pack.features.filter(f => s.featureRefs.includes(f.id ?? f.feature_id))) out.push(section(f.guideId ? `guide.${f.guideId}` : `feature.${f.id ?? f.feature_id}`, 'instructions', { pageRefs, taskRefs: f.taskId ? [f.taskId] : [] }));
       for (const artifact of artifacts) out.push(section(`figure.${artifact.figureId}.${artifact.part || 1}`, 'figure', { pageRefs, captureRefs: [artifact.captureId], scenarioRefs: [artifact.scenarioId] }));
+      if (s.tips?.length) out.push(section(`tips.${s.id}`, 'tips', { pageRefs }));
     }
+    if (pack.faq?.length) out.push(section('faq', 'branches', { pageRefs }));
     return out;
   }
   for (const scenarioId of unique(pack.artifacts.map((a) => a.scenarioId))) {

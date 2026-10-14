@@ -30,7 +30,7 @@ const VIEW_FIELDS = {
       guide: (p.guide || []).map((g) => ({ id: g.id, target: g.target ?? null, featureId: g.featureId ?? null })),
     }),
     docs: (p) => ({
-      sections: p.sections, figures: p.figures,
+      sections: p.sections, figures: p.figures, faq: p.faq,
       title: p.title, purpose: p.purpose, includeInManual: p.includeInManual,
       variants: p.variants,
       features: (p.features || []).map((f) => ({ id: f.id ?? f.feature_id, label: f.label, description: f.description ?? null, operations: f.operations })),

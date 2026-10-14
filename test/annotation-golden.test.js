@@ -120,7 +120,7 @@ const TARGETS = [
     }
 
     // ------------------------------------------------------------ AC-16 端到端：7 个标注、单图上限 5 → 两张图进入手册
-    await test('AC-16 端到端：分类工具栏的 7 个操作拆成两图并分别编号；B6-08 删掉 .manual/artifacts 后离线验证仍可核对，缺发布图明确报错', async () => {
+    await test('AC-16 端到端：分类工具栏的 7 个操作拆成两图并沿用步骤号；B6-08 删掉 .manual/artifacts 后离线验证仍可核对，缺发布图明确报错', async () => {
       const project = fx.captureFixture();
       try {
         fx.writeFile(project, 'app/layout-dense/page.tsx');
@@ -144,7 +144,8 @@ const TARGETS = [
         const parts = record.artifacts.filter((a) => a.kind === 'published');
         assert.deepStrictEqual(parts.map((a) => a.part), [1, 2], JSON.stringify(record.artifacts.map((a) => a.kind)));
         assert.ok(/--part-2--/.test(parts[1].path), parts[1].path);
-        assert.deepStrictEqual(record.annotationProof.rendered.map((r) => [r.label, r.part]), names.map((_, i) => [String(i % 5 + 1), i < 5 ? 1 : 2]));
+        // 标注号即步骤号：第二张图接着画 6、7，与正文第 6、7 步对应
+        assert.deepStrictEqual(record.annotationProof.rendered.map((r) => [r.label, r.part]), names.map((_, i) => [String(i + 1), i < 5 ? 1 : 2]));
         const doc = fs.readFileSync(path.join(project, 'docs', 'manual', 'layout-dense.md'), 'utf8');
         const images = [...doc.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)].map((m) => m[1]);
         assert.strictEqual(images.length, 2, doc);

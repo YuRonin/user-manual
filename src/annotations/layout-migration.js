@@ -20,6 +20,17 @@ function proposalFor(page) {
     retainedCaptureId: page.browser?.latestCaptureId || null, warnings: ['已有 target 只作为 hint；旧截图不自动升级为完整证据。'] };
 }
 
+/** 分类计划里读者会读到的文字（小节标题 / 场景、步骤、结果、提示、常见问题）按写作规范检查，命中即拒绝。 */
+function layoutStyle(page) {
+  const { lintProse, formatStyle } = require('../generate/style-lint');
+  const texts = [
+    ...page.sections.flatMap((s) => [[`sections.${s.id}.title`, s.title], [`sections.${s.id}.goal`, s.goal], ...(s.tips || []).map((t, i) => [`sections.${s.id}.tips[${i}]`, t])]),
+    ...require('./section-plan').operationsOf(page).flatMap((o) => [[`operations.${o.id}.instruction`, o.instruction], [`operations.${o.id}.outcome`, o.outcome]]),
+    ...(page.faq || []).flatMap((f) => [[`faq.${f.id}.question`, f.question], [`faq.${f.id}.answer`, f.answer]]),
+  ];
+  return texts.filter(([, text]) => text).flatMap(([where, text]) => formatStyle(lintProse(text), where));
+}
+
 function prepareLayouts({ projectRoot, config, payload }) {
   const stateDirAbs = path.join(projectRoot, config.artifacts.stateDir);
   const store = createProjectStore({ stateDirAbs, docsOutputDir: config.docs.outputDir });
@@ -32,13 +43,15 @@ function prepareLayouts({ projectRoot, config, payload }) {
     const old = base.model.pages.find(p => p.id === patch.id);
     if (!old || seen.has(patch.id)) fail([`页面不存在或重复: ${patch.id}`]);
     seen.add(patch.id);
-    const allowed = new Set(['id', 'title', 'purpose', 'features', 'sections', 'figures', 'states', 'variants']);
+    const allowed = new Set(['id', 'title', 'purpose', 'features', 'sections', 'figures', 'states', 'variants', 'faq']);
     if (Object.keys(patch).some(k => !allowed.has(k))) fail(['分类迁移只能更新语义与图文定义']);
     const next = { ...applyPatch(old, patch), schemaVersion: 3 };
     if (!next.title?.trim() || !next.purpose?.trim()) fail(['分类计划需要源码支持的 title 与 purpose']);
     if (patch.states) next.states = { ...(old.states || {}), ...patch.states };
     const result = validatePage(next);
     if (!result.ok || !grouped(next)) fail(result.ok ? ['需要分类 sections'] : result.errors.map(e => `${e.path}: ${e.message}`));
+    const style = layoutStyle(next);
+    if (style.length) fail(style);
     // Every legacy guide survives under its stable content block identity.
     for (const g of old.guide || []) {
       const feature = next.features.find(f => f.guideId === g.id);
@@ -65,7 +78,13 @@ function prepareLayouts({ projectRoot, config, payload }) {
     const checkpoint = scenario.checkpoints.find(c => c.id === (fig.checkpointId || 'default'));
     if (!checkpoint) fail([`图片 ${fig.id} 缺少检查点`]);
     if (fig.purpose === 'state' && !(checkpoint.assertions || []).some(a => a.type !== 'url')) fail([`状态图 ${fig.id} 需要非 URL 状态断言`]);
-    if ((scenario.setup || []).some(s => s.risk && !['read', 'local'].includes(s.risk))) fail([`Scenario ${id} 的写操作应交由已批准任务执行`]);
+    // 写操作只有两条路：已批准任务的真实执行，或本 Scenario 的 mock Fixture 在浏览器内完整模拟（mocked: true）
+    if ((scenario.setup || []).some(s => s.risk && !['read', 'local'].includes(s.risk) && s.mocked !== true)) fail([`Scenario ${id} 的写操作应交由已批准任务执行，或标 mocked: true 并由 mock Fixture 拦截`]);
+    if ((scenario.setup || []).some(s => s.mocked === true)) {
+      let fixture = null;
+      try { fixture = require('../scenarios/fixtures').readFixture(stateDirAbs, scenario.data?.fixture); } catch (error) { fail([`Scenario ${id} 的模拟写操作需要已登记的 mock Fixture：${error.message}`]); }
+      if (fixture.kind !== 'mock') fail([`Scenario ${id} 的模拟写操作需要 kind: mock 的 Fixture，${fixture.id} 是 ${fixture.kind}`]);
+    }
   }
   return { store, base, pages, scenarios, report: pages.map(p => ({ pageId: p.id, sections: p.sections.map(s => s.id), figures: p.figures.map(f => ({ id: f.id, scenarioId: f.scenarioId || `page-${p.id}`, checkpointId: f.checkpointId || 'default' })), unresolvedOperations: require('./section-plan').operationsOf(p).filter(o => !o.targetHint).map(o => o.id), prior: proposalFor(base.model.pages.find(old => old.id === p.id)) })) };
 }
@@ -105,4 +124,4 @@ function rollbackLayout({ projectRoot, config, id }) {
   return { ok: true, migrationId: id };
 }
 
-module.exports = { proposalFor, prepareLayouts, applyLayouts, rollbackLayout };
+module.exports = { proposalFor, prepareLayouts, applyLayouts, rollbackLayout, layoutStyle };

@@ -23,7 +23,7 @@ const BLOCKABLE = [
   'completion-unbound', 'completion-before-final-step', 'step-title-missing', 'ui-name-mismatch', 'before-image-target-mismatch',
   'screenshots-missing', 'step-image-missing', 'step-image-caption-unreviewed', 'image-timing-mismatch', 'goal-coverage-unreviewed',
   'image-unannotated', 'image-heavily-redacted', 'page-instructions-missing', 'ui-term-not-observed', 'steps-not-executed',
-  'demo-evidence-legacy', 'demo-recapture-blocked',
+  'demo-evidence-legacy', 'demo-recapture-blocked', 'section-too-broad', 'section-outcome-missing',
 ];
 
 const codeOf = (warning) => String(warning).split(':')[0];

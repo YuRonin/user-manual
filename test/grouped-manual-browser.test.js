@@ -6,6 +6,7 @@ const path = require('path');
 const http = require('http');
 const { spawnSync } = require('child_process');
 const sharp = require('sharp');
+const yaml = require('js-yaml');
 const fx = require('./fixtures');
 const { loadConfig } = require('../src/config/load');
 const { capturePage } = require('../src/evidence/capture-page');
@@ -27,28 +28,40 @@ const cli = (root, args) => {
     <section aria-label="登录方式" style="margin:40px;padding:30px"><button aria-label="NeoStar学校管理台账号登录">学校图标</button></section>
     <button onclick="document.getElementById('menu').hidden=false">技能与组合技</button>
     <section aria-label="个人模板"><button>选择模板</button></section><section aria-label="学校模板"><button>选择模板</button></section>
-    <section id="menu" hidden role="dialog" aria-label="教学能力"><button>组合技</button></section><div id="drop-zone" style="margin:30px;padding:30px;border:1px solid gray">拖到这里</div></body></html>`;
+    <section id="menu" hidden role="dialog" aria-label="教学能力"><button>组合技</button></section><div id="drop-zone" style="margin:30px;padding:30px;border:1px solid gray">拖到这里</div>
+    <section aria-label="验证码登录"><button onclick="fetch('/api/sms',{method:'POST'}).then(r=>r.json()).then(d=>{const el=document.getElementById('sent');el.textContent=d.message;el.hidden=false})">获取验证码</button><p id="sent" hidden></p></section></body></html>`;
   const server = http.createServer((req, res) => { res.setHeader('content-type', 'text/html; charset=utf-8'); res.end(html); });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   try {
     cli(root, ['init', '--base-url', `http://127.0.0.1:${server.address().port}`, '--audience', 'internal']);
     cli(root, ['inspect']);
+    // 模拟写操作：本地环境登记 Fixture 策略，短信接口由 mock Fixture 返回（真实服务器对任何路径都回 HTML，命中它会解析失败）
+    const configFile = path.join(root, '.manual', 'config.yaml');
+    fs.writeFileSync(configFile, yaml.dump({ ...yaml.load(fs.readFileSync(configFile, 'utf8')), fixtures: { environments: { local: { origins: ['http://127.0.0.1:*'] } } } }));
+    fs.mkdirSync(path.join(root, '.manual', 'fixtures'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.manual', 'fixtures', 'sms-demo.yaml'), yaml.dump({ schemaVersion: 1, id: 'sms-demo', version: 1, kind: 'mock', environments: ['local'], sideEffectClass: 'none', mock: { routes: [{ path: '/api/sms', method: 'POST', json: { message: '验证码已发送' } }] } }));
     const { config } = loadConfig(root);
     const state = path.join(root, '.manual');
     const op = (id, instruction, name, requirement = 'entry') => ({ id, instruction, evidenceRequirement: requirement, bindingIntent: { role: 'button', name } });
     const feature = (id, label, operation) => ({ id, label, priority: 'required', contentKind: 'operation', operations: [operation] });
     const page = { id: 'chat', title: 'AI 对话', purpose: '描述需求，选择教学能力。',
-      features: [feature('send', '发送', op('send-request', '点击「发送」。', '发送')), feature('upload', '附件', op('attach-file', '点击「添加文件附件」。', '添加文件附件')), feature('school', '学校登录', op('school-login', '点击学校账号登录入口。', 'NeoStar学校管理台账号登录')), feature('combo', '组合技', op('choose-combo', '点击「组合技」。', '组合技', 'state'))],
-      sections: [{ id: 'conversation', title: '开始对话', goal: '描述需求并发送。', featureRefs: ['send'], figureRefs: ['input'] }, { id: 'materials', title: '添加资料', goal: '添加参考资料。', featureRefs: ['upload'], figureRefs: ['attachments'] }, { id: 'school', title: '学校账号登录', goal: '找到学校登录入口。', featureRefs: ['school'], figureRefs: ['school-entry'] }, { id: 'abilities', title: '使用教学能力', goal: '选择组合技。', featureRefs: ['combo'], figureRefs: ['combo-menu'] }],
-      figures: [{ id: 'input', sectionId: 'conversation', operationRefs: ['send-request'], caption: '发送需求的入口', purpose: 'entry', frame: { mode: 'region', target: { role: 'region', name: '对话输入区' } } }, { id: 'attachments', sectionId: 'materials', operationRefs: ['attach-file'], caption: '添加附件', purpose: 'entry', frame: { mode: 'auto' } }, { id: 'school-entry', sectionId: 'school', operationRefs: ['school-login'], caption: '学校登录入口', purpose: 'entry', frame: { mode: 'auto' } }, { id: 'combo-menu', sectionId: 'abilities', operationRefs: ['choose-combo'], caption: '展开后的组合技菜单', purpose: 'state', scenarioId: 'chat-abilities', frame: { mode: 'region', target: { role: 'dialog', name: '教学能力' } } }],
+      features: [feature('send', '发送', op('send-request', '点击「发送」。', '发送')), feature('upload', '附件', op('attach-file', '点击「添加文件附件」。', '添加文件附件')), feature('school', '学校登录', op('school-login', '点击学校账号登录入口。', 'NeoStar学校管理台账号登录')), feature('combo', '组合技', op('choose-combo', '点击「组合技」。', '组合技', 'state')), feature('sms', '获取验证码', { ...op('get-code', '点击「获取验证码」。', '获取验证码'), outcome: '页面提示验证码已发送。', outcomeFigure: 'code-sent' })],
+      sections: [{ id: 'conversation', title: '开始对话', goal: '描述需求并发送。', featureRefs: ['send'], figureRefs: ['input'] }, { id: 'materials', title: '添加资料', goal: '添加参考资料。', featureRefs: ['upload'], figureRefs: ['attachments'] }, { id: 'school', title: '学校账号登录', goal: '找到学校登录入口。', featureRefs: ['school'], figureRefs: ['school-entry'] }, { id: 'abilities', title: '使用教学能力', goal: '选择组合技。', featureRefs: ['combo'], figureRefs: ['combo-menu'] }, { id: 'sms', title: '获取短信验证码', goal: '用验证码登录时先获取验证码。', featureRefs: ['sms'], figureRefs: ['sms-entry', 'code-sent'], tips: ['号码填错时重新输入后再获取。'] }],
+      figures: [{ id: 'input', sectionId: 'conversation', operationRefs: ['send-request'], caption: '发送需求的入口', purpose: 'entry', frame: { mode: 'region', target: { role: 'region', name: '对话输入区' } } }, { id: 'attachments', sectionId: 'materials', operationRefs: ['attach-file'], caption: '添加附件', purpose: 'entry', frame: { mode: 'auto' } }, { id: 'school-entry', sectionId: 'school', operationRefs: ['school-login'], caption: '学校登录入口', purpose: 'entry', frame: { mode: 'auto' } }, { id: 'combo-menu', sectionId: 'abilities', operationRefs: ['choose-combo'], caption: '展开后的组合技菜单', purpose: 'state', scenarioId: 'chat-abilities', frame: { mode: 'region', target: { role: 'dialog', name: '教学能力' } } }, { id: 'sms-entry', sectionId: 'sms', operationRefs: ['get-code'], caption: '获取验证码的入口', purpose: 'entry', frame: { mode: 'auto' } }, { id: 'code-sent', sectionId: 'sms', operationRefs: [], caption: '验证码已发送', purpose: 'state', scenarioId: 'chat-sms-sent', frame: { mode: 'auto' } }],
+      faq: [{ id: 'no-sms', question: '收不到验证码怎么办？', answer: '确认号码无误后重新获取。' }],
     };
     const scenario = { schemaVersion: 1, id: 'chat-abilities', userTaskId: null, environment: 'local', authProfile: 'anonymous', data: { mode: 'live' }, entry: { pageId: 'chat' }, expected: { httpStatuses: [200], state: 'normal' }, setup: [{ type: 'click', target: { role: 'button', name: '技能与组合技' }, risk: 'read' }], checkpoints: [{ id: 'default', pageId: 'chat', afterStepId: null, assertions: [{ id: 'menu-visible', type: 'visible', target: { role: 'dialog', name: '教学能力' } }], capture: { mode: 'viewport', annotations: [] } }] };
-    const payload = { pages: [page], scenarios: [scenario] };
+    const smsScenario = { schemaVersion: 1, id: 'chat-sms-sent', userTaskId: null, environment: 'local', authProfile: 'anonymous', data: { mode: 'fixture', fixture: 'sms-demo' }, entry: { pageId: 'chat' }, expected: { httpStatuses: [200], state: 'normal' }, setup: [{ type: 'click', target: { role: 'button', name: '获取验证码' }, risk: 'write', mocked: true }], checkpoints: [{ id: 'default', pageId: 'chat', afterStepId: null, assertions: [{ id: 'code-sent', type: 'visible', target: { selector: '#sent' } }], capture: { mode: 'viewport', annotations: [] } }] };
+    const unbacked = { ...smsScenario, id: 'chat-sms-unbacked', data: { mode: 'fixture', fixture: 'missing-fixture' } };
+    assert.throws(() => prepareLayouts({ projectRoot: root, config, payload: { pages: [{ ...page, figures: page.figures.map(f => f.id === 'code-sent' ? { ...f, scenarioId: unbacked.id } : f) }], scenarios: [scenario, unbacked] } }), e => e.code === 'invalid-manual-layout', 'mocked writes need a registered mock fixture');
+    const payload = { pages: [page], scenarios: [scenario, smsScenario] };
     assert(prepareLayouts({ projectRoot: root, config, payload }).report.length);
     const migration = applyLayouts({ projectRoot: root, config, payload });
     assert(applyLayouts({ projectRoot: root, config, payload }).idempotent);
     const initial = await capturePage({ projectRoot: root, config, pageId: 'chat' });
-    assert.equal(initial.record.annotationProof.figures.length, 3);
+    assert.equal(initial.record.annotationProof.figures.length, 4);
+    // 标注号即小节步骤号：每个小节都只有一步，都画 1
+    assert(initial.record.annotationProof.figures.every(f => f.annotationRefs.every(r => r.label === '1')));
     assert(initial.record.annotationProof.bindings.every(b => b.status === 'verified'));
     assert(initial.record.semantic.items.some(i => i.role === 'textbox' && i.name === '教学需求' && i.resolution === 'unique'));
     assert(initial.record.semantic.items.some(i => i.role === 'fileinput' && i.name === '资料文件' && i.resolution === 'unique'));
@@ -94,14 +107,27 @@ const cli = (root, args) => {
     assert(crops.get('input')?.width < fullWidth, 'region figure is still cropped to its named region');
     for (const image of initial.record.artifacts.filter(a => a.kind === 'published')) assert((await sharp(path.join(root, image.path)).metadata()).width > 0);
     const draftMissing = draftPage({ projectRoot: root, config, pageId: 'chat' });
-    assert.equal(draftMissing.pack.evidenceCoverage.total, 4);
+    assert.equal(draftMissing.pack.evidenceCoverage.total, 5);
+    assert(draftMissing.pack.evidenceCoverage.errors.some(e => e.code === 'manual-outcome-unproven'), 'the outcome needs its state figure');
     assert.throws(() => preparePageFinal({ projectRoot: root, config, pageId: 'chat' }), e => e.code === 'manual-operation-uncovered');
     const resolved = require('../src/scenarios/store').readScenario(state, scenario.id).scenario;
     const menu = await capturePage({ projectRoot: root, config, pageId: 'chat', options: { scenario: resolved } });
     assert(menu.record.annotationProof.figures[0].stateVerified);
+    const smsResolved = require('../src/scenarios/store').readScenario(state, smsScenario.id).scenario;
+    const sms = await capturePage({ projectRoot: root, config, pageId: 'chat', options: { scenario: smsResolved } });
+    assert(sms.record.annotationProof.figures[0].stateVerified, 'mocked write reaches the outcome state');
+    assert.equal(sms.record.provenance.mode, 'simulated');
+    assert.deepStrictEqual(sms.record.privacy.demo.mock.routes, [{ rule: 'POST /api/sms', hits: 1 }], 'the write was answered by the fixture, not the server');
     const draft = draftPage({ projectRoot: root, config, pageId: 'chat' });
     assert(draft.pack.evidenceCoverage.ok);
-    assert.equal(draft.pack.artifacts.length, 4);
+    assert.equal(draft.pack.artifacts.length, 6);
+    // 一组编号步骤 + 截图：说明只写一次，结果缩进在步骤下，图在步骤后，提示与常见问题各归其位
+    assert.equal(draft.markdown.split('点击「获取验证码」。').length - 1, 1, 'no legend repeats the step under the figure');
+    assert(/^1\. 点击「获取验证码」。\n\n {3}页面提示验证码已发送。$/m.test(draft.markdown));
+    assert(draft.markdown.indexOf('1. 点击「获取验证码」') < draft.markdown.indexOf('![获取验证码的入口]'));
+    assert(draft.markdown.indexOf('![验证码已发送]') < draft.markdown.indexOf('> 提示：号码填错时重新输入后再获取。'));
+    assert(draft.markdown.includes('截图中的数据为示例数据'), 'mocked screenshots carry the sample-data note');
+    assert(/## 常见问题\n\n\*\*收不到验证码怎么办？\*\*/.test(draft.markdown));
     const store = require('../src/store/project').createProjectStore({ stateDirAbs: state, docsOutputDir: config.docs.outputDir });
     const savedPage = store.load().model.pages.find(p => p.id === 'chat');
     const newInstruction = '填写需求后点击「发送」。';
@@ -120,9 +146,11 @@ const cli = (root, args) => {
       const live = await require('../src/verify/live').verifyLive({ projectRoot: root, config, target: { type: 'page', id: 'chat' }, session, drift: false });
       assert.equal(live.result, 'passed', JSON.stringify(live.checks));
       assert(live.checks.some(c => c.id.includes('choose-combo') && c.outcome === 'passed'), 'live verify must check expanded menu binding');
+      const liveSms = await require('../src/verify/live').verifyLive({ projectRoot: root, config, target: { type: 'page', id: 'chat', scenarioId: 'chat-sms-sent' }, session, drift: false });
+      assert.equal(liveSms.result, 'passed', 'live verify replays mocked writes with the same fixture routes: ' + JSON.stringify(liveSms.checks));
     } finally { await session.close(); }
     const derived = await rederiveCaptures({ projectRoot: root, config, captureIds: [initial.record.id] });
-    assert.equal(derived.records[0].record.annotationProof.figures.length, 3);
+    assert.equal(derived.records[0].record.annotationProof.figures.length, 4);
     fs.appendFileSync(path.join(root, 'app/chat/page.tsx'), '\n// Source changed after the grouped captures.\n');
     cli(root, ['inspect']);
     cli(root, ['describe', '--id', 'chat', '--title', 'AI 对话', '--purpose', '描述需求，选择教学能力。']);
@@ -130,6 +158,7 @@ const cli = (root, args) => {
     assert.throws(() => preparePageFinal({ projectRoot: root, config, pageId: 'chat' }), e => e.code === 'draft-stale', 'existing grouped drafts cannot publish after source reanalysis');
     rollbackLayout({ projectRoot: root, config, id: migration.migrationId });
     assert(!fs.existsSync(path.join(state, 'scenarios/chat-abilities.yaml')));
+    assert(!fs.existsSync(path.join(state, 'scenarios/chat-sms-sent.yaml')));
     console.log('grouped-manual-browser: capture, crop, state, publication, site, rederive, rollback passed');
   } finally {
     await new Promise(resolve => { server.closeAllConnections(); server.close(resolve); });

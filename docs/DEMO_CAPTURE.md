@@ -147,9 +147,10 @@ capture:
 
 - **数据读取**：页面声明了敏感区域时，每个数据接口都要有着落：用 Fixture 返回虚构数据（推荐），或者确认接口只返回公开数据、或其内容全部落在已声明的区域里之后登记到 `network.allow`。没有敏感区域的公开页面只记录，不阻断。
 - **页面采集**：只要有写请求被中止，截图就判为 `blocked`（`write-blocked`），服务端不会收到这个请求。
+- **页面 Scenario 的模拟写操作**：setup 动作标 `mocked: true`、Scenario 用 `kind: mock` 的 Fixture（`data.mode: fixture`）时，这一步发出的写请求由 Fixture 返回虚构响应，验证码、注册、重置密码这类流程可以拍到成功那一屏。`mocked: true` 不放宽守卫：Fixture 没覆盖到的写请求照样中止并判 `write-blocked`；数据模式不是 mock 时采集直接报 `mock-write-unbacked`。写法见 [分类图文手册](GROUPED_MANUAL.md)“用 mock 走完写操作流程”。
 - **任务采集**：动作触发了未授权的写请求时，步骤以 `demo-write-blocked` 失败，**不会把界面上的失败状态当作完成**。
 - **"删除""支付""提交"类步骤**：要么经 `writeAuthorization` 在登记的测试环境里真实执行；要么用 Fixture 拦截写请求，**同时**拦截之后的读取请求，在浏览器内完整模拟；两者都做不到时，保持 `risk: write` / `destructive`，让流程停在动作之前。
-- **`verify --live`**：回放时同样安装守卫（不装 Fixture 路由），只读步骤触发写请求也会被中止并记为失败。
+- **`verify --live`**：回放时同样安装守卫（不装 Fixture 路由），只读步骤触发写请求也会被中止并记为失败。例外是 setup 含 `mocked: true` 的页面 Scenario：回放时装上它的 mock 路由，否则流程走不到被验证的状态。
 
 ## verify 中的 Demo 结果
 

@@ -12,6 +12,36 @@ function operationsOf(page) {
   return (Array.isArray(page.features) ? page.features : []).filter(Boolean).flatMap((f) => (Array.isArray(f.operations) ? f.operations : []).filter(Boolean).map((op) => ({ ...op, featureId: featureId(f), featureLabel: f.label, contentKind: f.contentKind || 'operation', priority: f.priority })));
 }
 
+/**
+ * 小节里的步骤：按 featureRefs、再按功能内 operations 的顺序。
+ * 操作类功能的操作（以及被图片标注的说明类操作）从 1 连续编号——正文序号与截图标注号是同一个数；
+ * 其余说明类操作 step 为 null，正文写成步骤之后的普通段落。
+ */
+function sectionSteps(page, section) {
+  const features = new Map((Array.isArray(page.features) ? page.features : []).filter(Boolean).map((f) => [featureId(f), f]));
+  const annotated = new Set((Array.isArray(page.figures) ? page.figures : []).filter((f) => f?.sectionId === section?.id).flatMap((f) => (Array.isArray(f.operationRefs) ? f.operationRefs : [])));
+  const out = [];
+  let n = 0;
+  for (const id of Array.isArray(section?.featureRefs) ? section.featureRefs : []) {
+    const feature = features.get(id);
+    if (!feature) continue;
+    for (const op of (Array.isArray(feature.operations) ? feature.operations : []).filter(Boolean)) {
+      const numbered = (feature.contentKind || 'operation') === 'operation' || annotated.has(op.id);
+      out.push({ op: { ...op, featureId: id }, feature, step: numbered ? ++n : null });
+    }
+  }
+  return out;
+}
+
+/** 操作 id → 所在小节的步骤号（只含已收录、已编号的操作）。 */
+function stepNumbers(page) {
+  const out = new Map();
+  for (const section of Array.isArray(page.sections) ? page.sections : []) {
+    for (const item of sectionSteps(page, section)) if (item.step) out.set(item.op.id, item.step);
+  }
+  return out;
+}
+
 function validateLayout(page) {
   const errors = [];
   const issue = (path, message) => errors.push({ path, code: 'invalid-manual-layout', message });
@@ -38,6 +68,22 @@ function validateLayout(page) {
       if (op.risk !== undefined && !['read', 'write', 'destructive'].includes(op.risk)) issue(`${at}.risk`, '风险必须是 read / write / destructive');
       if (op.evidenceRequirement === 'result' && !op.taskId) issue(at, '结果验证须引用已有任务 taskId 和 claimId');
       if (op.evidenceRequirement === 'result' && !op.claimId) issue(at, '结果验证须引用 claimId');
+      // 结果说明（做完这一步看到什么）必须由同一小节的状态图证明
+      if (op.outcome !== undefined && (typeof op.outcome !== 'string' || !op.outcome.trim())) issue(`${at}.outcome`, '结果说明需要非空文字');
+      if (op.outcomeFigure !== undefined && !isSafeId(op.outcomeFigure)) issue(`${at}.outcomeFigure`, 'outcomeFigure 需要图片 id');
+      if (op.outcome !== undefined && op.outcomeFigure === undefined) issue(at, '结果说明需要 outcomeFigure 指向证明这一状态的状态图');
+      if (op.outcomeFigure !== undefined && op.outcome === undefined) issue(at, 'outcomeFigure 只能和 outcome 一起使用');
+    }
+  }
+  if (page.faq !== undefined) {
+    if (!Array.isArray(page.faq)) issue('faq', '常见问题需要数组');
+    else {
+      const ids = new Set();
+      page.faq.forEach((item, i) => {
+        if (!item || typeof item !== 'object' || !isSafeId(item.id) || ids.has(item.id)) { issue(`faq[${i}]`, '常见问题需要唯一安全 id'); return; }
+        ids.add(item.id);
+        for (const field of ['question', 'answer']) if (typeof item[field] !== 'string' || !item[field].trim()) issue(`faq[${i}].${field}`, `常见问题需要非空 ${field}`);
+      });
     }
   }
   if (page.sections === undefined && page.figures === undefined) return errors;
@@ -53,6 +99,7 @@ function validateLayout(page) {
     if (!Array.isArray(s.featureRefs) || !s.featureRefs.length) issue(at, '小节需要 featureRefs');
     for (const id of Array.isArray(s.featureRefs) ? s.featureRefs : []) if (!features.has(id) || ['skip', 'undecided'].includes(features.get(id).priority)) issue(`${at}.featureRefs`, `功能不存在、未确认或已跳过: ${id}`);
     if (!Array.isArray(s.figureRefs)) issue(at, '小节需要 figureRefs（无图概念小节可为空）');
+    if (s.tips !== undefined && (!Array.isArray(s.tips) || s.tips.some((t) => typeof t !== 'string' || !t.trim()))) issue(`${at}.tips`, '提示需要非空字符串数组');
   }
   for (const [i, fig] of (Array.isArray(page.figures) ? page.figures : []).entries()) {
     const at = `figures[${i}]`;
@@ -93,27 +140,58 @@ function validateLayout(page) {
       if (included.has(featureId(f)) && !(f.operations || []).length) issue('features', `已收录功能需要操作或显式无图说明: ${featureId(f)}`);
     }
     for (const op of operations.values()) if (included.has(op.featureId) && op.evidenceRequirement !== 'none' && ![...figures.values()].some((f) => f.operationRefs?.includes(op.id))) issue('figures', `已收录操作没有图片计划: ${op.id}`);
+    for (const op of operations.values()) {
+      if (op.outcomeFigure === undefined) continue;
+      const fig = figures.get(op.outcomeFigure);
+      const home = page.sections.find((s) => s.featureRefs.includes(op.featureId));
+      if (!fig || fig.purpose !== 'state' || !home || fig.sectionId !== home.id) issue(`operations.${op.id}.outcomeFigure`, `结果图须是同一小节的状态图（purpose: state）: ${op.outcomeFigure}`);
+    }
   }
   return errors;
+}
+
+/** 小节的步骤数与操作功能数上限：超过时多半混了几条子流程。 */
+const SECTION_MAX_STEPS = 6;
+const SECTION_MAX_FEATURES = 3;
+
+/**
+ * 分类计划的写法提示（不阻断，可用 quality.blockOn 升级）：
+ *   section-too-broad       编号步骤过多或操作功能过多：一节只讲一条读者能独立完成的子流程
+ *   section-outcome-missing 操作小节的最后一步没有结果说明：读者不知道做完会看到什么
+ */
+function layoutQuality(page) {
+  if (!grouped(page)) return [];
+  const warnings = [];
+  for (const section of page.sections) {
+    const steps = sectionSteps(page, section).filter((s) => s.step);
+    const operationFeatures = new Set(steps.filter((s) => (s.feature.contentKind || 'operation') === 'operation').map((s) => s.op.featureId));
+    if (steps.length > SECTION_MAX_STEPS || operationFeatures.size > SECTION_MAX_FEATURES) warnings.push(`section-too-broad:${section.id}`);
+    if (steps.length && !steps[steps.length - 1].op.outcome) warnings.push(`section-outcome-missing:${section.id}`);
+  }
+  return warnings;
 }
 
 function figuresFor(page, scenarioId, checkpointId = 'default') {
   return (page.figures || []).filter((f) => (f.scenarioId || defaultScenario(page)) === scenarioId && (f.checkpointId || 'default') === checkpointId);
 }
 
+// 标注号 = 操作在小节里的步骤号：读者看到图上的 ②，就是正文第 2 步。
 function layoutPlan(page, scenarioId, checkpointId = 'default') {
   const ops = new Map(operationsOf(page).map((op) => [op.id, op]));
+  const steps = stepNumbers(page);
   return figuresFor(page, scenarioId, checkpointId).flatMap((f) => f.operationRefs.map((id, index) => {
     const op = ops.get(id);
-    return { feature_id: op.featureId, operation_id: op.id, figure_id: f.id, section_id: f.sectionId, label: String(index + 1),
+    return { feature_id: op.featureId, operation_id: op.id, figure_id: f.id, section_id: f.sectionId, label: String(steps.get(id) ?? index + 1),
       priority: 'optional', target: op.targetHint || null, bindingIntent: op.bindingIntent || null,
       description: op.instruction, evidenceRequirement: op.evidenceRequirement, scenario: scenarioId };
   }));
 }
 
+// 标注号进入 layoutRevision：步骤顺序变了，旧图上的编号就对不上正文，需要重新派生或重采。
 function captureLayout(page) {
+  const steps = stepNumbers(page);
   return { operations: operationsOf(page).map(({ id, featureId: fid, targetHint, bindingIntent, evidenceRequirement, taskId, claimId }) => ({ id, featureId: fid, targetHint, bindingIntent, evidenceRequirement, taskId, claimId })),
-    figures: (page.figures || []).map(({ id, sectionId, operationRefs, scenarioId, checkpointId, frame, purpose }) => ({ id, sectionId, operationRefs, scenarioId, checkpointId, frame, purpose })) };
+    figures: (page.figures || []).map(({ id, sectionId, operationRefs, scenarioId, checkpointId, frame, purpose }) => ({ id, sectionId, operationRefs, scenarioId, checkpointId, frame, purpose, labels: (Array.isArray(operationRefs) ? operationRefs : []).map((op) => steps.get(op) ?? null) })) };
 }
 
 function bindingLayout(page) {
@@ -169,32 +247,55 @@ function documentCoverage(page, images, records, claims = []) {
     }
     if (!satisfied) add(op, `缺少 ${op.evidenceRequirement} 证据或图片/状态/绑定已失效`);
   }
-  return { ok: !errors.length, errors, links, total: required.length, verified: required.length - errors.length, percent: required.length ? (required.length - errors.length) / required.length * 100 : null };
+  // 结果说明：outcomeFigure 的最终图必须存在、状态在截图前后都复核通过
+  for (const op of required.filter((o) => o.outcome)) {
+    const fig = page.figures.find((f) => f.id === op.outcomeFigure);
+    const proven = fig && images.filter((i) => i.figureId === fig.id).some((image) => {
+      const record = records.find((r) => r.id === image.captureId);
+      const frame = record?.annotationProof?.figures?.find((f) => f.figureId === fig.id && f.part === (image.part || 1));
+      return record && record.layoutRevision === layoutRevision(page) && frame?.status === 'verified' && frame.stateVerified
+        && record.scenarioId === (fig.scenarioId || defaultScenario(page)) && record.checkpointId === (fig.checkpointId || 'default')
+        && record.validations?.some((v) => v.scope === 'scenario-state' && v.outcome === 'passed');
+    });
+    if (proven) links.push({ featureId: op.featureId, operationId: op.id, figureId: fig.id, sectionId: fig.sectionId, scope: 'outcome-observed' });
+    else errors.push({ code: 'manual-outcome-unproven', operationId: op.id, featureId: op.featureId, message: `${op.id}: 结果说明缺少已复核的状态图 ${op.outcomeFigure}` });
+  }
+  const uncovered = errors.filter((e) => e.code === 'manual-operation-uncovered').length;
+  return { ok: !errors.length, errors, links, total: required.length, verified: required.length - uncovered, percent: required.length ? (required.length - uncovered) / required.length * 100 : null };
 }
 
+// 正文与最终图的对应：步骤块的编号与顺序、图片所在小节、图上每个标注号等于对应操作的步骤号。
 function validateRenderedLayout(pack, markdown) {
   if (!pack?.sections?.length) return [];
   const { parseManual } = require('../generate/merge');
   const { extractFacts, compareFacts } = require('../generate/facts');
+  const { stepBlockId } = require('../generate/render');
   const actual = parseManual(markdown);
   const expected = parseManual(require('../generate/render').renderPage(pack));
+  const steps = stepNumbers(pack);
+  const numbers = (content) => [...String(content || '').matchAll(/^(\d+)\.\s/gm)].map(m => m[1]);
   const errors = [];
   for (const section of pack.sections) {
     const sectionId = `section.${section.id}`;
     const start = actual.order.indexOf(sectionId);
     const next = actual.order.findIndex((id, i) => i > start && id.startsWith('section.'));
+    const inside = (at) => at > start && (next < 0 || at < next);
     if (start < 0) errors.push({ code: 'manual-layout-mismatch', message: `正文缺少分类小节 ${section.id}` });
+    for (const feature of (pack.features || []).filter(f => section.featureRefs.includes(featureId(f)))) {
+      const id = stepBlockId(feature);
+      const block = actual.blocks.get(id);
+      if (!expected.blocks.has(id)) continue;
+      if (!block || !inside(actual.order.indexOf(id)) || JSON.stringify(numbers(block.content)) !== JSON.stringify(numbers(expected.blocks.get(id).content))) errors.push({ code: 'manual-layout-mismatch', message: `小节 ${section.id} 的步骤编号或顺序已变化（${id}）` });
+    }
     for (const artifact of pack.artifacts.filter(a => section.figureRefs.includes(a.figureId))) {
       const id = `figure.${artifact.figureId}.${artifact.part || 1}`;
-      const at = actual.order.indexOf(id);
       const block = actual.blocks.get(id);
-      if (!block || at <= start || (next >= 0 && at >= next) || !compareFacts(extractFacts(expected.blocks.get(id).content), extractFacts(block.content)).ok) errors.push({ code: 'manual-layout-mismatch', message: `图片 ${artifact.figureId} 的小节、操作说明或局部编号已变化` });
-      const labels = (artifact.annotationRefs || []).map(r => r.label);
-      const bodyLabels = [...String(block?.content || '').matchAll(/^\s*(\d+)\.\s/gm)].map(m => m[1]);
-      if (JSON.stringify(labels) !== JSON.stringify(bodyLabels)) errors.push({ code: 'manual-layout-mismatch', message: `图片 ${artifact.figureId} 的编号与最终图不一致` });
+      if (!block || !inside(actual.order.indexOf(id)) || !compareFacts(extractFacts(expected.blocks.get(id).content), extractFacts(block.content)).ok) errors.push({ code: 'manual-layout-mismatch', message: `图片 ${artifact.figureId} 的小节或位置已变化` });
+      const wrong = (artifact.annotationRefs || []).filter(r => r.operationId && String(steps.get(r.operationId)) !== String(r.label));
+      if (wrong.length) errors.push({ code: 'manual-layout-mismatch', message: `图片 ${artifact.figureId} 的标注号与正文步骤号不一致（${wrong.map(r => `${r.operationId}=${r.label}`).join('、')}），重新派生或重新采集` });
     }
   }
   return errors;
 }
 
-module.exports = { validateRenderedLayout, bindingLayout, bindingRevision, featureId, operationsOf, grouped, validateLayout, figuresFor, layoutPlan, captureLayout, layoutRevision, documentCoverage, defaultScenario };
+module.exports = { validateRenderedLayout, bindingLayout, bindingRevision, featureId, operationsOf, sectionSteps, stepNumbers, layoutQuality, grouped, validateLayout, figuresFor, layoutPlan, captureLayout, layoutRevision, documentCoverage, defaultScenario };

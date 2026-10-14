@@ -122,6 +122,12 @@ function buildTaskFactPack({ task, evidence, images, claims, language, entryPage
  */
 function buildPageFactPack({ page, image = null, images = null, language, headerComments = [], observedTerms = [] }) {
   templateFor(language);
+  const layout = require('../annotations/section-plan');
+  // 分类计划里读者可见的说明文字：步骤、结果、提示、常见问题。结果、提示与问答也是改写导语时可以复述的依据
+  const layoutTexts = page.sections?.length ? {
+    instructions: layout.operationsOf(page).map((o) => o.instruction),
+    results: [...layout.operationsOf(page).map((o) => o.outcome), ...page.sections.flatMap((s) => s.tips || []), ...(page.faq || []).flatMap((f) => [f.question, f.answer])].filter(Boolean),
+  } : { instructions: layout.operationsOf(page).map((o) => o.instruction), results: [] };
   const list = images?.length ? images : image ? [image] : [];
   const artifacts = list.map((item, index) => ({ id: `img-${index + 1}`, ...item }));
   const actions = (Array.isArray(page.detectedActions) ? page.detectedActions : []).filter(Boolean)
@@ -139,15 +145,15 @@ function buildPageFactPack({ page, image = null, images = null, language, header
     route: page.route,
     actions,
     guide: page.guide || [],
-    ...(page.sections?.length ? { sections: page.sections, figures: page.figures, features: page.features } : {}),
-    quality: { completeness: page.sections?.length || page.guide?.length ? 'instructions' : 'overview-only', warnings: page.sections?.length || page.guide?.length ? [] : ['page-instructions-missing'] },
+    ...(page.sections?.length ? { sections: page.sections, figures: page.figures, features: page.features, faq: page.faq || [], results: layoutTexts.results } : {}),
+    quality: { completeness: page.sections?.length || page.guide?.length ? 'instructions' : 'overview-only', warnings: page.sections?.length || page.guide?.length ? layout.layoutQuality(page) : ['page-instructions-missing'] },
     artifacts,
     headerComments,
     blocks: { intro: { kind: 'intro', default: page.purpose || '' } },
-    allowedUiTerms: [...new Set([...actions.flatMap((a) => uiTerms(a.text)), ...uiTerms(page.purpose), ...(page.guide || []).flatMap(g => uiTerms(g.instruction)), ...require('../annotations/section-plan').operationsOf(page).flatMap(o => uiTerms(o.instruction))])],
+    allowedUiTerms: [...new Set([...actions.flatMap((a) => uiTerms(a.text)), ...uiTerms(page.purpose), ...(page.guide || []).flatMap(g => uiTerms(g.instruction)), ...[...layoutTexts.instructions, ...layoutTexts.results].flatMap(uiTerms)])],
     uiEvidence: uiEvidence({
       observed: observedTerms,
-      declared: [...actions.flatMap((a) => uiTerms(a.text)), ...uiTerms(page.purpose), ...(page.guide || []).flatMap((g) => uiTerms(g.instruction)), ...require('../annotations/section-plan').operationsOf(page).flatMap(o => uiTerms(o.instruction))],
+      declared: [...actions.flatMap((a) => uiTerms(a.text)), ...uiTerms(page.purpose), ...(page.guide || []).flatMap((g) => uiTerms(g.instruction)), ...[...layoutTexts.instructions, ...layoutTexts.results].flatMap(uiTerms)],
     }),
   });
 }

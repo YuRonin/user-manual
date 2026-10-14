@@ -343,8 +343,11 @@ async function verifyLive({ projectRoot, config, target, session, timeoutMs = DE
     }
   };
   const work = async (provider) => {
-    // Demo 网络守卫：在线回放同样不允许写请求到达服务端（不装 Fixture 路由：这里验证的是线上真实行为）
-    if (provider.installDemoGuard) await provider.installDemoGuard({ baseUrl: config.project.baseUrl, demo: mergeDemo(config.capture?.demo, null) });
+    // Demo 网络守卫：在线回放同样不允许写请求到达服务端（不装 Fixture 路由：这里验证的是线上真实行为）。
+    // 例外：setup 含 mocked: true 的 Scenario 本来就靠 mock Fixture 走完写操作，回放时装同一组路由
+    const mocked = (scenario.setup || []).some((action) => action?.mocked === true);
+    const routes = mocked ? require('../scenarios/fixtures').prepareScenarioData({ stateDirAbs, config, scenario }).routes : [];
+    if (provider.installDemoGuard) await provider.installDemoGuard({ baseUrl: config.project.baseUrl, routes, demo: mergeDemo(config.capture?.demo, null) });
     const navigation = await openEntry(provider, url, expected, checks, auth);
     if (!navigation) return { stepRecords: [] };
     checks.push(...await collectAssertions(provider, identityAssertions, { scope: 'page-identity', idPrefix: `${target.id}:default`, timeoutMs }));

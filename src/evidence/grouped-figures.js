@@ -52,7 +52,8 @@ async function deriveGrouped({ captured, rawPath, sanitizedPath, publishedPath, 
       const origin = { x: pixels.x / dpr, y: pixels.y / dpr };
       const shift = r => ({ ...r, x: r.x - origin.x, y: r.y - origin.y });
       const localMasks = redactions.map(r => ({ ...r, rect: shift(r.rect) }));
-      const local = group.map((t, i) => ({ ...t, part, label: String(i + 1), rect: shift(t.rect) }));
+      // 标注号沿用计划里的步骤号（正文第几步就画几号）；没有计划号的旧数据按图内顺序补
+      const local = group.map((t, i) => ({ ...t, part, label: t.label || String(i + 1), rect: shift(t.rect) }));
       const size = { width: pixels.width / dpr, height: pixels.height / dpr };
       const layout = layoutAnnotations(local, size, theme, { avoid: localMasks });
       if (!layout.ok) throw Object.assign(new Error(`图片 ${figure.id}: ${layout.errors.join('；')}`), { code: 'annotation-layout-crowded' });

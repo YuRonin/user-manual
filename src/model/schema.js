@@ -34,7 +34,7 @@ const SHA256_RE = /^(sha256:)?[0-9a-f]{64}$/;
 const KNOWN_FIELDS = {
   page: ['schemaVersion', 'id', 'revision', 'lifecycle', 'title', 'purpose', 'route', 'dynamic', 'params', 'routeBindings',
     'entry', 'source', 'dependencies', 'includeInManual', 'detectedActions', 'features', 'guide', 'states', 'identityAssertions', 'confidence',
-    'browser', 'status', 'analysis', 'latestCaptureId', 'variants', 'sections', 'figures'],
+    'browser', 'status', 'analysis', 'latestCaptureId', 'variants', 'sections', 'figures', 'faq'],
   userTask: ['schemaVersion', 'id', 'revision', 'title', 'goal', 'entryPage', 'priority', 'preconditions', 'readerPreconditions', 'risk', 'status',
     'approval', 'environment', 'fixtures', 'writeAuthorization', 'steps', 'branches', 'relatedTasks', 'completion', 'evidence', 'evidenceManifest',
     'capturePlan', 'captureIds', 'lastCapture', 'stale', 'lastVerification', 'params', 'authProfile',
@@ -551,13 +551,18 @@ function validateScenario(scenario, context = {}) {
   // 不满足时报 auth-identity-mismatch，绝不改用其他身份重试
   if (scenario.expected?.roleAssertions !== undefined) validateAssertions(c, scenario.expected.roleAssertions, 'expected.roleAssertions');
   // 页面 setup（B5-01）：打开页面后、截图前执行的只读动作（展开菜单、切换标签、打开弹窗）；
-  // 有副作用的动作不能放在这里（重拍会重复执行），写操作只能走任务的 writeAuthorization
+  // 有副作用的动作不能放在这里（重拍会重复执行），写操作只能走任务的 writeAuthorization。
+  // 例外：mocked: true 的动作发出的写请求由本 Scenario 的 mock Fixture 在浏览器内拦截（data.mode: fixture），
+  // 服务端收不到；漏写 mock 的写请求仍会被 Demo 网络守卫中止、截图判为 write-blocked。
   if (scenario.setup !== undefined) {
     if (!Array.isArray(scenario.setup)) c.error('setup', 'invalid-setup', 'setup 需要是动作数组。');
     else scenario.setup.forEach((action, i) => {
       validateAction(c, action, `setup[${i}]`);
       const label = [action?.target?.name, action?.target?.text, action?.target?.label].filter(Boolean).join(' ');
-      if (isObject(action) && action.type !== 'inspect' && action.type !== 'hover' && SETUP_RISKY_RE.test(label)) c.error(`setup[${i}]`, 'setup-write-risk', `setup 动作「${label}」看起来有副作用；setup 只能是展开、切换、打开等只读动作。`);
+      const mocked = isObject(action) && action.mocked !== undefined;
+      if (mocked && action.mocked !== true) c.error(`setup[${i}].mocked`, 'invalid-setup', 'mocked 只能是 true。');
+      if (mocked && scenario.data?.mode !== 'fixture') c.error(`setup[${i}].mocked`, 'mock-write-unbacked', 'mocked: true 的动作需要 Scenario 使用 mock Fixture（data.mode: fixture）拦截写请求。');
+      if (isObject(action) && action.mocked !== true && action.type !== 'inspect' && action.type !== 'hover' && SETUP_RISKY_RE.test(label)) c.error(`setup[${i}]`, 'setup-write-risk', `setup 动作「${label}」看起来有副作用；setup 只能是展开、切换、打开等只读动作；由 mock Fixture 拦截的写操作标 mocked: true。`);
       if (isObject(action) && action.expect !== undefined) validateAssertions(c, action.expect, `setup[${i}].expect`);
     });
   }

@@ -106,8 +106,8 @@ function layoutContent(ctx, task) {
   return {
     inputHash: revisionOf({ task: task.inputHash, files }), files,
     facts: { page: require('../model/revision').pickDefinitionFields('page', page), migration: require('../annotations/layout-migration').proposalFor(page), schemaReference: 'docs/GROUPED_MANUAL.md' },
-    output: { type: 'manual-layout', allowedFields: ['title', 'purpose', 'features', 'sections', 'figures', 'states', 'variants', 'scenarios'], shape: '{ "features": [...], "sections": [...], "figures": [...], "scenarios": [...] }' },
-    instructions: '阅读 docs/GROUPED_MANUAL.md，按读者目标分类。保留每项旧 guide 的 feature.guideId 和功能身份，不删减原有操作。每个已收录功能用 operations 定义动作及证据需求；图片引用操作、Scenario、检查点。默认每张 1～3 个标注；图片保留原尺寸截图，用不同小节的标注区分重点，frame 一般用 auto，只有读者确实只需看某个区域时才用 region。菜单、拖放、产物使用不同真实状态。显式 targetHint 是线索，无法确定时用 bindingIntent 描述待选控件。concept/reference 的无图说明必须有来源和理由。只提交源码支持的事实，风险动作沿用任务授权；新 Scenario 只能做 read/local setup，不能执行业务写入。不能修改已有 Scenario，使用新 id 或引用已有定义。',
+    output: { type: 'manual-layout', allowedFields: ['title', 'purpose', 'features', 'sections', 'figures', 'states', 'variants', 'scenarios', 'faq'], shape: '{ "features": [...], "sections": [...], "figures": [...], "scenarios": [...], "faq": [...] }' },
+    instructions: '阅读 docs/GROUPED_MANUAL.md 与 references/manual-writing-style.md 第五节“分类页面”，站在读者角度按任务流程分节：一节只讲一条读者能独立完成的子流程（如「使用密码登录」「使用短信验证码登录」「找回密码」各成一节），goal 写一句使用场景；步骤按读者操作顺序排列，正文序号即截图标注号，不要重复描述；每节最后一步用 outcome 写清做完看到什么、怎么判断成功，并用 outcomeFigure 指向证明该状态的状态图；不属于主流程的提示写进 sections[].tips，常见问题写进 faq。验证码、注册、重置密码等写操作用 mock Fixture 拦截，setup 动作标 mocked: true，把流程拍到成功状态。保留每项旧 guide 的 feature.guideId 和功能身份，不删减原有操作。每个已收录功能用 operations 定义动作及证据需求；图片引用操作、Scenario、检查点。默认每张 1～3 个标注；图片保留原尺寸截图，用不同小节的标注区分重点，frame 一般用 auto，只有读者确实只需看某个区域时才用 region。菜单、拖放、产物使用不同真实状态。显式 targetHint 是线索，无法确定时用 bindingIntent 描述待选控件。concept/reference 的无图说明必须有来源和理由。只提交源码支持的事实，风险动作沿用任务授权；新 Scenario 的 setup 只能是 read/local 动作，或由 kind: mock 的 Fixture 拦截的 mocked: true 写操作，不能真实执行业务写入。不能修改已有 Scenario，使用新 id 或引用已有定义。',
   };
 }
 
@@ -152,9 +152,10 @@ function requestModel(ctx, kind, task, payload = null) {
     responsePath: rel(ctx.projectRoot, responseFileFor(ctx.runDir, requestId)),
   };
   if (kind === 'layout') {
-    const reference = 'docs/GROUPED_MANUAL.md';
-    const file = path.resolve(__dirname, '..', '..', reference);
-    if (fs.existsSync(file)) request.files.push({ path: reference, sha256: sha256Hex(fs.readFileSync(file)), root: 'tool' });
+    for (const reference of ['docs/GROUPED_MANUAL.md', STYLE_GUIDE]) {
+      const file = path.resolve(__dirname, '..', '..', reference);
+      if (fs.existsSync(file)) request.files.push({ path: reference, sha256: sha256Hex(fs.readFileSync(file)), root: 'tool' });
+    }
   }
   fs.mkdirSync(dir, { recursive: true });
   writeFileAtomic(requestFileFor(ctx.runDir, requestId), JSON.stringify(request, null, 2) + '\n');
