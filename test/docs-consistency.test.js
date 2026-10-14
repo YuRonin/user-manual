@@ -2,7 +2,7 @@
 
 /*
  * P3-08：用户文档与实际 CLI 一致。
- *   - 注册表里的每个命令都出现在 SKILL.md 与 README.md，且有 --help
+ *   - 注册表里的每个命令都出现在 SKILL.md 与使用文档中，且有 --help
  *   - 文档里写到的 update / verify / gc / capture 选项都是命令真实接受的参数
  *   - 不再把已实现的命令标为"计划中"，不再承诺"同一页面截图字节一致"
  */
@@ -25,7 +25,7 @@ function test(name, fn) {
   catch (error) { failures.push({ name, error }); process.stdout.write(`  ✗ ${name}\n    ${error.stack || error}\n`); }
 }
 
-const docs = { skill: read('SKILL.md'), readme: read('README.md'), runtime: read('docs/RUNTIME.md'), migration: read('docs/MIGRATION.md'), architecture: read('docs/ARCHITECTURE.md') };
+const docs = { skill: read('SKILL.md'), readme: read('README.md'), gettingStarted: read('docs/GETTING_STARTED.md'), usage: read('docs/USAGE.md'), runtime: read('docs/RUNTIME.md'), migration: read('docs/MIGRATION.md'), architecture: read('docs/ARCHITECTURE.md') };
 
 function camel(flag) {
   return flag.replace(/^--/, '').replace(/-([a-z])/g, (_, c) => c.toUpperCase());
@@ -44,7 +44,7 @@ test('命令按分组出现在文档中：主流程 / 任务 / Run 在 SKILL.md�
       assert.ok(!new RegExp(`manual ${command.name}\\b`).test(docs.skill), `SKILL.md 不应引导使用兼容入口 ${command.name}`);
       assert.ok(docs.migration.includes(command.name), `MIGRATION.md 缺少兼容入口 ${command.name} 的替代说明`);
     }
-    assert.ok(docs.readme.includes(command.name), `README.md 缺少 ${command.name}`);
+    assert.ok(`${docs.gettingStarted}\n${docs.usage}`.includes(command.name), `使用文档缺少 ${command.name}`);
     const help = spawnSync(process.execPath, [CLI, command.name, '--help'], { encoding: 'utf8' });
     assert.strictEqual(help.status, 0, `${command.name} --help`);
   }

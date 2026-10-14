@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#152c4b"/><stop offset="1" stop-color="#081329"/></linearGradient>
+    <linearGradient id="glow" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#67e8d4"/><stop offset="1" stop-color="#54a9ff"/></linearGradient>
+  </defs>
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <circle cx="1120" cy="80" r="310" fill="#1c3d60" opacity=".45"/>
+  <circle cx="1220" cy="590" r="250" fill="#12413f" opacity=".35"/>
+  <path d="M0 576h1280" stroke="#315073"/>
+  <rect x="80" y="100" width="124" height="124" rx="28" fill="#173250" stroke="#3c6482"/>
+  <rect x="103" y="125" width="78" height="66" rx="10" fill="none" stroke="#e5f2ff" stroke-width="5"/>
+  <path d="M105 143h74M118 158h29M118 170h20" stroke="#e5f2ff" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="166" cy="177" r="18" fill="#67e8d4"/>
+  <path d="m158 177 6 6 11-13" fill="none" stroke="#102640" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="80" y="318" fill="#f0f7ff" font-family="Arial, sans-serif" font-size="86" font-weight="700">DocWitness</text>
+  <text x="84" y="376" fill="#b5c9df" font-family="Arial, sans-serif" font-size="31">Documentation backed by real browser evidence.</text>
+  <rect x="80" y="428" width="600" height="4" rx="2" fill="url(#glow)"/>
+  <text x="84" y="486" fill="#67e8d4" font-family="Arial, sans-serif" font-size="24">Observe  ·  Document  ·  Verify  ·  Update</text>
+  <text x="84" y="603" fill="#8daac5" font-family="Arial, sans-serif" font-size="19">AI-powered living documentation for Next.js</text>
+</svg>

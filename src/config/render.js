@@ -46,7 +46,7 @@ function renderConfigYaml(config, meta = {}) {
   const generatedAt = meta.generatedAt || new Date().toISOString();
   const L = [];
 
-  L.push('# Living User Manual —— 项目级配置');
+  L.push('# DocWitness —— 项目级配置');
   L.push('# 由 `manual init` 生成，可手工编辑；重跑 init 会覆盖（默认先备份为 config.yaml.bak）。');
   L.push(`# 生成时间: ${generatedAt}`);
   L.push('');

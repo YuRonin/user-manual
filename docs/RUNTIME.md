@@ -284,9 +284,3 @@ manual gc --apply --expect <planHash>          # 项目锁内重新核对后删�
 3. **写授权**：`writeAuthorization.expiresAt` 在运行前检查，临近到期时规划会给 `write-authorization-expiring` 提示；续期后按审批规则重新批准。
 4. **开发服务器**：`next dev` 下 `.manual/` 与 `docs/` 的写入不能触发持续热更新（Tailwind 的 `@source not` 等项目侧配置由项目决定，工具不改）；Next.js 开发指示器（`nextjs-portal`）在截图时自动隐藏，`doctor` 会提示建议关闭 `devIndicators`。
 5. **认证**：`manual auth check` 确认各身份可用；身份不符报 `auth-identity-mismatch`，不会改用其他身份。
-
-## 11. 已知产品侧绕法（记录退出条件）
-
-| 绕法 | 原因 | 责任方 | 退出条件 |
-|---|---|---|---|
-| 重采 `edit-export-artifact` 前准备一个新建的 v1 产物 | NeoAgent 对话内产物二次编辑返回 409（`ArtifactShell` 未传 `baseVersion`），属于产品缺陷，不是本工具的问题 | NeoAgent 产品仓库 | 产品修复合入后，用同一任务复测二次编辑；通过后删除这条测试数据准备步骤 |

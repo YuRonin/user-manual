@@ -146,7 +146,7 @@ test('仅页面流程：apply 使用同一份计划的 ID；旧 verified 降为 
   const config = readYaml(root, '.manual/config.yaml');
   assert.strictEqual(config.version, 2);
   assert.strictEqual(config.project.id, plan.projectId);
-  assert.match(fs.readFileSync(path.join(root, '.manual/config.yaml'), 'utf8'), /# Living User Manual/, '保留原配置注释');
+  assert.match(fs.readFileSync(path.join(root, '.manual/config.yaml'), 'utf8'), /# DocWitness/, '保留项目配置标题');
 
   const chat = readYaml(root, '.manual/pages/chat.yaml');
   assert.strictEqual(chat.schemaVersion, 3);

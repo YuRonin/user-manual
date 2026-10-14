@@ -1,7 +1,8 @@
 {
-  "name": "living-manual",
+  "name": "docwitness",
   "version": "0.1.0",
-  "description": "为 Web 项目生成并持续维护图文用户手册的工具链（Living User Manual）",
+  "description": "DocWitness：基于真实浏览器证据生成并持续维护图文用户手册",
+  "license": "MIT",
   "private": true,
   "type": "commonjs",
   "bin": {

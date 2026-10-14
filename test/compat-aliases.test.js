@@ -31,14 +31,16 @@ try {
     assert.ok(fs.existsSync(skill), skill);
     assert.ok(fs.existsSync(command), command);
     assert.match(fs.readFileSync(skill, 'utf8'), new RegExp(`name: ${name}`));
+    assert.match(fs.readFileSync(skill, 'utf8'), /DocWitness/);
     assert.match(fs.readFileSync(command, 'utf8'), new RegExp(`manual\\.js" ${name.replace(/^manual-/, '')}`));
+    assert.match(fs.readFileSync(command, 'utf8'), /DocWitness/);
   }
   assert.strictEqual(output.installed.length, 18);
 
-  const readme = fs.readFileSync(path.resolve(__dirname, '..', 'README.md'), 'utf8');
+  const gettingStarted = fs.readFileSync(path.resolve(__dirname, '..', 'docs', 'GETTING_STARTED.md'), 'utf8');
   const architecture = fs.readFileSync(path.resolve(__dirname, '..', 'docs', 'ARCHITECTURE.md'), 'utf8');
-  assert.match(readme, /manual auth login/);
-  assert.match(readme, /auth-missing/);
+  assert.match(gettingStarted, /manual auth login/);
+  assert.match(gettingStarted, /auth-missing/);
   assert.match(architecture, /%LOCALAPPDATA%/);
   assert.doesNotMatch(architecture, /登录态：.*需要持久化 context/);
 

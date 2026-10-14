@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-labelledby="title desc">
+  <title id="title">DocWitness</title>
+  <desc id="desc">A browser window with a documented page and a verification check</desc>
+  <defs>
+    <linearGradient id="surface" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#152c4b"/>
+      <stop offset="1" stop-color="#0b1730"/>
+    </linearGradient>
+  </defs>
+  <rect width="120" height="120" rx="27" fill="url(#surface)"/>
+  <rect x="21" y="27" width="78" height="64" rx="11" fill="none" stroke="#e5f2ff" stroke-width="5"/>
+  <path d="M23 44h74" stroke="#e5f2ff" stroke-width="5"/>
+  <circle cx="32" cy="36" r="2.5" fill="#67e8d4"/>
+  <circle cx="41" cy="36" r="2.5" fill="#67e8d4"/>
+  <path d="M37 57h31M37 68h22" stroke="#a6bdd5" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="79" cy="75" r="18" fill="#67e8d4"/>
+  <path d="m71 75 6 6 11-13" fill="none" stroke="#102640" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

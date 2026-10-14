@@ -2,7 +2,7 @@
 'use strict';
 
 /*
- * Living User Manual CLI 入口。
+ * DocWitness CLI 入口。
  *
  * 命令清单来自 src/cli/commands.js（与 compat 别名共用）。
  * 每个子命令导出 run(argv) 并自己负责参数解析与退出码。
@@ -18,7 +18,7 @@ const COMMAND_LIST = GROUPS.map((group) => {
 }).join('\n\n');
 
 const HELP = `
-manual —— Living User Manual (v${pkg.version})
+manual —— DocWitness (v${pkg.version})
 为 Web 项目生成并持续维护图文用户手册。
 
 用法:

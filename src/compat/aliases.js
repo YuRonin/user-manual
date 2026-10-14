@@ -10,7 +10,8 @@ const { COMMANDS } = require('../cli/commands');
 const ALIAS_COMMANDS = COMMANDS.filter((command) => command.group === 'core').map((command) => command.name);
 // 旧版本为所有命令生成过别名；安装时据此识别并清理不再提供的别名。
 const ALL_COMMANDS = COMMANDS.map((command) => command.name);
-const MARKER = 'Living User Manual';
+const MARKER = 'DocWitness';
+const LEGACY_MARKER = 'Living User Manual';
 
 function aliasName(command) {
   return `manual-${command}`;
@@ -69,7 +70,7 @@ Follow the main skill's approval, safety, privacy, and verification rules.
 function isGeneratedAlias(content) {
   if (typeof content !== 'string' || !content.includes('manual.js')) return false;
   // 旧版 Codex 别名没有标记，只能按固定措辞识别。
-  return content.includes(MARKER) || content.includes('compatibility alias for the `manual` skill');
+  return content.includes(MARKER) || content.includes(LEGACY_MARKER) || content.includes('compatibility alias for the `manual` skill');
 }
 
 module.exports = { COMMANDS: ALIAS_COMMANDS, ALL_COMMANDS, aliasName, renderCodexAlias, renderClaudeCommand, isGeneratedAlias };

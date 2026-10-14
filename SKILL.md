@@ -3,7 +3,7 @@ name: manual
 description: Use when a Web project (currently Next.js) needs a living user manual: 初始化、扫描页面、用真实浏览器截图、生成或更新图文使用手册与任务操作指南、核对手册是否仍与线上一致；also when the user invokes /manual or /manual-<command>.
 ---
 
-# manual —— Living User Manual
+# manual —— DocWitness
 
 为 Web 项目生成并持续维护图文使用手册：读源码建立页面与任务模型，用真实浏览器操作和截图，按帮助中心的写法出稿，代码变化后只更新受影响的文档。
 

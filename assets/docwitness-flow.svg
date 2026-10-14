@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 280" role="img" aria-labelledby="title desc">
+  <title id="title">DocWitness 工作流程示意</title>
+  <desc id="desc">扫描源码与路由，采集真实浏览器证据，生成图文手册，再验证并增量更新</desc>
+  <rect width="1100" height="280" rx="24" fill="#0b1730"/>
+  <text x="44" y="52" fill="#e5f2ff" font-family="Arial, sans-serif" font-size="25" font-weight="700">From application to living documentation</text>
+  <text x="44" y="81" fill="#a6bdd5" font-family="Arial, sans-serif" font-size="15">DocWitness workflow · 流程示意，非产品截图</text>
+  <g font-family="Arial, sans-serif" text-anchor="middle">
+    <g transform="translate(44 112)">
+      <rect width="224" height="122" rx="16" fill="#172e4e" stroke="#315073"/>
+      <circle cx="112" cy="33" r="17" fill="#67e8d4"/><text x="112" y="40" fill="#102640" font-size="19" font-weight="700">1</text>
+      <text x="112" y="76" fill="#e5f2ff" font-size="18" font-weight="700">源码与路由</text>
+      <text x="112" y="101" fill="#a6bdd5" font-size="13">建立页面与任务模型</text>
+    </g>
+    <g transform="translate(306 112)">
+      <rect width="224" height="122" rx="16" fill="#172e4e" stroke="#315073"/>
+      <circle cx="112" cy="33" r="17" fill="#67e8d4"/><text x="112" y="40" fill="#102640" font-size="19" font-weight="700">2</text>
+      <text x="112" y="76" fill="#e5f2ff" font-size="18" font-weight="700">真实浏览器</text>
+      <text x="112" y="101" fill="#a6bdd5" font-size="13">采集界面与操作证据</text>
+    </g>
+    <g transform="translate(568 112)">
+      <rect width="224" height="122" rx="16" fill="#172e4e" stroke="#315073"/>
+      <circle cx="112" cy="33" r="17" fill="#67e8d4"/><text x="112" y="40" fill="#102640" font-size="19" font-weight="700">3</text>
+      <text x="112" y="76" fill="#e5f2ff" font-size="18" font-weight="700">图文指南</text>
+      <text x="112" y="101" fill="#a6bdd5" font-size="13">页面、任务与帮助中心</text>
+    </g>
+    <g transform="translate(830 112)">
+      <rect width="224" height="122" rx="16" fill="#172e4e" stroke="#315073"/>
+      <circle cx="112" cy="33" r="17" fill="#67e8d4"/><text x="112" y="40" fill="#102640" font-size="19" font-weight="700">4</text>
+      <text x="112" y="76" fill="#e5f2ff" font-size="18" font-weight="700">验证与更新</text>
+      <text x="112" y="101" fill="#a6bdd5" font-size="13">回放检查，定位受影响内容</text>
+    </g>
+  </g>
+  <g fill="none" stroke="#67e8d4" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M279 173h16m-7-7 7 7-7 7M541 173h16m-7-7 7 7-7 7M803 173h16m-7-7 7 7-7 7"/>
+  </g>
+</svg>
