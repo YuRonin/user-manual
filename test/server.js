@@ -129,6 +129,23 @@ const PAGES = {
 <div style="height:1600px"></div>
 <p id="email" style="background:#ff0000;color:#ff0000;display:inline-block">teacher@example.com</p>`),
 
+  // 被祖先 overflow 裁掉的表单控件不出现在像素里，不能在裁剪框外留下马赛克（横向滑屏卡片的离屏输入框）；
+  // 绝对定位越过非包含块祖先的控件仍然可见，必须照常遮盖。
+  '/privacy-clipped': html(`
+<h1>滑屏卡片</h1>
+<div id="viewport" style="width:300px;height:60px;overflow:hidden;background:#e2e8f0">
+  <div style="display:flex;width:900px;transform:translateX(-300px)">
+    <div style="width:300px;flex:none"><input id="offscreen-left" value="13900001111" style="background:#ff0000;color:#ff0000;border:0;font-size:16px;width:200px"></div>
+    <div style="width:300px;flex:none"><input id="onscreen" value="13812345678" style="background:#ff0000;color:#ff0000;border:0;font-size:16px;width:200px"></div>
+    <div style="width:300px;flex:none"><input id="offscreen-right" value="13600003333" style="background:#ff0000;color:#ff0000;border:0;font-size:16px;width:200px"></div>
+  </div>
+</div>
+<div style="position:relative;height:120px">
+  <div style="width:100px;height:20px;overflow:hidden">
+    <input id="escaped" value="13700002222" style="position:absolute;left:0;top:60px;background:#ff0000;color:#ff0000;border:0;font-size:16px;width:200px">
+  </div>
+</div>`),
+
   // 表单控件里的手机号 / 邮箱：仍按原规则精确遮罩（Demo 门禁只接管 data-redact 区域与可见正文）
   '/privacy-form': html(`
 <h1>通讯录</h1>

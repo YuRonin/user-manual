@@ -286,6 +286,34 @@ process.stdout.write('\nimage pipeline\n');
         fx.cleanup(project);
       }
     });
+    await test('真浏览器：被祖先 overflow 裁掉的输入框不打码，越过非包含块祖先的绝对定位输入框照常遮盖', async () => {
+      const project = fx.captureFixture();
+      try {
+        let r = await runCli(['init', '--project-root', project, '--base-url', server.baseUrl, '--profile', 'custom', '--viewport', '800x600', '--dpr', '1']);
+        assert.strictEqual(r.status, 0, r.stderr);
+        r = await runCli(['inspect', '--project-root', project]);
+        assert.strictEqual(r.status, 0, r.stderr);
+        r = await runCli(['capture', 'chat', '--project-root', project, '--url', `${server.baseUrl}/privacy-clipped`, '--json']);
+        assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+        const out = JSON.parse(r.stdout);
+        const raw = await pixels(path.join(project, out.screenshot));
+        const pub = await pixels(path.join(project, out.published.artifactPath));
+        // 可见的两个手机号：滑屏卡片当前一屏的输入框、越过裁剪祖先的绝对定位输入框；离屏的两个不应有遮罩
+        assert.strictEqual(out.redactions.length, 2, JSON.stringify(out.redactions));
+        const viewport = { left: 40, right: 340 };
+        for (const item of out.redactions) {
+          const cx = Math.floor(item.rect.x + item.rect.width / 2);
+          const cy = Math.floor(item.rect.y + item.rect.height / 2);
+          assert.ok(isRed(raw.at(cx, cy)), `raw 在 ${item.kind} 中心应是红色（遮罩落在可见像素上）`);
+          assert.ok(isMosaic(pub.at(cx, cy)), `${item.kind} 在发布图中未被遮罩`);
+        }
+        const inCard = out.redactions.filter((item) => item.rect.y < 200);
+        assert.strictEqual(inCard.length, 1, '滑屏卡片里只有当前一屏的输入框需要遮罩');
+        assert.ok(inCard[0].rect.x >= viewport.left && inCard[0].rect.x + inCard[0].rect.width <= viewport.right, `遮罩不能超出卡片裁剪框: ${JSON.stringify(inCard[0].rect)}`);
+      } finally {
+        fx.cleanup(project);
+      }
+    });
   } finally {
     await server.close();
   }

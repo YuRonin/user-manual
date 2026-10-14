@@ -975,9 +975,37 @@ class PlaywrightBrowserProvider extends BrowserProvider {
         }
         return null;
       };
+      // 祖先的 overflow 裁剪：被裁掉的部分不会出现在像素里，遮罩只能落在可见部分
+      // （横向滑屏卡片的离屏输入框完全被裁掉，否则会在卡片外的背景上留下马赛克）。
+      // 只认包含块链上的祖先：absolute 越过非定位祖先、fixed 越过非变换祖先时不受它们裁剪，
+      // 宁可多遮也不能把实际可见的内容裁出遮罩之外。
+      const establishesFixedBlock = (s) => s.transform !== 'none' || s.filter !== 'none' || s.perspective !== 'none'
+        || /paint|layout|strict|content/.test(s.contain) || /transform|perspective|filter/.test(s.willChange);
+      const clipToAncestors = (element, rect) => {
+        let box = { left: rect.x, top: rect.y, right: rect.x + rect.width, bottom: rect.y + rect.height };
+        let mode = getComputedStyle(element).position;
+        for (let node = element.parentElement; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
+          const s = getComputedStyle(node);
+          if (mode === 'fixed' && !establishesFixedBlock(s)) continue;
+          if (mode === 'absolute' && s.position === 'static' && !establishesFixedBlock(s)) continue;
+          const clipX = s.overflowX !== 'visible';
+          const clipY = s.overflowY !== 'visible';
+          if (clipX || clipY) {
+            const outer = node.getBoundingClientRect();
+            const left = outer.x + node.clientLeft;
+            const top = outer.y + node.clientTop;
+            if (clipX) box = { ...box, left: Math.max(box.left, left), right: Math.min(box.right, left + node.clientWidth) };
+            if (clipY) box = { ...box, top: Math.max(box.top, top), bottom: Math.min(box.bottom, top + node.clientHeight) };
+            if (box.right <= box.left || box.bottom <= box.top) return null;
+          }
+          mode = s.position;
+        }
+        return { x: box.left, y: box.top, width: box.right - box.left, height: box.bottom - box.top };
+      };
       const add = (element, text, label, source, inputType, rectOverride) => {
-        const rect = rectOverride || element.getBoundingClientRect();
-        if (!rect.width || !rect.height) return;
+        if (getComputedStyle(element).visibility === 'hidden') return;
+        const rect = clipToAncestors(element, rectOverride || element.getBoundingClientRect());
+        if (!rect || !rect.width || !rect.height) return;
         const key = `${source}:${Math.round(rect.x)}:${Math.round(rect.y)}:${Math.round(rect.width)}:${Math.round(rect.height)}`;
         if (seen.has(key)) return;
         seen.add(key);
